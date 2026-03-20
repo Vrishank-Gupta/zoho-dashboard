@@ -29,6 +29,150 @@ CREATE_TABLE_STATEMENTS = {
             INDEX idx_created_at (created_at)
         )
     """,
+    "api_snapshot_cache": """
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            cache_type VARCHAR(50) NOT NULL,
+            cache_key VARCHAR(255) NOT NULL,
+            payload_json LONGTEXT NOT NULL,
+            source_mode VARCHAR(50) NOT NULL,
+            generated_at DATETIME NOT NULL,
+            PRIMARY KEY (cache_type, cache_key),
+            INDEX idx_generated_at (generated_at)
+        )
+    """,
+    "ticket_facts": """
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            ticket_id VARCHAR(100) NOT NULL PRIMARY KEY,
+            event_date DATE NOT NULL,
+            created_at DATETIME NOT NULL,
+            closed_at DATETIME NULL,
+            product_family VARCHAR(100) NOT NULL,
+            model_name VARCHAR(150) NOT NULL,
+            channel VARCHAR(100) NOT NULL,
+            department_name VARCHAR(100) NOT NULL,
+            fault_code VARCHAR(100) NOT NULL,
+            fault_code_level_1 VARCHAR(150) NOT NULL,
+            fault_code_level_2 VARCHAR(150) NOT NULL,
+            resolution_code_level_1 VARCHAR(150) NOT NULL,
+            bot_action_group VARCHAR(100) NOT NULL,
+            repeat_flag TINYINT(1) NOT NULL,
+            is_installation TINYINT(1) NOT NULL,
+            is_blank_chat TINYINT(1) NOT NULL,
+            is_duplicate_ticket TINYINT(1) NOT NULL,
+            is_sales_marketing TINYINT(1) NOT NULL,
+            is_bot_ticket TINYINT(1) NOT NULL,
+            is_bot_resolved TINYINT(1) NOT NULL,
+            is_bot_transferred TINYINT(1) NOT NULL,
+            is_field_visit TINYINT(1) NOT NULL,
+            is_repair_visit TINYINT(1) NOT NULL,
+            is_installation_visit TINYINT(1) NOT NULL,
+            is_logistics TINYINT(1) NOT NULL,
+            handle_time_minutes DOUBLE NULL,
+            INDEX idx_ticket_facts_event_date (event_date),
+            INDEX idx_ticket_facts_product_model (product_family, model_name),
+            INDEX idx_ticket_facts_issue (fault_code, fault_code_level_2),
+            INDEX idx_ticket_facts_channel (channel),
+            INDEX idx_ticket_facts_bot_action (bot_action_group),
+            INDEX idx_ticket_facts_flags (is_installation, is_blank_chat, is_duplicate_ticket, is_sales_marketing)
+        )
+    """,
+    "fact_daily_overview": """
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            metric_date DATE NOT NULL PRIMARY KEY,
+            tickets INT NOT NULL,
+            repeat_tickets INT NOT NULL,
+            bot_resolved_tickets INT NOT NULL,
+            bot_transferred_tickets INT NOT NULL,
+            blank_chat_tickets INT NOT NULL,
+            duplicate_tickets INT NOT NULL,
+            installation_tickets INT NOT NULL,
+            sales_marketing_tickets INT NOT NULL,
+            field_visit_tickets INT NOT NULL,
+            repair_visit_tickets INT NOT NULL,
+            installation_visit_tickets INT NOT NULL
+        )
+    """,
+    "fact_daily_product": """
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            metric_date DATE NOT NULL,
+            product_family VARCHAR(100) NOT NULL,
+            tickets INT NOT NULL,
+            repeat_tickets INT NOT NULL,
+            bot_resolved_tickets INT NOT NULL,
+            bot_transferred_tickets INT NOT NULL,
+            blank_chat_tickets INT NOT NULL,
+            duplicate_tickets INT NOT NULL,
+            installation_tickets INT NOT NULL,
+            sales_marketing_tickets INT NOT NULL,
+            field_visit_tickets INT NOT NULL,
+            repair_visit_tickets INT NOT NULL,
+            installation_visit_tickets INT NOT NULL,
+            INDEX idx_fact_daily_product_date (metric_date),
+            INDEX idx_fact_daily_product_family (product_family)
+        )
+    """,
+    "fact_daily_model": """
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            metric_date DATE NOT NULL,
+            product_family VARCHAR(100) NOT NULL,
+            model_name VARCHAR(150) NOT NULL,
+            tickets INT NOT NULL,
+            repeat_tickets INT NOT NULL,
+            bot_resolved_tickets INT NOT NULL,
+            bot_transferred_tickets INT NOT NULL,
+            blank_chat_tickets INT NOT NULL,
+            duplicate_tickets INT NOT NULL,
+            installation_tickets INT NOT NULL,
+            sales_marketing_tickets INT NOT NULL,
+            field_visit_tickets INT NOT NULL,
+            repair_visit_tickets INT NOT NULL,
+            installation_visit_tickets INT NOT NULL,
+            INDEX idx_fact_daily_model_date (metric_date),
+            INDEX idx_fact_daily_model_family (product_family, model_name)
+        )
+    """,
+    "fact_daily_issue": """
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            metric_date DATE NOT NULL,
+            product_family VARCHAR(100) NOT NULL,
+            fault_code VARCHAR(100) NOT NULL,
+            fault_code_level_2 VARCHAR(150) NOT NULL,
+            tickets INT NOT NULL,
+            repeat_tickets INT NOT NULL,
+            bot_resolved_tickets INT NOT NULL,
+            bot_transferred_tickets INT NOT NULL,
+            field_visit_tickets INT NOT NULL,
+            repair_visit_tickets INT NOT NULL,
+            installation_visit_tickets INT NOT NULL,
+            INDEX idx_fact_daily_issue_date (metric_date),
+            INDEX idx_fact_daily_issue_key (product_family, fault_code, fault_code_level_2)
+        )
+    """,
+    "fact_daily_channel": """
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            metric_date DATE NOT NULL,
+            channel VARCHAR(100) NOT NULL,
+            tickets INT NOT NULL,
+            bot_resolved_tickets INT NOT NULL,
+            bot_transferred_tickets INT NOT NULL,
+            blank_chat_tickets INT NOT NULL,
+            field_visit_tickets INT NOT NULL,
+            repair_visit_tickets INT NOT NULL,
+            installation_visit_tickets INT NOT NULL,
+            INDEX idx_fact_daily_channel_date (metric_date),
+            INDEX idx_fact_daily_channel_name (channel)
+        )
+    """,
+    "fact_daily_bot": """
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            metric_date DATE NOT NULL,
+            product_family VARCHAR(100) NOT NULL,
+            bot_action_group VARCHAR(100) NOT NULL,
+            tickets INT NOT NULL,
+            INDEX idx_fact_daily_bot_date (metric_date),
+            INDEX idx_fact_daily_bot_group (product_family, bot_action_group)
+        )
+    """,
     "agg_daily_tickets": """
         CREATE TABLE IF NOT EXISTS {table_name} (
             metric_date DATE NOT NULL,

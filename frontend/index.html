@@ -6,7 +6,7 @@
   <title>Qubo CS Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -84,10 +84,6 @@
 
       <!-- SECTION 1: ORG LEVEL -->
       <section class="dash-section" id="section-org">
-        <div class="section-header">
-          <div class="section-title">Org Level</div>
-          <div class="section-sub" id="execSummary">Customer service ticket analytics across all products and channels.</div>
-        </div>
 
         <div class="kpi-row" id="kpiRow"></div>
 
@@ -96,10 +92,10 @@
             <div class="chart-header">
               <div class="chart-title">Ticket volume over time</div>
               <div class="chart-legend">
-                <span class="legend-bar" style="background:#475569"></span><span>Total tickets</span>
-                <span class="legend-line" style="background:#22c55e;margin-left:14px"></span><span>Bot resolved %</span>
-                <span class="legend-bar" style="background:#ef4444;margin-left:14px"></span><span>Repair</span>
-                <span class="legend-bar" style="background:#f59e0b;margin-left:14px"></span><span>Installation</span>
+                <span class="legend-bar" style="background:#3d3d3d"></span><span>Total tickets</span>
+                <span class="legend-line" style="background:#1f6645;margin-left:14px"></span><span>Bot resolved %</span>
+                <span class="legend-bar" style="background:#8a3520;margin-left:14px"></span><span>Repair</span>
+                <span class="legend-bar" style="background:#7a5218;margin-left:14px"></span><span>Installation</span>
               </div>
             </div>
             <div id="volumeChart" class="chart-area"></div>
@@ -116,25 +112,16 @@
         </div>
 
         <div class="charts-row" style="margin-bottom:16px">
-          <div class="chart-card chart-main">
+          <div class="chart-card" style="flex:1">
             <div class="chart-header">
               <div class="chart-title">Field visits trend</div>
               <div class="chart-legend">
-                <span class="legend-bar" style="background:#ef4444"></span><span>Repair visits</span>
-                <span class="legend-bar" style="background:#f59e0b;margin-left:14px"></span><span>Installation visits</span>
+                <span class="legend-bar" style="background:#8a3520"></span><span>Repair visits</span>
+                <span class="legend-bar" style="background:#7a5218;margin-left:14px"></span><span>Installation visits</span>
               </div>
             </div>
             <div id="fieldTrendChart" class="chart-area"></div>
             <div id="fieldTrendInsight" class="chart-insight-strip"></div>
-          </div>
-          <div class="chart-card chart-side">
-            <div class="chart-header">
-              <div>
-                <div class="chart-title">Channel mix snapshot</div>
-                <div class="chart-note">Current filter selection, not a period trend.</div>
-              </div>
-            </div>
-            <div id="channelTrendChart" class="chart-area" style="min-height:180px"></div>
           </div>
         </div>
 
@@ -174,8 +161,8 @@
           <div class="data-card-header">
             <div class="data-card-title">Field visits by product</div>
             <div class="data-card-note">
-              <span class="legend-dot" style="background:#ef4444"></span> Repair &nbsp;
-              <span class="legend-dot" style="background:#f59e0b"></span> Installation
+              <span class="legend-dot" style="background:#8a3520"></span> Repair &nbsp;
+              <span class="legend-dot" style="background:#7a5218"></span> Installation
             </div>
           </div>
           <div id="fieldVisitByProductInsight" class="chart-insight-strip"></div>

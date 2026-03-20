@@ -156,14 +156,19 @@ MODEL_KEYWORDS: dict[str, list[tuple[str, tuple[str, ...]]]] = {
 
 
 def normalize_model(product_family: str, raw_product: str | None, raw_model: str | None) -> str:
-    """Return a specific model name within a product family, or the family name as fallback."""
+    """Return a specific model name within a product family, or a readable raw model fallback."""
     family_models = MODEL_KEYWORDS.get(product_family)
-    if not family_models:
-        return product_family
     lowered = " ".join([(raw_product or "").lower(), (raw_model or "").lower()]).strip()
-    for model_name, needles in family_models:
-        if any(needle in lowered for needle in needles):
-            return model_name
+    if family_models:
+        for model_name, needles in family_models:
+            if any(needle in lowered for needle in needles):
+                return model_name
+    raw_model_clean = (raw_model or "").strip()
+    if raw_model_clean and raw_model_clean.lower() not in BLANK_MARKERS:
+        return raw_model_clean
+    raw_product_clean = (raw_product or "").strip()
+    if raw_product_clean and raw_product_clean.lower() not in BLANK_MARKERS and raw_product_clean != product_family:
+        return raw_product_clean
     return product_family
 
 

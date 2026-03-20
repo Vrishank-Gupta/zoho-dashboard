@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from functools import lru_cache
 
+from ..dashboard_rules import load_sales_marketing_rules
 from ..models import TicketRecord
 
 
@@ -84,6 +86,13 @@ def build_ticket_facts(tickets: list[TicketRecord]) -> list[TicketFacts]:
 
 def build_aggregates(ticket_facts: list[TicketFacts]) -> dict[str, list[dict]]:
     return {
+        "ticket_facts": ticket_facts_rows(ticket_facts),
+        "fact_daily_overview": fact_daily_overview(ticket_facts),
+        "fact_daily_product": fact_daily_product(ticket_facts),
+        "fact_daily_model": fact_daily_model(ticket_facts),
+        "fact_daily_issue": fact_daily_issue(ticket_facts),
+        "fact_daily_channel": fact_daily_channel(ticket_facts),
+        "fact_daily_bot": fact_daily_bot(ticket_facts),
         "agg_daily_tickets": agg_daily_tickets(ticket_facts),
         "agg_fc_weekly": agg_fc_weekly(ticket_facts),
         "agg_sw_version": agg_sw_version(ticket_facts),
@@ -98,6 +107,127 @@ def build_aggregates(ticket_facts: list[TicketFacts]) -> dict[str, list[dict]]:
         "agg_data_quality": agg_data_quality(ticket_facts),
         "agg_model_breakdown": agg_model_breakdown(ticket_facts),
     }
+
+
+def ticket_facts_rows(ticket_facts: list[TicketFacts]) -> list[dict]:
+    sales_marketing_keywords = get_sales_marketing_keywords()
+    rows: list[dict] = []
+    for fact in ticket_facts:
+        ticket = fact.ticket
+        rows.append(
+            {
+                "ticket_id": ticket.ticket_id,
+                "event_date": ticket.created_at.date(),
+                "created_at": ticket.created_at,
+                "closed_at": ticket.closed_at,
+                "product_family": ticket.canonical_product,
+                "model_name": ticket.canonical_model,
+                "channel": ticket.normalized_channel,
+                "department_name": ticket.normalized_department,
+                "fault_code": ticket.normalized_fault_code,
+                "fault_code_level_1": normalize_text(ticket.fault_code_level_1),
+                "fault_code_level_2": ticket.normalized_fault_code_l2,
+                "resolution_code_level_1": ticket.normalized_resolution,
+                "bot_action_group": ticket_bot_action_group(ticket),
+                "repeat_flag": int(fact.repeat_flag),
+                "is_installation": int(ticket.field_visit_type == "Installation"),
+                "is_blank_chat": int(ticket.is_blank_chat),
+                "is_duplicate_ticket": int(ticket.is_cancelled_existing_ticket),
+                "is_sales_marketing": int(ticket_is_sales_marketing(ticket, sales_marketing_keywords)),
+                "is_bot_ticket": int(ticket.normalized_channel == "Chat"),
+                "is_bot_resolved": int(ticket.is_bot_resolved),
+                "is_bot_transferred": int(ticket.is_bot_transferred),
+                "is_field_visit": int(ticket.is_field_service),
+                "is_repair_visit": int(ticket.field_visit_type == "Repair"),
+                "is_installation_visit": int(ticket.field_visit_type == "Installation"),
+                "is_logistics": int(ticket.is_logistics),
+                "handle_time_minutes": ticket.handle_time_minutes,
+            }
+        )
+    return rows
+
+
+def fact_daily_overview(ticket_facts: list[TicketFacts]) -> list[dict]:
+    grouped = defaultdict(list)
+    for fact in ticket_facts:
+        grouped[fact.ticket.created_at.date()].append(fact)
+    return [
+        {"metric_date": day, **base_metric_counts(items)}
+        for day, items in sorted(grouped.items())
+    ]
+
+
+def fact_daily_product(ticket_facts: list[TicketFacts]) -> list[dict]:
+    grouped = defaultdict(list)
+    for fact in ticket_facts:
+        grouped[(fact.ticket.created_at.date(), fact.ticket.canonical_product)].append(fact)
+    return [
+        {"metric_date": key[0], "product_family": key[1], **base_metric_counts(items)}
+        for key, items in sorted(grouped.items())
+    ]
+
+
+def fact_daily_model(ticket_facts: list[TicketFacts]) -> list[dict]:
+    grouped = defaultdict(list)
+    for fact in ticket_facts:
+        grouped[(fact.ticket.created_at.date(), fact.ticket.canonical_product, fact.ticket.canonical_model)].append(fact)
+    return [
+        {"metric_date": key[0], "product_family": key[1], "model_name": key[2], **base_metric_counts(items)}
+        for key, items in sorted(grouped.items())
+    ]
+
+
+def fact_daily_issue(ticket_facts: list[TicketFacts]) -> list[dict]:
+    grouped = defaultdict(list)
+    for fact in ticket_facts:
+        ticket = fact.ticket
+        grouped[(ticket.created_at.date(), ticket.canonical_product, ticket.normalized_fault_code, ticket.normalized_fault_code_l2)].append(fact)
+    return [
+        {
+            "metric_date": key[0],
+            "product_family": key[1],
+            "fault_code": key[2],
+            "fault_code_level_2": key[3],
+            "tickets": len(items),
+            "repeat_tickets": sum(1 for item in items if item.repeat_flag),
+            "bot_resolved_tickets": sum(1 for item in items if item.ticket.is_bot_resolved),
+            "bot_transferred_tickets": sum(1 for item in items if item.ticket.is_bot_transferred),
+            "field_visit_tickets": sum(1 for item in items if item.ticket.is_field_service),
+            "repair_visit_tickets": sum(1 for item in items if item.ticket.field_visit_type == "Repair"),
+            "installation_visit_tickets": sum(1 for item in items if item.ticket.field_visit_type == "Installation"),
+        }
+        for key, items in sorted(grouped.items())
+    ]
+
+
+def fact_daily_channel(ticket_facts: list[TicketFacts]) -> list[dict]:
+    grouped = defaultdict(list)
+    for fact in ticket_facts:
+        grouped[(fact.ticket.created_at.date(), fact.ticket.normalized_channel)].append(fact)
+    return [
+        {
+            "metric_date": key[0],
+            "channel": key[1],
+            "tickets": len(items),
+            "bot_resolved_tickets": sum(1 for item in items if item.ticket.is_bot_resolved),
+            "bot_transferred_tickets": sum(1 for item in items if item.ticket.is_bot_transferred),
+            "blank_chat_tickets": sum(1 for item in items if item.ticket.is_blank_chat),
+            "field_visit_tickets": sum(1 for item in items if item.ticket.is_field_service),
+            "repair_visit_tickets": sum(1 for item in items if item.ticket.field_visit_type == "Repair"),
+            "installation_visit_tickets": sum(1 for item in items if item.ticket.field_visit_type == "Installation"),
+        }
+        for key, items in sorted(grouped.items())
+    ]
+
+
+def fact_daily_bot(ticket_facts: list[TicketFacts]) -> list[dict]:
+    grouped = defaultdict(int)
+    for fact in ticket_facts:
+        grouped[(fact.ticket.created_at.date(), fact.ticket.canonical_product, ticket_bot_action_group(fact.ticket))] += 1
+    return [
+        {"metric_date": key[0], "product_family": key[1], "bot_action_group": key[2], "tickets": count}
+        for key, count in sorted(grouped.items())
+    ]
 
 
 def agg_daily_tickets(ticket_facts: list[TicketFacts]) -> list[dict]:
@@ -416,6 +546,53 @@ def agg_model_breakdown(ticket_facts: list[TicketFacts]) -> list[dict]:
             }
         )
     return rows
+
+
+def base_metric_counts(items: list[TicketFacts]) -> dict[str, int]:
+    sales_marketing_keywords = get_sales_marketing_keywords()
+    return {
+        "tickets": len(items),
+        "repeat_tickets": sum(1 for item in items if item.repeat_flag),
+        "bot_resolved_tickets": sum(1 for item in items if item.ticket.is_bot_resolved),
+        "bot_transferred_tickets": sum(1 for item in items if item.ticket.is_bot_transferred),
+        "blank_chat_tickets": sum(1 for item in items if item.ticket.is_blank_chat),
+        "duplicate_tickets": sum(1 for item in items if item.ticket.is_cancelled_existing_ticket),
+        "installation_tickets": sum(1 for item in items if item.ticket.field_visit_type == "Installation"),
+        "sales_marketing_tickets": sum(1 for item in items if ticket_is_sales_marketing(item.ticket, sales_marketing_keywords)),
+        "field_visit_tickets": sum(1 for item in items if item.ticket.is_field_service),
+        "repair_visit_tickets": sum(1 for item in items if item.ticket.field_visit_type == "Repair"),
+        "installation_visit_tickets": sum(1 for item in items if item.ticket.field_visit_type == "Installation"),
+    }
+
+
+def ticket_bot_action_group(ticket: TicketRecord) -> str:
+    value = (ticket.bot_action or "").strip().lower()
+    if not value or value in {"-", "0", "null", "none", "nan", "-none-"}:
+        return "Non bot tickets"
+    if value == "bot resolved ticket":
+        return "Bot resolved"
+    if value == "bot transferred to agent":
+        return "Bot transferred"
+    if "blank chat" in value:
+        return "Blank chat"
+    if "cancelled due to existing ticket" in value:
+        return "Cancelled - existing ticket"
+    return "Non bot tickets"
+
+
+def ticket_is_sales_marketing(ticket: TicketRecord, keywords: list[str]) -> bool:
+    fc2 = (ticket.normalized_fault_code_l2 or "").strip().lower()
+    return bool(fc2 and any(keyword in fc2 for keyword in keywords))
+
+
+@lru_cache(maxsize=1)
+def get_sales_marketing_keywords() -> list[str]:
+    return load_sales_marketing_rules()
+
+
+def normalize_text(value: str | None) -> str:
+    cleaned = (value or "").strip()
+    return cleaned or ""
 
 
 def top_text(values: list[str | None]) -> str:

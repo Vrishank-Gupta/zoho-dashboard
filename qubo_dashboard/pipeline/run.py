@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from time import perf_counter
 
+from ..analytics import AnalyticsService
 from ..config import settings
 from ..repository import TicketRepository
 from .sql import CREATE_TABLE_STATEMENTS
@@ -31,6 +32,14 @@ def bulk_insert(cursor, table_name: str, rows: list[dict]) -> None:
 
 def ensure_tables(cursor) -> None:
     table_map = {
+        "api_snapshot_cache": settings.api_snapshot_cache_table,
+        "ticket_facts": settings.ticket_facts_table,
+        "fact_daily_overview": settings.fact_daily_overview_table,
+        "fact_daily_product": settings.fact_daily_product_table,
+        "fact_daily_model": settings.fact_daily_model_table,
+        "fact_daily_issue": settings.fact_daily_issue_table,
+        "fact_daily_channel": settings.fact_daily_channel_table,
+        "fact_daily_bot": settings.fact_daily_bot_table,
         "agg_daily_tickets": settings.agg_daily_tickets_table,
         "agg_fc_weekly": settings.agg_fc_weekly_table,
         "agg_sw_version": settings.agg_sw_version_table,
@@ -84,6 +93,13 @@ def run_pipeline() -> None:
     cache_elapsed = perf_counter() - cache_started
     print(f"Upserted {cached_rows_written} rows into {settings.raw_ticket_cache_table} in {cache_elapsed:.1f}s")
 
+    if cached_rows_written == 0 and not settings.pipeline_force_rebuild:
+        elapsed = (datetime.now() - started_at).total_seconds()
+        print(f"Cache unchanged ({len(new_tickets)} ticket(s) already up to date) — skipping rebuild. ({elapsed:.1f}s total)")
+        return
+    if cached_rows_written == 0:
+        print(f"Cache unchanged but force rebuild requested — continuing.")
+
     load_started = perf_counter()
     tickets = repository.fetch_cached_tickets(since=cutoff)
     load_elapsed = perf_counter() - load_started
@@ -103,6 +119,13 @@ def run_pipeline() -> None:
     print(f"Prepared aggregate tables in {ddl_elapsed:.1f}s")
 
     table_targets = {
+        settings.ticket_facts_table: aggregates["ticket_facts"],
+        settings.fact_daily_overview_table: aggregates["fact_daily_overview"],
+        settings.fact_daily_product_table: aggregates["fact_daily_product"],
+        settings.fact_daily_model_table: aggregates["fact_daily_model"],
+        settings.fact_daily_issue_table: aggregates["fact_daily_issue"],
+        settings.fact_daily_channel_table: aggregates["fact_daily_channel"],
+        settings.fact_daily_bot_table: aggregates["fact_daily_bot"],
         settings.agg_daily_tickets_table: aggregates["agg_daily_tickets"],
         settings.agg_fc_weekly_table: aggregates["agg_fc_weekly"],
         settings.agg_sw_version_table: aggregates["agg_sw_version"],
@@ -139,6 +162,17 @@ def run_pipeline() -> None:
     write_elapsed = perf_counter() - write_started
     cursor.close()
     connection.close()
+    if settings.snapshot_prewarm_enabled:
+        warm_started = perf_counter()
+        warm_stats = AnalyticsService(repository).warm_snapshot_cache()
+        warm_elapsed = perf_counter() - warm_started
+        print(
+            "Warmed API snapshots: "
+            f"{warm_stats['dashboard_snapshots']} dashboards, "
+            f"{warm_stats['period_snapshots']} periods in {warm_elapsed:.1f}s"
+        )
+    else:
+        print("Skipped API snapshot prewarm (QUBO_SNAPSHOT_PREWARM_ENABLED=false)")
     print(f"Pipeline complete. Source rows: {len(tickets)}. Write phase: {write_elapsed:.1f}s. Duration: {duration_minutes} minutes.")
 
 

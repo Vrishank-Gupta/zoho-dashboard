@@ -3,11 +3,13 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
+import hashlib
+import json
 from typing import Any
 
 from .config import settings
 from .cleaning import normalize_fault_code
-from .dashboard_rules import load_installation_combos, load_sales_marketing_rules
+from .dashboard_rules import get_rules_signature, load_installation_combos, load_sales_marketing_rules
 from .models import DashboardFilters
 from .pipeline.transforms import build_ticket_facts, build_aggregates
 from .repository import TicketRepository
@@ -63,15 +65,23 @@ class AnalyticsService:
     def __init__(self, repository: TicketRepository) -> None:
         self._repository = repository
         self._source_facts_cache: tuple[list[Any], date] | None = None
+        self._response_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
     def build_dashboard(self, filters: DashboardFilters) -> dict[str, Any]:
+        cache_key = self._snapshot_cache_key("dashboard", filters)
+        cached = self._load_snapshot("dashboard", cache_key)
+        if cached is not None:
+            return cached
         if self._needs_source_mode(filters):
-            if not settings.has_zoho_database:
-                raise RuntimeError("Source database is not configured for bot-action or model filtering.")
-            return self._build_from_source(filters)
-        if not settings.has_agg_database:
-            raise RuntimeError("Aggregate database is not configured. Run the pipeline first.")
-        return self._build_from_agg(filters)
+            if not self._source_mode_available():
+                raise RuntimeError("Source-backed filters require either local raw-ticket cache or source database access.")
+            payload = self._build_from_source(filters)
+        else:
+            if not settings.has_agg_database:
+                raise RuntimeError("Aggregate database is not configured. Run the pipeline first.")
+            payload = self._build_from_agg(filters)
+        self._store_snapshot("dashboard", cache_key, payload)
+        return payload
 
     def get_issue_tickets(self, filters: DashboardFilters, issue_id: str) -> dict[str, Any]:
         dashboard = self.build_dashboard(filters)
@@ -125,10 +135,16 @@ class AnalyticsService:
         return []
 
     def get_period_breakdown(self, filters: DashboardFilters, start_date: date, end_date: date) -> dict[str, Any]:
+        cache_key = self._snapshot_cache_key("period_breakdown", filters, start_date=start_date, end_date=end_date)
+        cached = self._load_snapshot("period_breakdown", cache_key)
+        if cached is not None:
+            return cached
         if self._needs_source_mode(filters):
-            if not settings.has_zoho_database:
-                raise RuntimeError("Source database is not configured for bot-action or model filtering.")
-            return self._build_period_from_source(filters, start_date, end_date)
+            if not self._source_mode_available():
+                raise RuntimeError("Source-backed filters require either local raw-ticket cache or source database access.")
+            payload = self._build_period_from_source(filters, start_date, end_date)
+            self._store_snapshot("period_breakdown", cache_key, payload)
+            return payload
         if not settings.has_agg_database:
             raise RuntimeError("Aggregate database is not configured. Run the pipeline first.")
         connection = self._repository.open_agg_connection()
@@ -152,7 +168,7 @@ class AnalyticsService:
         current_rows = [row for row in current_rows if self._matches_filters(row, filters)]
         previous_rows = [row for row in previous_rows if self._matches_filters(row, filters)]
 
-        return {
+        payload = {
             "kpis": self._agg_kpis(current_rows, previous_rows),
             "timeline": self._agg_timeline(current_rows),
             "products": self._agg_products(current_rows),
@@ -164,9 +180,47 @@ class AnalyticsService:
                 "days": days,
             },
         }
+        self._store_snapshot("period_breakdown", cache_key, payload)
+        return payload
+
+    def warm_snapshot_cache(self) -> dict[str, int]:
+        warmed_dashboards = 0
+        warmed_periods = 0
+        seen_filter_keys: set[str] = set()
+        for preset in settings.snapshot_prewarm_presets:
+            seed_filters = DashboardFilters(date_preset=preset)
+            seed_payload = self.build_dashboard(seed_filters)
+            filter_sets = [seed_filters]
+            products = [product for product in (seed_payload.get("filter_options", {}).get("products") or []) if product]
+            models_by_product = seed_payload.get("filter_options", {}).get("models_by_product") or {}
+            quick_groups = ["installations", "blank_chat", "duplicate_tickets", "sales_marketing"]
+            filter_sets.extend(DashboardFilters(date_preset=preset, products=[product]) for product in products)
+            for product in products:
+                for model in models_by_product.get(product, []) or []:
+                    filter_sets.append(DashboardFilters(date_preset=preset, products=[product], models=[model]))
+            filter_sets.extend(DashboardFilters(date_preset=preset, quick_exclusions=[group]) for group in quick_groups)
+            for product in products:
+                filter_sets.extend(
+                    DashboardFilters(date_preset=preset, products=[product], quick_exclusions=[group])
+                    for group in quick_groups
+                )
+            for candidate in filter_sets:
+                filter_key = self._snapshot_cache_key("dashboard", candidate)
+                if filter_key in seen_filter_keys:
+                    continue
+                seen_filter_keys.add(filter_key)
+                payload = self.build_dashboard(candidate)
+                warmed_dashboards += 1
+                for period_start, period_end in self._timeline_period_ranges(payload.get("timeline", []), candidate.date_preset):
+                    self.get_period_breakdown(candidate, period_start, period_end)
+                    warmed_periods += 1
+        return {"dashboard_snapshots": warmed_dashboards, "period_snapshots": warmed_periods}
 
     def _needs_source_mode(self, filters: DashboardFilters) -> bool:
         return bool(filters.bot_actions or filters.models or filters.quick_exclusions)
+
+    def _source_mode_available(self) -> bool:
+        return settings.has_agg_database or settings.has_zoho_database
 
     def _build_from_source(self, filters: DashboardFilters) -> dict[str, Any]:
         facts = self._get_source_facts()
@@ -259,6 +313,88 @@ class AnalyticsService:
         facts = build_ticket_facts(tickets)
         self._source_facts_cache = (facts, today)
         return facts
+
+    def _load_snapshot(self, cache_type: str, cache_key: str) -> dict[str, Any] | None:
+        cached = self._response_cache.get((cache_type, cache_key))
+        if cached is not None:
+            return cached
+        if not settings.has_agg_database:
+            return None
+        try:
+            payload = self._repository.fetch_snapshot_payload(cache_type, cache_key)
+        except Exception:
+            return None
+        if payload is not None:
+            self._response_cache[(cache_type, cache_key)] = payload
+        return payload
+
+    def _store_snapshot(self, cache_type: str, cache_key: str, payload: dict[str, Any]) -> None:
+        self._response_cache[(cache_type, cache_key)] = payload
+        if not settings.has_agg_database:
+            return
+        try:
+            self._repository.upsert_snapshot_payload(
+                cache_type,
+                cache_key,
+                payload,
+                str(payload.get("meta", {}).get("source_mode") or "unknown"),
+            )
+        except Exception:
+            return
+
+    def _snapshot_cache_key(
+        self,
+        cache_type: str,
+        filters: DashboardFilters,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> str:
+        payload: dict[str, Any] = {
+            "filters": self._normalized_filter_payload(filters),
+            "rules_signature": get_rules_signature(),
+        }
+        if start_date:
+            payload["start_date"] = start_date.isoformat()
+        if end_date:
+            payload["end_date"] = end_date.isoformat()
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha1(f"{cache_type}:{raw}".encode("utf-8")).hexdigest()
+        return digest
+
+    def _normalized_filter_payload(self, filters: DashboardFilters) -> dict[str, Any]:
+        return {
+            "date_preset": filters.date_preset,
+            "products": sorted(set(filters.products)),
+            "models": sorted(set(filters.models)),
+            "fault_codes": sorted(set(filters.fault_codes)),
+            "channels": sorted(set(filters.channels)),
+            "bot_actions": sorted(set(filters.bot_actions)),
+            "quick_exclusions": sorted(set(filters.quick_exclusions)),
+        }
+
+    def _timeline_period_ranges(self, timeline: list[dict[str, Any]], date_preset: str) -> list[tuple[date, date]]:
+        parsed_dates = sorted(
+            {
+                datetime.strptime(str(item.get("date")), "%Y-%m-%d").date()
+                for item in timeline
+                if item.get("date")
+            }
+        )
+        if not parsed_dates:
+            return []
+        if date_preset == "14d":
+            return [(day, day) for day in parsed_dates]
+        if date_preset == "history":
+            grouped: dict[tuple[int, int], list[date]] = defaultdict(list)
+            for day in parsed_dates:
+                grouped[(day.year, day.month)].append(day)
+            return [(min(days), max(days)) for _, days in sorted(grouped.items())]
+        grouped_weeks: dict[date, list[date]] = defaultdict(list)
+        for day in parsed_dates:
+            week_start = day - timedelta(days=day.weekday())
+            grouped_weeks[week_start].append(day)
+        return [(week_start, max(days)) for week_start, days in sorted(grouped_weeks.items())]
 
     def _build_from_agg(self, filters: DashboardFilters) -> dict[str, Any]:
         connection = self._repository.open_agg_connection()

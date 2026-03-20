@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
@@ -46,6 +47,7 @@ class TicketRepository:
             "agg_configured": settings.has_agg_database,
             "zoho_ticket_table": settings.zoho_ticket_table,
             "raw_ticket_cache_table": settings.raw_ticket_cache_table,
+            "api_snapshot_cache_table": settings.api_snapshot_cache_table,
             "agg_tables": {
                 "agg_daily_tickets": settings.agg_daily_tickets_table,
                 "agg_fc_weekly": settings.agg_fc_weekly_table,
@@ -59,6 +61,14 @@ class TicketRepository:
                 "agg_anomalies": settings.agg_anomalies_table,
                 "agg_health_score": settings.agg_health_score_table,
                 "agg_data_quality": settings.agg_data_quality_table,
+                "api_snapshot_cache": settings.api_snapshot_cache_table,
+                "ticket_facts": settings.ticket_facts_table,
+                "fact_daily_overview": settings.fact_daily_overview_table,
+                "fact_daily_product": settings.fact_daily_product_table,
+                "fact_daily_model": settings.fact_daily_model_table,
+                "fact_daily_issue": settings.fact_daily_issue_table,
+                "fact_daily_channel": settings.fact_daily_channel_table,
+                "fact_daily_bot": settings.fact_daily_bot_table,
                 "pipeline_log": settings.pipeline_log_table,
             },
         }
@@ -164,6 +174,46 @@ class TicketRepository:
         cursor.close()
         connection.close()
         return affected
+
+    def fetch_snapshot_payload(self, cache_type: str, cache_key: str) -> dict[str, Any] | None:
+        connection = self.open_agg_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            f"SELECT payload_json FROM {settings.api_snapshot_cache_table} WHERE cache_type = %s AND cache_key = %s",
+            (cache_type, cache_key),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        if not row or not row[0]:
+            return None
+        try:
+            payload = json.loads(row[0])
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def upsert_snapshot_payload(self, cache_type: str, cache_key: str, payload: dict[str, Any], source_mode: str) -> None:
+        connection = self.open_agg_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            (
+                f"INSERT INTO {settings.api_snapshot_cache_table} "
+                "(cache_type, cache_key, payload_json, source_mode, generated_at) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE payload_json = VALUES(payload_json), source_mode = VALUES(source_mode), generated_at = VALUES(generated_at)"
+            ),
+            (
+                cache_type,
+                cache_key,
+                json.dumps(payload, separators=(",", ":"), ensure_ascii=False),
+                source_mode,
+                datetime.now(),
+            ),
+        )
+        connection.commit()
+        cursor.close()
+        connection.close()
 
     def _fetch_zoho_mysql(self, since: datetime | None = None) -> list[TicketRecord]:
         import mysql.connector

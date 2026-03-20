@@ -32,8 +32,12 @@ class Settings:
     app_reload: bool = os.getenv("QUBO_APP_RELOAD", "true").lower() == "true"
     serve_frontend: bool = os.getenv("QUBO_SERVE_FRONTEND", "false").lower() == "true"
     pipeline_recreate_tables: bool = os.getenv("QUBO_PIPELINE_RECREATE_TABLES", "true").lower() == "true"
+    pipeline_force_rebuild: bool = os.getenv("QUBO_PIPELINE_FORCE_REBUILD", "false").lower() == "true"
     pipeline_source_cutoff: str = os.getenv("QUBO_PIPELINE_SOURCE_CUTOFF", "2026-01-01")
     raw_ticket_cache_table: str = os.getenv("QUBO_RAW_TICKET_CACHE_TABLE", "raw_ticket_cache")
+    api_snapshot_cache_table: str = os.getenv("QUBO_API_SNAPSHOT_CACHE_TABLE", "api_snapshot_cache")
+    snapshot_prewarm_enabled: bool = os.getenv("QUBO_SNAPSHOT_PREWARM_ENABLED", "false").lower() == "true"
+    snapshot_prewarm_presets_raw: str = os.getenv("QUBO_SNAPSHOT_PREWARM_PRESETS", "60d")
     cors_allowed_origins_raw: str = os.getenv("QUBO_CORS_ALLOWED_ORIGINS", "*")
     zoho_ticket_table: str = os.getenv("QUBO_ZOHO_TICKET_TABLE", "Call_Driver_Data_Zoho_FromAug2024")
     agg_daily_tickets_table: str = os.getenv("QUBO_AGG_DAILY_TICKETS_TABLE", "agg_daily_tickets")
@@ -49,6 +53,13 @@ class Settings:
     agg_health_score_table: str = os.getenv("QUBO_AGG_HEALTH_SCORE_TABLE", "agg_health_score")
     agg_data_quality_table: str = os.getenv("QUBO_AGG_DATA_QUALITY_TABLE", "agg_data_quality")
     agg_model_breakdown_table: str = os.getenv("QUBO_AGG_MODEL_BREAKDOWN_TABLE", "agg_model_breakdown")
+    ticket_facts_table: str = os.getenv("QUBO_TICKET_FACTS_TABLE", "ticket_facts")
+    fact_daily_overview_table: str = os.getenv("QUBO_FACT_DAILY_OVERVIEW_TABLE", "fact_daily_overview")
+    fact_daily_product_table: str = os.getenv("QUBO_FACT_DAILY_PRODUCT_TABLE", "fact_daily_product")
+    fact_daily_model_table: str = os.getenv("QUBO_FACT_DAILY_MODEL_TABLE", "fact_daily_model")
+    fact_daily_issue_table: str = os.getenv("QUBO_FACT_DAILY_ISSUE_TABLE", "fact_daily_issue")
+    fact_daily_channel_table: str = os.getenv("QUBO_FACT_DAILY_CHANNEL_TABLE", "fact_daily_channel")
+    fact_daily_bot_table: str = os.getenv("QUBO_FACT_DAILY_BOT_TABLE", "fact_daily_bot")
     pipeline_log_table: str = os.getenv("QUBO_PIPELINE_LOG_TABLE", "pipeline_log")
 
     @property
@@ -86,6 +97,13 @@ class Settings:
             return []
         if raw == "*":
             return ["*"]
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
+    @property
+    def snapshot_prewarm_presets(self) -> list[str]:
+        raw = self.snapshot_prewarm_presets_raw.strip()
+        if not raw:
+            return ["60d"]
         return [item.strip() for item in raw.split(",") if item.strip()]
 
 

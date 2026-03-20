@@ -5,8 +5,10 @@ const state = {
   issueView: "biggest_burden",
   payload: null,
   loading: false,
+  quickFilterLoadingKey: null,
   requestSeq: 0,
 };
+let inflightController = null;
 
 // ── Element refs ────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -18,7 +20,6 @@ const els = {
   refreshPipelineBtn: $("refreshPipelineBtn"),
   metaDate: $("metaDate"),
   metaSource: $("metaSource"),
-  execSummary: $("execSummary"),
   kpiRow: $("kpiRow"),
   volumeChart: $("volumeChart"),
   volumeInsight: $("volumeInsight"),
@@ -117,6 +118,9 @@ function setLoading(isLoading) {
   els.resetFilters.disabled = isLoading;
   if (els.refreshPipelineBtn) els.refreshPipelineBtn.disabled = isLoading;
   setSurfaceLoading(isLoading);
+  if (!isLoading) {
+    state.quickFilterLoadingKey = null;
+  }
 }
 
 function renderDashboardLoading() {
@@ -182,17 +186,26 @@ function setSurfaceLoading(isLoading) {
 
 // ── Data loading ─────────────────────────────────────────────────────────────
 async function loadDashboard() {
+  // Cancel any previous in-flight requests before starting new ones.
+  if (inflightController) inflightController.abort();
+  inflightController = new AbortController();
+  const signal = inflightController.signal;
+
   const requestId = ++state.requestSeq;
-  const params = new URLSearchParams({ date_preset: state.filters.date_preset });
-  if (state.filters.products.length)    params.set("products",    state.filters.products.join(","));
-  if (state.filters.models.length)      params.set("models",      state.filters.models.join(","));
-  if (state.filters.fault_codes.length) params.set("fault_codes", state.filters.fault_codes.join(","));
-  if (state.filters.channels.length)    params.set("channels",    state.filters.channels.join(","));
-  if (state.filters.bot_actions.length) params.set("bot_actions", state.filters.bot_actions.join(","));
-  if (state.filters.quick_exclusions.length) params.set("quick_exclusions", state.filters.quick_exclusions.join(","));
+
+  // Legacy params deliberately omit quick_exclusions (and bot_actions) — these
+  // flags trigger slow source-mode Python recomputation on the legacy path.
+  // V2 endpoints handle them via SQL and overwrite the relevant widgets after.
+  const legacyParams = new URLSearchParams({ date_preset: state.filters.date_preset });
+  if (state.filters.products.length)    legacyParams.set("products",    state.filters.products.join(","));
+  if (state.filters.models.length)      legacyParams.set("models",      state.filters.models.join(","));
+  if (state.filters.fault_codes.length) legacyParams.set("fault_codes", state.filters.fault_codes.join(","));
+  if (state.filters.channels.length)    legacyParams.set("channels",    state.filters.channels.join(","));
+
   setLoading(true);
+  const orgV2Promise = fetchOrgLevelV2Bundle(signal).catch(() => null);
   try {
-    const payload = await fetchJson(`${state.apiBase}/api/dashboard?${params}`, { timeoutMs: 20000 });
+    const payload = await fetchJson(`${state.apiBase}/api/dashboard?${legacyParams}`, { timeoutMs: 20000, signal });
     if (requestId !== state.requestSeq) return;
     state.payload = payload;
     hydrateFilters({
@@ -202,12 +215,81 @@ async function loadDashboard() {
     });
     renderDashboard(payload);
     refreshPipelineStatus({ silent: true });
+    const orgV2 = await orgV2Promise;
+    if (requestId !== state.requestSeq || !orgV2) return;
+    state.payload = mergeOrgLevelPayload(state.payload, orgV2);
+    renderDashboard(state.payload);
   } catch (err) {
     if (requestId !== state.requestSeq) return;
     showError(err.message);
   } finally {
     if (requestId === state.requestSeq) setLoading(false);
   }
+}
+
+async function fetchOrgLevelV2Bundle(signal) {
+  const params = new URLSearchParams({ date_preset: state.filters.date_preset });
+  if (state.filters.products.length) params.set("products", state.filters.products.join(","));
+  if (state.filters.models.length) params.set("models", state.filters.models.join(","));
+  if (state.filters.fault_codes.length) params.set("fault_codes", state.filters.fault_codes.join(","));
+  if (state.filters.channels.length) params.set("channels", state.filters.channels.join(","));
+  if (state.filters.bot_actions.length) params.set("bot_actions", state.filters.bot_actions.join(","));
+  if (state.filters.quick_exclusions.length) params.set("quick_exclusions", state.filters.quick_exclusions.join(","));
+  const q = params.toString();
+  // Per-endpoint error isolation: one slow or missing endpoint won't null out the whole bundle.
+  const tryFetch = (url) => fetchJson(url, { timeoutMs: 12000, signal }).catch(() => null);
+  const [summary, trend, productBurden, modelBreakdown, channelMix, issueBoard] = await Promise.all([
+    tryFetch(`${state.apiBase}/api/v2/summary?${q}`),
+    tryFetch(`${state.apiBase}/api/v2/trend?${q}`),
+    tryFetch(`${state.apiBase}/api/v2/product-burden?${q}`),
+    tryFetch(`${state.apiBase}/api/v2/model-breakdown?${q}`),
+    tryFetch(`${state.apiBase}/api/v2/channel-mix?${q}`),
+    tryFetch(`${state.apiBase}/api/v2/issues?${q}`),
+  ]);
+  // If all critical endpoints failed, signal fallback by returning null.
+  if (!summary && !trend && !productBurden) return null;
+  return { summary, trend, productBurden, modelBreakdown, channelMix, issueBoard };
+}
+
+function mergeOrgLevelPayload(basePayload, orgV2) {
+  if (!basePayload || !orgV2) return basePayload;
+  const groupedModels = {};
+  for (const row of (orgV2.modelBreakdown?.rows || [])) {
+    if (!groupedModels[row.product_family]) groupedModels[row.product_family] = [];
+    groupedModels[row.product_family].push({
+      model: row.model_name,
+      tickets: row.tickets,
+      repair_field_visit_rate: row.repair_field_visit_rate || 0,
+      installation_field_visit_rate: row.installation_field_visit_rate || 0,
+      repeat_rate: row.repeat_rate || 0,
+      bot_deflection_rate: row.bot_deflection_rate || 0,
+      bot_transfer_rate: row.bot_transfer_rate || 0,
+      blank_chat_rate: 0,
+    });
+  }
+  const merged = {
+    ...basePayload,
+    meta: {
+      ...(basePayload.meta || {}),
+      semantic_v2_org: true,
+    },
+    kpis: orgV2.summary?.kpis || basePayload.kpis,
+    timeline: orgV2.trend?.timeline || basePayload.timeline,
+    product_health: orgV2.productBurden?.rows || basePayload.product_health,
+    model_breakdown: Object.keys(groupedModels).length ? groupedModels : basePayload.model_breakdown,
+    issue_views: orgV2.issueBoard?.issue_views || basePayload.issue_views,
+    service_ops: {
+      ...(basePayload.service_ops || {}),
+      channel_mix: orgV2.channelMix?.rows || basePayload.service_ops?.channel_mix || [],
+    },
+  };
+  if (!merged.executive_summary && merged.product_health?.length) {
+    merged.executive_summary = {
+      headline: "CS Snapshot",
+      summary: `${merged.product_health[0].product_family} is carrying the highest ticket load in the selected window.`,
+    };
+  }
+  return merged;
 }
 
 // ── Render all ───────────────────────────────────────────────────────────────
@@ -222,12 +304,11 @@ function renderDashboard(p) {
 
   // topbar / meta
   els.sourceBadge.textContent = p.meta?.warehouse_mode ? "Live data" : "Sample data";
-  els.sourceBadge.style.background = p.meta?.warehouse_mode ? "rgba(34,197,94,0.15)" : "rgba(245,158,11,0.15)";
-  els.sourceBadge.style.color = p.meta?.warehouse_mode ? "#22c55e" : "#f59e0b";
+  els.sourceBadge.style.background = p.meta?.warehouse_mode ? "rgba(31,102,69,0.1)" : "rgba(153,96,16,0.1)";
+  els.sourceBadge.style.color = p.meta?.warehouse_mode ? "#1f6645" : "#996010";
   els.lastUpdated.textContent = pipeline.last_run_at ? `Last run: ${pipeline.last_run_at}` : "";
   els.metaDate.textContent = pipeline.last_run_at || "-";
   els.metaSource.textContent = p.meta?.source_mode === "mysql" ? "MySQL warehouse" : "Sample data";
-  els.execSummary.textContent = cleanCopy(summary.summary || "");
 
   renderKpis(p.kpis || {});
   renderVolumeChart(timeline, state.filters.date_preset);
@@ -236,7 +317,6 @@ function renderDashboard(p) {
   renderChannelInsight(ops.channel_mix || []);
   renderFieldTrendChart(timeline, state.filters.date_preset);
   renderFieldTrendInsight(timeline, state.filters.date_preset);
-  renderChannelTrendChart(timeline, state.filters.date_preset, ops.channel_mix || []);
   renderBarList(els.fieldSummary, buildFieldRows(p.kpis || {}, ops.field_service_split || []), { countFmt: (v) => fmtNum(v) });
   renderBarList(els.botOutcomesChart, (ops.bot_outcomes || []).map((r) => ({ label: r.label, count: r.count, share: r.share })), { countFmt: (v) => fmtNum(v) });
   renderBarList(els.resolutionList, (ops.resolution_mix || []).slice(0, 5).map((r) => ({ label: r.label, count: r.count, share: r.share })), { countFmt: (v) => fmtNum(v) });
@@ -256,6 +336,7 @@ function renderDashboard(p) {
   renderWidgetQuickFilters();
 }
 
+
 const QUICK_EXCLUSION_OPTIONS = [
   { key: "installations", label: "No Installations" },
   { key: "blank_chat", label: "No Blank Chat" },
@@ -266,15 +347,17 @@ const QUICK_EXCLUSION_OPTIONS = [
 function quickFilterBarHtml() {
   return `<div class="widget-quick-filters">
     ${QUICK_EXCLUSION_OPTIONS.map((option) => `
-      <button type="button" class="widget-qf-chip${state.filters.quick_exclusions.includes(option.key) ? " active" : ""}" data-quick-exclusion="${option.key}">
+      <button type="button" class="widget-qf-chip${state.filters.quick_exclusions.includes(option.key) ? " active" : ""}${state.quickFilterLoadingKey === option.key ? " loading" : ""}" data-quick-exclusion="${option.key}" ${state.loading ? "disabled" : ""}>
+        ${state.quickFilterLoadingKey === option.key ? `<span class="widget-qf-spinner" aria-hidden="true"></span>` : ""}
         ${esc(option.label)}
       </button>`).join("")}
   </div>`;
 }
 
 function renderWidgetQuickFilters() {
-  document.querySelectorAll(".chart-card, .ops-card, .data-card").forEach((card) => {
-    const header = card.querySelector(".chart-header, .data-card-header") || card;
+  document.querySelectorAll(".chart-card, .data-card").forEach((card) => {
+    const header = card.querySelector(".chart-header, .data-card-header");
+    if (!header) return;
     let host = card.querySelector(".widget-quick-filters");
     if (!host) {
       const wrapper = document.createElement("div");
@@ -291,11 +374,36 @@ function renderWidgetQuickFilters() {
 }
 
 function toggleQuickExclusion(key) {
+  if (state.loading) return;
   const next = new Set(state.filters.quick_exclusions);
   if (next.has(key)) next.delete(key);
   else next.add(key);
+  state.quickFilterLoadingKey = key;
   state.filters.quick_exclusions = [...next];
-  loadDashboard();
+  renderWidgetQuickFilters();
+  // Quick exclusions are handled entirely by v2 via SQL WHERE clauses.
+  // Re-calling loadDashboard() would re-fetch legacy (which strips exclusions) and
+  // flash incorrect numbers. Instead just re-fetch the v2 bundle and re-merge.
+  loadV2Only();
+}
+
+async function loadV2Only() {
+  if (inflightController) inflightController.abort();
+  inflightController = new AbortController();
+  const signal = inflightController.signal;
+  const requestId = ++state.requestSeq;
+  setLoading(true);
+  try {
+    const orgV2 = await fetchOrgLevelV2Bundle(signal);
+    if (requestId !== state.requestSeq || !orgV2) return;
+    state.payload = mergeOrgLevelPayload(state.payload, orgV2);
+    renderDashboard(state.payload);
+  } catch (err) {
+    if (requestId !== state.requestSeq) return;
+    showError(err.message);
+  } finally {
+    if (requestId === state.requestSeq) setLoading(false);
+  }
 }
 
 function renderInsightStrip(container, cards, emptyMsg = "No insights available.") {
@@ -386,10 +494,11 @@ function renderFieldVisitProductInsight(products) {
   );
   const top = ranked[0];
   const installLed = [...rows].sort((a, b) => Number(b.installation_field_visit_rate || 0) - Number(a.installation_field_visit_rate || 0))[0];
+  const repairLed = [...rows].sort((a, b) => Number(b.repair_field_visit_rate || 0) - Number(a.repair_field_visit_rate || 0))[0];
   renderInsightStrip(els.fieldVisitByProductInsight, [
-    { label: "Highest field burden", value: top.product_family, note: `${fmtPct((top.repair_field_visit_rate || 0) + (top.installation_field_visit_rate || 0))} combined field rate` },
-    { label: "Repair component", value: fmtPct(top.repair_field_visit_rate || 0), note: `Installation ${fmtPct(top.installation_field_visit_rate || 0)}` },
-    { label: "Installation-led line", value: installLed.product_family, note: `${fmtPct(installLed.installation_field_visit_rate || 0)} installation visits` },
+    { label: "Highest total burden", value: top.product_family, note: `${fmtPct((top.repair_field_visit_rate || 0) + (top.installation_field_visit_rate || 0))} field visits across ${fmtNum(top.ticket_volume)} tickets` },
+    { label: "Most repair-heavy", value: repairLed.product_family, note: `${fmtPct(repairLed.repair_field_visit_rate || 0)} repair visits` },
+    { label: "Most installation-heavy", value: installLed.product_family, note: `${fmtPct(installLed.installation_field_visit_rate || 0)} installation visits` },
   ]);
 }
 
@@ -516,8 +625,8 @@ function renderVolumeChart(points, datePreset) {
   const gridLines = [0, 0.25, 0.5, 0.75, 1.0].map((f) => {
     const y = toBarY(f * maxTickets);
     const label = f === 0 ? "0" : fmtNum(Math.round(f * maxTickets));
-    return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#1e2a3a" stroke-width="1"/>
-            <text x="${padL - 6}" y="${y + 4}" text-anchor="end" font-size="9" fill="#4a5568">${label}</text>`;
+    return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#ddd8cf" stroke-width="1"/>
+            <text x="${padL - 6}" y="${y + 4}" text-anchor="end" font-size="9" fill="#6b6659">${label}</text>`;
   }).join("");
 
   // Bars — data-* attributes drive the floating tooltip
@@ -533,10 +642,10 @@ function renderVolumeChart(points, datePreset) {
       data-repair="${d.repair_field}" data-install="${d.install_field}"
       data-botn="${d.bot_resolved}" data-botr="${(d.bot_rate * 100).toFixed(1)}">
       <rect x="${x - 4}" y="${padT}" width="${barW + 8}" height="${chartH}" fill="transparent"/>
-      <rect x="${x}" y="${barY}" width="${barW}" height="${barH}" fill="url(#volBarFill)" rx="3"/>
-      <rect x="${x}" y="${padT+chartH-insH}" width="${barW}" height="${insH}" fill="#f59e0b" rx="2" opacity="0.9"/>
-      <rect x="${x}" y="${padT+chartH-repH-insH}" width="${barW}" height="${repH}" fill="#ef4444" rx="2" opacity="0.9"/>
-      ${showNum ? `<text x="${x+barW/2}" y="${numY}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#94a3b8">${fmtNum(d.tickets)}</text>` : ""}
+      <rect x="${x}" y="${barY}" width="${barW}" height="${barH}" fill="#3d3d3d" rx="2"/>
+      <rect x="${x}" y="${padT+chartH-insH}" width="${barW}" height="${insH}" fill="#7a5218" rx="2" opacity="0.9"/>
+      <rect x="${x}" y="${padT+chartH-repH-insH}" width="${barW}" height="${repH}" fill="#8a3520" rx="2" opacity="0.9"/>
+      ${showNum ? `<text x="${x+barW/2}" y="${numY}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#8a8070">${fmtNum(d.tickets)}</text>` : ""}
     </g>`;
   }).join("");
 
@@ -545,37 +654,31 @@ function renderVolumeChart(points, datePreset) {
   const dotsHtml = data.map((d, i) => {
     const cx = padL + i * step + step / 2, cy = toLineY(d.bot_rate);
     const showPct = barW >= 22;
-    return `<circle cx="${cx}" cy="${cy}" r="3.5" fill="#22c55e" stroke="#0d1117" stroke-width="1.5"/>
-            ${showPct ? `<text x="${cx}" y="${cy - 7}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#22c55e">${(d.bot_rate * 100).toFixed(0)}%</text>` : ""}`;
+    return `<circle cx="${cx}" cy="${cy}" r="3.5" fill="#2a6b50" stroke="#faf8f4" stroke-width="1.5"/>
+            ${showPct ? `<text x="${cx}" y="${cy - 7}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#2a6b50">${(d.bot_rate * 100).toFixed(0)}%</text>` : ""}`;
   }).join("");
 
   // X labels
   const nth = Math.max(1, Math.ceil(data.length / 13));
   const xLabels = data.map((d, i) => {
     if (i % nth !== 0) return "";
-    return `<text x="${padL + i * step + step/2}" y="${H - 4}" text-anchor="middle" font-size="9" fill="#4a5568">${esc(d.label)}</text>`;
+    return `<text x="${padL + i * step + step/2}" y="${H - 4}" text-anchor="middle" font-size="9" fill="#6b6659">${esc(d.label)}</text>`;
   }).join("");
 
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px">
-    <defs>
-      <linearGradient id="volBarFill" x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0%" stop-color="#475569"/>
-        <stop offset="100%" stop-color="#1e293b"/>
-      </linearGradient>
-    </defs>
     ${gridLines}${barsHtml}
-    <line x1="${padL}" y1="${avgY}" x2="${W - padR}" y2="${avgY}" stroke="#94a3b8" stroke-dasharray="4 4" stroke-width="1"/>
-    <text x="${W - padR}" y="${avgY - 6}" text-anchor="end" font-size="9" font-weight="700" fill="#94a3b8">Avg ${fmtNum(Math.round(avgTickets))}</text>
-    <polyline points="${linePoints}" fill="none" stroke="#22c55e" stroke-width="2" stroke-linejoin="round"/>
+    <line x1="${padL}" y1="${avgY}" x2="${W - padR}" y2="${avgY}" stroke="#b0a898" stroke-dasharray="4 4" stroke-width="1"/>
+    <text x="${W - padR}" y="${avgY - 6}" text-anchor="end" font-size="9" font-weight="700" fill="#8a8070">Avg ${fmtNum(Math.round(avgTickets))}</text>
+    <polyline points="${linePoints}" fill="none" stroke="#2a6b50" stroke-width="2" stroke-linejoin="round"/>
     ${dotsHtml}${xLabels}
   </svg>`;
 
   bindTip(el, ".vol-bar", (g) => ttHtml(g.dataset.label, [
     { label: "Total tickets",    val: fmtNum(g.dataset.tickets) },
-    { label: "Repair visits",    val: fmtNum(g.dataset.repair),  color: "#ef4444" },
-    { label: "Installation",     val: fmtNum(g.dataset.install), color: "#f59e0b" },
-    { label: "Bot resolved",     val: fmtNum(g.dataset.botn),    color: "#22c55e" },
-    { label: "Bot resolved %",   val: g.dataset.botr + "%",      color: "#22c55e" },
+    { label: "Repair visits",    val: fmtNum(g.dataset.repair),  color: "#b5300a" },
+    { label: "Installation",     val: fmtNum(g.dataset.install), color: "#996010" },
+    { label: "Bot resolved",     val: fmtNum(g.dataset.botn),    color: "#1f6645" },
+    { label: "Bot resolved %",   val: g.dataset.botr + "%",      color: "#1f6645" },
   ]));
   bindClick(el, ".vol-bar", (g) => openWeekDrawer(g.dataset.key, g.dataset.label, g.dataset));
 }
@@ -599,8 +702,8 @@ function renderFieldTrendChart(points, datePreset) {
 
   const gridLines = [0, 0.5, 1.0].map((f) => {
     const y = toY(f * maxField);
-    return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#1e2a3a" stroke-width="1"/>
-            <text x="${padL - 5}" y="${y + 4}" text-anchor="end" font-size="9" fill="#4a5568">${fmtNum(Math.round(f * maxField))}</text>`;
+    return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#ddd8cf" stroke-width="1"/>
+            <text x="${padL - 5}" y="${y + 4}" text-anchor="end" font-size="9" fill="#6b6659">${fmtNum(Math.round(f * maxField))}</text>`;
   }).join("");
 
   const barsHtml = data.map((d, i) => {
@@ -608,8 +711,8 @@ function renderFieldTrendChart(points, datePreset) {
     const repY = toY(d.repair_field), repH = padT + chartH - repY;
     const insY = toY(d.install_field), insH = padT + chartH - insY;
     return `<g class="field-bar chart-interactive" style="cursor:pointer" tabindex="0" role="button" data-key="${esc(d.key)}" data-label="${esc(d.label)}" data-repair="${d.repair_field}" data-install="${d.install_field}">
-      <rect x="${cx - halfW - 2}" y="${repY}" width="${halfW}" height="${repH}" fill="#ef4444" rx="2" opacity="0.85"/>
-      <rect x="${cx + 2}" y="${insY}" width="${halfW}" height="${insH}" fill="#f59e0b" rx="2" opacity="0.85"/>
+      <rect x="${cx - halfW - 2}" y="${repY}" width="${halfW}" height="${repH}" fill="#8a3520" rx="2" opacity="0.85"/>
+      <rect x="${cx + 2}" y="${insY}" width="${halfW}" height="${insH}" fill="#7a5218" rx="2" opacity="0.85"/>
       <rect x="${cx - halfW - 2}" y="${padT}" width="${barW + 4}" height="${chartH}" fill="transparent"/>
     </g>`;
   }).join("");
@@ -617,19 +720,19 @@ function renderFieldTrendChart(points, datePreset) {
   const nth = Math.max(1, Math.ceil(data.length / 12));
   const xLabels = data.map((d, i) => {
     if (i % nth !== 0) return "";
-    return `<text x="${padL + i * step + step/2}" y="${H - 4}" text-anchor="middle" font-size="9" fill="#4a5568">${esc(d.label)}</text>`;
+    return `<text x="${padL + i * step + step/2}" y="${H - 4}" text-anchor="middle" font-size="9" fill="#6b6659">${esc(d.label)}</text>`;
   }).join("");
 
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px">
     ${gridLines}
-    <line x1="${padL}" y1="${avgY}" x2="${W - padR}" y2="${avgY}" stroke="#94a3b8" stroke-dasharray="4 4" stroke-width="1"/>
-    <text x="${W - padR}" y="${avgY - 6}" text-anchor="end" font-size="9" font-weight="700" fill="#94a3b8">Avg ${fmtNum(Math.round(avgField))}</text>
+    <line x1="${padL}" y1="${avgY}" x2="${W - padR}" y2="${avgY}" stroke="#b0a898" stroke-dasharray="4 4" stroke-width="1"/>
+    <text x="${W - padR}" y="${avgY - 6}" text-anchor="end" font-size="9" font-weight="700" fill="#8a8070">Avg ${fmtNum(Math.round(avgField))}</text>
     ${barsHtml}${xLabels}
   </svg>`;
 
   bindTip(el, ".field-bar", (g) => ttHtml(g.dataset.label, [
-    { label: "Repair visits",       val: fmtNum(g.dataset.repair),   color: "#ef4444" },
-    { label: "Installation visits", val: fmtNum(g.dataset.install),  color: "#f59e0b" },
+    { label: "Repair visits",       val: fmtNum(g.dataset.repair),   color: "#b5300a" },
+    { label: "Installation visits", val: fmtNum(g.dataset.install),  color: "#996010" },
   ]));
   bindClick(el, ".field-bar", (g) => openWeekDrawer(g.dataset.key, g.dataset.label, {}));
 }
@@ -642,7 +745,7 @@ function renderChannelTrendChart(points, datePreset, channelMix) {
   // Instead, show the channel mix as a simple visual reference with proportional bars.
   if (!channelMix.length) { el.innerHTML = empty("No channel data."); return; }
 
-  const CHAN_COLORS = { "Chat": "#3b82f6", "Phone": "#a78bfa", "Email": "#22c55e", "WhatsApp": "#f59e0b", "Web": "#06b6d4", "Others": "#64748b" };
+  const CHAN_COLORS = { "Chat": "#2a5580", "Phone": "#5a3875", "Email": "#2a6b50", "WhatsApp": "#7a5218", "Web": "#226060", "Others": "#5c5248" };
   const total = channelMix.reduce((s, r) => s + Number(r.count || 0), 0) || 1;
   const W = 300, H = 200, padL = 72, padR = 12, padT = 12, padB = 12;
   const rowH = Math.floor((H - padT - padB) / Math.min(channelMix.length, 6));
@@ -651,14 +754,14 @@ function renderChannelTrendChart(points, datePreset, channelMix) {
     const y = padT + i * rowH;
     const share = Number(item.count || 0) / total;
     const bW = Math.max(4, share * (W - padL - padR - 60));
-    const col = CHAN_COLORS[item.label] || "#64748b";
+    const col = CHAN_COLORS[item.label] || "#5c5248";
     return `<g class="chan-bar chart-interactive" style="cursor:pointer" tabindex="0" role="button" data-label="${esc(item.label)}" data-count="${item.count}" data-share="${share.toFixed(4)}">
       <rect x="0" y="${y}" width="${W}" height="${rowH}" fill="transparent"/>
       <text x="${padL - 6}" y="${y + rowH/2 + 4}" text-anchor="end" font-size="11" font-weight="600" fill="#cbd5e1">${esc(item.label)}</text>
       <rect x="${padL}" y="${y + 4}" width="${W - padL - padR - 18}" height="${rowH - 8}" fill="#111827" rx="3"/>
       <rect x="${padL}" y="${y + 4}" width="${bW}" height="${rowH - 8}" fill="${col}" rx="3" opacity="0.85"/>
       <text x="${padL + bW + 6}" y="${y + rowH/2 + 4}" font-size="11" font-weight="700" fill="${col}">${fmtPct(share)}</text>
-      <text x="${padL + bW + 48}" y="${y + rowH/2 + 4}" font-size="10" fill="#64748b">${fmtNum(item.count)}</text>
+      <text x="${padL + bW + 48}" y="${y + rowH/2 + 4}" font-size="10" fill="#6b6659">${fmtNum(item.count)}</text>
     </g>`;
   }).join("");
 
@@ -677,7 +780,7 @@ function renderChannelChart(items) {
   const leg = els.channelLegend;
   if (!items.length) { el.innerHTML = empty("No channel data."); return; }
 
-  const colors = ["#3b82f6", "#a78bfa", "#22c55e", "#f59e0b", "#06b6d4", "#64748b"];
+  const colors = ["#2a5580", "#5a3875", "#2a6b50", "#7a5218", "#226060", "#5c5248"];
   const total = items.reduce((s, r) => s + Number(r.count || 0), 0) || 1;
   const cx = 90, cy = 90, r = 72, inner = 40;
   let angle = -Math.PI / 2;
@@ -715,8 +818,8 @@ function renderChannelChart(items) {
   el.innerHTML = `<svg viewBox="0 0 180 180" style="width:180px;height:180px">
     ${slices.map((s) => `<path class="donut-slice chart-interactive" style="cursor:pointer" tabindex="0" role="button" d="${s.path}" fill="${s.color}" opacity="0.9" data-label="${esc(s.label)}" data-count="${s.count}" data-share="${s.share.toFixed(4)}"/>`).join("")}
     ${labelHtml}
-    <text x="${cx}" y="${cy - 8}" text-anchor="middle" font-size="10" fill="#64748b">Total</text>
-    <text x="${cx}" y="${cy + 10}" text-anchor="middle" font-size="16" font-weight="800" fill="#e2e8f0">${fmtNum(total)}</text>
+    <text x="${cx}" y="${cy - 8}" text-anchor="middle" font-size="10" fill="#6b6659">Total</text>
+    <text x="${cx}" y="${cy + 10}" text-anchor="middle" font-size="16" font-weight="800" fill="#1c1c1c">${fmtNum(total)}</text>
   </svg>`;
 
   bindTip(el, ".donut-slice", (path) => ttHtml(path.dataset.label, [
@@ -752,14 +855,12 @@ function buildFieldRows(kpis, split) {
       count: repair.count || 0,
       share: kpis.repair_field_visit_rate?.value || 0,
       detail: "Field repairs driven by service or product defects",
-      metrics: [`Rate ${fmtPct(kpis.repair_field_visit_rate?.value || 0)}`],
     },
     {
       label: "Installation visits",
       count: install.count || 0,
       share: kpis.installation_field_visit_rate?.value || 0,
       detail: "Onboarding and installation-related dispatches",
-      metrics: [`Rate ${fmtPct(kpis.installation_field_visit_rate?.value || 0)}`],
     },
   ];
 }
@@ -767,10 +868,7 @@ function buildFieldRows(kpis, split) {
 function renderBarList(container, rows, options = {}) {
   if (!container) return;
   if (!rows.length) { container.innerHTML = empty("No data."); return; }
-  container.innerHTML = buildBreakdownRows(rows.map((row) => ({
-    ...row,
-    detail: row.detail || (row.share != null ? `${fmtPct(row.share)} of selected volume` : ""),
-  })), options);
+  container.innerHTML = buildBreakdownRows(rows, options);
 }
 
 // ── Product matrix ────────────────────────────────────────────────────────────
@@ -824,49 +922,53 @@ function renderFieldVisitByProduct(products) {
     .filter((p) => (p.repair_field_visit_rate + (p.installation_field_visit_rate || 0)) > 0)
     .sort((a, b) => (b.repair_field_visit_rate + (b.installation_field_visit_rate || 0)) - (a.repair_field_visit_rate + (a.installation_field_visit_rate || 0)));
   if (!rows.length) { el.innerHTML = empty("No field visit data."); return; }
+  const maxTotal = Math.max(...rows.map((r) => r.repair_field_visit_rate + (r.installation_field_visit_rate || 0)), 0.01);
+  el.innerHTML = `
+    <div class="fv-table">
+      <div class="fv-header">
+        <div>Product</div>
+        <div>Top models</div>
+        <div style="text-align:right">Tickets</div>
+        <div style="text-align:right">Repair %</div>
+        <div style="text-align:right">Installation %</div>
+        <div>Total field burden</div>
+      </div>
+      ${rows.map((r) => {
+        const totalRate = Number(r.repair_field_visit_rate || 0) + Number(r.installation_field_visit_rate || 0);
+        const topModels = ((state.payload?.model_breakdown || {})[r.product_family] || [])
+          .filter((m) => (m.model || "") !== r.product_family)
+          .slice(0, 2)
+          .map((m) => m.model);
+        return `
+          <div class="fv-row" tabindex="0" role="button" data-product="${esc(r.product_family)}" data-repair="${Number(r.repair_field_visit_rate || 0).toFixed(4)}" data-install="${Number(r.installation_field_visit_rate || 0).toFixed(4)}" data-total="${totalRate.toFixed(4)}" data-vol="${r.ticket_volume || 0}">
+            <div class="fv-product">
+              <div class="fv-product-name">${esc(r.product_family)}</div>
+              <div class="fv-product-note">${cleanCopy(r.top_issue || "No dominant issue")}</div>
+            </div>
+            <div class="fv-models">
+              ${topModels.length
+                ? topModels.map((model) => `<span class="fv-model-chip">${esc(model)}</span>`).join("")
+                : `<span class="fv-model-fallback">Model mix loads on click</span>`}
+            </div>
+            <div class="fv-num">${fmtNum(r.ticket_volume)}</div>
+            <div class="fv-num fv-repair">${fmtPct(r.repair_field_visit_rate || 0)}</div>
+            <div class="fv-num fv-install">${fmtPct(r.installation_field_visit_rate || 0)}</div>
+            <div class="fv-burden">
+              <div class="fv-burden-bar">
+                <div class="fv-burden-total" style="width:${(totalRate / maxTotal) * 100}%">
+                  <div class="fv-burden-repair" style="width:${totalRate > 0 ? (Number(r.repair_field_visit_rate || 0) / totalRate) * 100 : 0}%"></div>
+                  <div class="fv-burden-install" style="width:${totalRate > 0 ? (Number(r.installation_field_visit_rate || 0) / totalRate) * 100 : 0}%"></div>
+                </div>
+              </div>
+              <div class="fv-burden-label">${fmtPct(totalRate)}</div>
+            </div>
+          </div>`;
+      }).join("")}
+    </div>`;
 
-  const W = 620, rowH = 34, padL = 150, padR = 94, padT = 18;
-  const H = padT + rows.length * rowH + 24;
-  const barAreaW = W - padL - padR;
-  const maxRate = Math.max(...rows.map((r) => r.repair_field_visit_rate + (r.installation_field_visit_rate || 0)), 0.01);
-  const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => {
-    const x = padL + f * barAreaW;
-    const val = fmtPct(f * maxRate);
-    return `<line x1="${x}" y1="${padT - 8}" x2="${x}" y2="${H - 8}" stroke="#1f2937" stroke-width="1"/>
-      <text x="${x}" y="${H}" text-anchor="middle" font-size="9" fill="#64748b">${val}</text>`;
-  }).join("");
-
-  const rowsHtml = rows.map((r, i) => {
-    const y = padT + i * rowH;
-    const repairX = padL + (r.repair_field_visit_rate / maxRate) * barAreaW;
-    const installX = padL + ((r.installation_field_visit_rate || 0) / maxRate) * barAreaW;
-    const totalX = padL + (Math.min((r.repair_field_visit_rate + (r.installation_field_visit_rate || 0)) / maxRate, 1)) * barAreaW;
-    const totalRate = r.repair_field_visit_rate + (r.installation_field_visit_rate || 0);
-    return `<g class="fv-bar chart-interactive" style="cursor:pointer" tabindex="0" role="button" data-label="${esc(r.product_family)}" data-repair="${r.repair_field_visit_rate.toFixed(4)}" data-install="${(r.installation_field_visit_rate || 0).toFixed(4)}" data-total="${totalRate.toFixed(4)}" data-vol="${r.ticket_volume || 0}">
-      <rect x="0" y="${y}" width="${W}" height="${rowH}" fill="transparent"/>
-      <text x="${padL - 10}" y="${y + 12}" text-anchor="end" font-size="11" font-weight="700" fill="#dbe4f0">${esc(r.product_family)}</text>
-      <text x="${padL - 10}" y="${y + 25}" text-anchor="end" font-size="10" fill="#64748b">${fmtNum(r.ticket_volume)} tickets</text>
-      <line x1="${padL}" y1="${y + rowH/2}" x2="${padL + barAreaW}" y2="${y + rowH/2}" stroke="#1e293b" stroke-width="5" stroke-linecap="round"/>
-      <line x1="${Math.min(repairX, installX)}" y1="${y + rowH/2}" x2="${Math.max(repairX, installX)}" y2="${y + rowH/2}" stroke="#334155" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="${repairX}" cy="${y + rowH/2}" r="5.5" fill="#ef4444" stroke="#0f172a" stroke-width="2"/>
-      <circle cx="${installX}" cy="${y + rowH/2}" r="5.5" fill="#f59e0b" stroke="#0f172a" stroke-width="2"/>
-      <circle cx="${totalX}" cy="${y + rowH/2}" r="4" fill="#60a5fa" stroke="#0f172a" stroke-width="1.5"/>
-      <text x="${padL + barAreaW + 8}" y="${y + rowH/2 + 4}" font-size="11" font-weight="700" fill="#93c5fd">${fmtPct(totalRate)}</text>
-    </g>`;
-  }).join("");
-
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px">
-    ${grid}
-    ${rowsHtml}
-  </svg>`;
-
-  bindTip(el, ".fv-bar", (g) => ttHtml(g.dataset.label, [
-    { label: "Repair visits",       val: fmtPct(Number(g.dataset.repair)),   color: "#ef4444" },
-    { label: "Installation visits", val: fmtPct(Number(g.dataset.install)),  color: "#f59e0b" },
-    { label: "Total field visit %", val: fmtPct(Number(g.dataset.total)) },
-    { label: "Ticket volume",       val: fmtNum(g.dataset.vol) },
-  ]));
-  bindClick(el, ".fv-bar", (g) => openProductDrawer(g.dataset.label));
+  el.querySelectorAll(".fv-row").forEach((row) => {
+    wireAction(row, () => openProductDrawer(row.dataset.product));
+  });
 }
 
 // ── Model breakdown ───────────────────────────────────────────────────────────
@@ -882,9 +984,14 @@ function renderModelBreakdown(breakdown) {
     const models = breakdown[family] || [];
     if (!models.length) return "";
     const maxVol = Math.max(...models.map((m) => m.tickets), 1);
+    const resolvedModels = models.map((m) => ({
+      ...m,
+      display_model: m.model === family ? "Unmapped / family-level" : m.model,
+    }));
     return `
       <div class="model-family-block">
         <div class="model-family-title">${esc(family)}</div>
+        <div class="model-family-note">Models within ${esc(family)}. If a row says "Unmapped / family-level", the source ticket did not carry a specific model cleanly.</div>
         <div class="pt-header model-header">
           <div>Model</div>
           <div style="text-align:right">Tickets</div>
@@ -893,14 +1000,14 @@ function renderModelBreakdown(breakdown) {
           <div style="text-align:right">Bot res.</div>
           <div style="text-align:right">Transfer %</div>
         </div>
-        ${models.map((m) => {
+        ${resolvedModels.map((m) => {
           const repairCls = m.repair_field_visit_rate >= 0.12 ? "red" : "muted";
           const repeatCls = m.repeat_rate >= 0.15 ? "amber" : "muted";
           const botCls = m.bot_deflection_rate >= 0.2 ? "green" : "muted";
           const xferCls = m.bot_transfer_rate >= 0.2 ? "amber" : "muted";
           return `
             <div class="pt-row model-row">
-              <div class="pt-name" title="${esc(m.model)}">${esc(m.model)}</div>
+              <div class="pt-name" title="${esc(m.display_model)}">${esc(m.display_model)}</div>
               <div class="pt-bar-wrap" style="text-align:right">
                 <div class="pt-val">${fmtNum(m.tickets)}</div>
                 <div class="bar-track" style="margin-top:3px"><div class="bar-fill" style="width:${(m.tickets / maxVol) * 100}%"></div></div>
@@ -922,34 +1029,34 @@ function renderIssueBoard(views) {
   if (!issues.length) { el.innerHTML = empty("No issues for this view."); return; }
 
   el.innerHTML = issues.map((issue) => {
-    // Mini word cloud: top_symptom, top_defect, top_repair
-    const signals = [
-      { text: issue.top_symptom, weight: 3 },
-      { text: issue.top_defect,  weight: 2 },
-      { text: issue.top_repair,  weight: 1 },
-    ].filter((s) => s.text && s.text !== "Unknown");
-    const cloudHtml = signals.map((s) => {
-      const sz = 10 + s.weight * 2;
-      const col = issue.repair_field_visit_rate >= 0.12 ? "#ef4444" : issue.repeat_rate >= 0.1 ? "#f59e0b" : "#3b82f6";
-      return `<span class="issue-cloud-word" style="font-size:${sz}px;color:${col}">${esc(s.text)}</span>`;
+    const resolutions = issue.top_resolutions || [];
+    const maxRes = resolutions.length ? Math.max(...resolutions.map((r) => r.count)) : 1;
+    const RES_COLORS = ["#3d3d3d", "#2a5580", "#7a5218", "#2a6b50"];
+    const resBarsHtml = resolutions.map((r, i) => {
+      const pct = Math.round((r.count / maxRes) * 100);
+      return `<div class="irb-row">
+        <div class="irb-label">${esc(r.label)} <span class="irb-count">(${fmtNum(r.count)})</span></div>
+        <div class="irb-track"><div class="irb-bar" style="width:${pct}%;background:${RES_COLORS[i] || RES_COLORS[0]}"></div></div>
+      </div>`;
     }).join("");
+    const repairPct = issue.repair_field_visit_rate > 0 ? `<span class="issue-stat-pct" style="color:#8a3520">${fmtPct(issue.repair_field_visit_rate)} repair</span>` : "";
+    const repeatPct = issue.repeat_rate > 0.05 ? `<span class="issue-stat-pct" style="color:#7a5218">${fmtPct(issue.repeat_rate)} repeat</span>` : "";
     return `
     <div class="issue-card" tabindex="0" role="button" data-issue-id="${esc(issue.issue_id)}">
-      <div class="issue-fc1">${esc(issue.fault_code)}</div>
-      <div class="issue-fc2" title="${esc(issue.fault_code_level_2)}">${esc(issue.fault_code_level_2)}</div>
-      <div class="issue-product">${esc(issue.product_family)}</div>
-      <div class="issue-chips">
-        <span class="chip chip-blue">${fmtNum(issue.volume)} tickets</span>
-        ${issue.repair_field_visit_rate > 0.05 ? `<span class="chip chip-red">Repair ${fmtPct(issue.repair_field_visit_rate)}</span>` : ""}
-        ${issue.repeat_rate > 0.05 ? `<span class="chip chip-amber">Repeat ${fmtPct(issue.repeat_rate)}</span>` : ""}
-        ${issue.bot_deflection_rate > 0.1 ? `<span class="chip chip-green">Bot ${fmtPct(issue.bot_deflection_rate)}</span>` : ""}
-        ${issue.bot_transfer_rate > 0.1 ? `<span class="chip chip-amber">Transfer ${fmtPct(issue.bot_transfer_rate)}</span>` : ""}
+      <div class="issue-head-row">
+        <div class="issue-name-col">
+          <div class="issue-fc2" title="${esc(issue.fault_code_level_2)}">${esc(issue.fault_code_level_2)}</div>
+          <div class="issue-product">${esc(issue.product_family)} · ${esc(issue.fault_code)}</div>
+        </div>
+        <div class="issue-stat-col">
+          <span class="issue-stat-vol">${fmtNum(issue.volume)}</span>
+          ${repairPct}${repeatPct}
+        </div>
       </div>
-      ${cloudHtml ? `<div class="issue-cloud">${cloudHtml}</div>` : ""}
-      <div class="issue-insight">${esc(cleanCopy(issue.insight))}</div>
+      ${resBarsHtml ? `<div class="issue-resolution-bars">${resBarsHtml}</div>` : ""}
       <div class="issue-foot">
-        <span>Prior: ${fmtNum(issue.previous_volume)}</span>
-        <span>Click for analysis -></span>
+        <span>Prior period: ${fmtNum(issue.previous_volume)}</span>
+        <span>Details &rarr;</span>
       </div>
     </div>`;
   }).join("");
@@ -1139,7 +1246,7 @@ function renderDrawer(payload) {
 
   // repair rate determines color in cloud
   const repairRate = issue.repair_field_visit_rate || 0;
-  const cloudColor = repairRate >= 0.15 ? "#ef4444" : repairRate >= 0.08 ? "#f59e0b" : "#3b82f6";
+  const cloudColor = repairRate >= 0.15 ? "#8a3520" : repairRate >= 0.08 ? "#7a5218" : "#2a5580";
 
   const cloudWords = Object.entries(wordFreq)
     .sort((a, b) => b[1] - a[1])
@@ -1267,6 +1374,7 @@ function _syncMultiSelectLabel(el, selected) {
 
 function buildMultiSelect(el, opts, selected, onChange) {
   const selSet = new Set(selected);
+  let committedSelected = [...selected];
   el.innerHTML = `
     <div class="ms-trigger">
       <span class="ms-label">All</span>
@@ -1279,16 +1387,26 @@ function buildMultiSelect(el, opts, selected, onChange) {
         <span>All (clear)</span>
       </label>
       <div class="ms-divider"></div>
-      ${opts.map((o) => `
-        <label class="ms-item" data-val="${esc(o)}">
-          <input type="checkbox" value="${esc(o)}"${selSet.has(o) ? " checked" : ""}>
-          <span>${esc(o)}</span>
-        </label>`).join("")}
+      <div class="ms-items">
+        ${opts.map((o) => `
+          <label class="ms-item" data-val="${esc(o)}">
+            <input type="checkbox" value="${esc(o)}"${selSet.has(o) ? " checked" : ""}>
+            <span>${esc(o)}</span>
+          </label>`).join("")}
+      </div>
+      <div class="ms-divider"></div>
+      <div class="ms-footer">
+        <button type="button" class="ms-btn ms-cancel">Cancel</button>
+        <button type="button" class="ms-btn ms-apply">Apply</button>
+      </div>
     </div>`;
 
   const trigger = el.querySelector(".ms-trigger");
   const panel   = el.querySelector(".ms-panel");
   const search  = el.querySelector(".ms-search");
+  const clearInput = el.querySelector(".ms-clear input");
+  const cancelBtn = el.querySelector(".ms-cancel");
+  const applyBtn = el.querySelector(".ms-apply");
 
   function getSelected() {
     return [...el.querySelectorAll(".ms-item:not(.ms-clear) input:checked")].map((i) => i.value);
@@ -1300,13 +1418,26 @@ function buildMultiSelect(el, opts, selected, onChange) {
     else if (vals.length === 1) { lbl.textContent = vals[0]; trigger.classList.add("ms-active"); }
     else { lbl.textContent = `${vals[0]} +${vals.length - 1}`; trigger.classList.add("ms-active"); }
   }
-  updateLabel();
+  function syncDraft(vals) {
+    const selectedSet = new Set(vals);
+    el.querySelectorAll(".ms-item:not(.ms-clear) input").forEach((i) => {
+      i.checked = selectedSet.has(i.value);
+    });
+    clearInput.checked = false;
+    updateLabel();
+  }
+  syncDraft(committedSelected);
 
   trigger.addEventListener("click", (e) => {
     e.stopPropagation();
     document.querySelectorAll(".ms-panel:not(.hidden)").forEach((p) => { if (p !== panel) p.classList.add("hidden"); });
     panel.classList.toggle("hidden");
-    if (!panel.classList.contains("hidden")) { search.value = ""; filterItems(""); search.focus(); }
+    if (!panel.classList.contains("hidden")) {
+      syncDraft(committedSelected);
+      search.value = "";
+      filterItems("");
+      search.focus();
+    }
   });
   panel.addEventListener("click", (e) => e.stopPropagation());
 
@@ -1317,16 +1448,35 @@ function buildMultiSelect(el, opts, selected, onChange) {
     });
   }
   search.addEventListener("input", () => filterItems(search.value));
-  search.addEventListener("keydown", (e) => { if (e.key === "Escape") panel.classList.add("hidden"); });
+  search.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      syncDraft(committedSelected);
+      panel.classList.add("hidden");
+    }
+  });
 
-  el.querySelector(".ms-clear input").addEventListener("change", () => {
+  clearInput.addEventListener("change", () => {
     el.querySelectorAll(".ms-item:not(.ms-clear) input").forEach((i) => { i.checked = false; });
-    el.querySelector(".ms-clear input").checked = false;
-    updateLabel(); onChange([]);
+    clearInput.checked = false;
+    updateLabel();
   });
 
   el.querySelectorAll(".ms-item:not(.ms-clear) input").forEach((input) => {
-    input.addEventListener("change", () => { updateLabel(); onChange(getSelected()); });
+    input.addEventListener("change", () => { updateLabel(); });
+  });
+
+  cancelBtn.addEventListener("click", () => {
+    syncDraft(committedSelected);
+    panel.classList.add("hidden");
+  });
+
+  applyBtn.addEventListener("click", () => {
+    const nextSelected = getSelected();
+    const changed = nextSelected.length !== committedSelected.length
+      || nextSelected.some((value, idx) => value !== committedSelected[idx]);
+    committedSelected = [...nextSelected];
+    panel.classList.add("hidden");
+    if (changed) onChange(nextSelected);
   });
 }
 
@@ -1334,9 +1484,8 @@ function buildMultiSelect(el, opts, selected, onChange) {
 function showError(msg) {
   els.viewStatus.textContent = "Error";
   els.sourceBadge.textContent = "Load failed";
-  els.sourceBadge.style.background = "rgba(239,68,68,0.15)";
-  els.sourceBadge.style.color = "#ef4444";
-  els.execSummary.textContent = `Failed to fetch data: ${msg}`;
+  els.sourceBadge.style.background = "rgba(181,48,10,0.1)";
+  els.sourceBadge.style.color = "#b5300a";
   [els.kpiRow, els.volumeChart, els.channelChart, els.fieldSummary, els.botOutcomesChart,
    els.resolutionList, els.productMatrix, els.issueBoard, els.botKpiRow,
    els.botProductMatrix, els.botBestIssues, els.botLeakyIssues, els.qualityCards, els.pipelineHealth]
@@ -1550,7 +1699,7 @@ function openWeekDrawer(weekKey, weekLabel, ds) {
   const allBucketed = bucketTimeline(state.payload?.timeline || [], state.filters.date_preset);
   const avgT = allBucketed.length > 0 ? Math.round(allBucketed.reduce((s, b) => s + b.tickets, 0) / allBucketed.length) : 0;
   const diff = avgT > 0 ? ((total - avgT) / avgT * 100).toFixed(0) : null;
-  const diffColor = diff > 0 ? "#ef4444" : "#22c55e";
+  const diffColor = diff > 0 ? "#b5300a" : "#1f6645";
 
   // Daily mini-chart (only for weekly buckets where we have multiple daily points)
   const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -1565,9 +1714,9 @@ function openWeekDrawer(weekKey, weekLabel, ds) {
     const y = H2 - padB2 - bH;
     const dt = new Date(p.date + "T00:00:00");
     const dayLbl = DAYS[(dt.getDay() + 6) % 7];
-    return `<rect x="${cx - bW2/2}" y="${y}" width="${bW2}" height="${bH}" fill="#3b82f6" rx="2" opacity="0.85"/>
-      <text x="${cx}" y="${H2 - 4}" text-anchor="middle" font-size="8" fill="#4a5568">${dayLbl}</text>
-      <text x="${cx}" y="${y - 3}" text-anchor="middle" font-size="7.5" fill="#64748b">${fmtNum(v)}</text>`;
+    return `<rect x="${cx - bW2/2}" y="${y}" width="${bW2}" height="${bH}" fill="#1e4f82" rx="2" opacity="0.85"/>
+      <text x="${cx}" y="${H2 - 4}" text-anchor="middle" font-size="8" fill="#6b6659">${dayLbl}</text>
+      <text x="${cx}" y="${y - 3}" text-anchor="middle" font-size="7.5" fill="#8a8070">${fmtNum(v)}</text>`;
   }).join("");
 
   const topProducts = (state.payload?.product_health || []).slice(0, 5).map((product) => ({
@@ -1587,9 +1736,9 @@ function openWeekDrawer(weekKey, weekLabel, ds) {
   openDrawer(`${isWeekly ? "Week: " : ""}${weekLabel}`, `
     <div class="drill-kpi-row">
       <div class="drill-kpi"><div class="dk-val">${fmtNum(total)}</div><div class="dk-lbl">Total tickets</div></div>
-      <div class="drill-kpi"><div class="dk-val" style="color:#ef4444">${fmtPct(total > 0 ? repair / total : 0)}</div><div class="dk-lbl">Repair visit %</div></div>
-      <div class="drill-kpi"><div class="dk-val" style="color:#f59e0b">${fmtPct(total > 0 ? install / total : 0)}</div><div class="dk-lbl">Installation %</div></div>
-      <div class="drill-kpi"><div class="dk-val" style="color:#22c55e">${botR}</div><div class="dk-lbl">Bot resolved %</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#8a3520">${fmtPct(total > 0 ? repair / total : 0)}</div><div class="dk-lbl">Repair visit %</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#7a5218">${fmtPct(total > 0 ? install / total : 0)}</div><div class="dk-lbl">Installation %</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#2a6b50">${botR}</div><div class="dk-lbl">Bot resolved %</div></div>
     </div>
     ${diff !== null ? `<div class="drill-vs">vs period average: <strong style="color:${diffColor}">${diff > 0 ? "+" : ""}${diff}%</strong> tickets &nbsp;(period avg: ${fmtNum(avgT)} / ${isWeekly ? "week" : "day"})</div>` : ""}
     ${isWeekly && points.length > 1 ? `
@@ -1655,7 +1804,7 @@ function openProductDrawer(productFamily) {
   const cloudHtml = cloudWords.map(([word, freq]) => {
     const sz = 11 + Math.round((freq / maxWF) * 16);
     const op = 0.5 + (freq / maxWF) * 0.5;
-    return `<span class="cloud-word" style="font-size:${sz}px;color:#3b82f6;opacity:${op}">${esc(word)}</span>`;
+    return `<span class="cloud-word" style="font-size:${sz}px;color:#1e4f82;opacity:${op}">${esc(word)}</span>`;
   }).join("");
 
   // Top issues rows
@@ -1685,17 +1834,17 @@ function openProductDrawer(productFamily) {
   openDrawer(`${productFamily} - Deep Dive`, `
     <div class="drill-kpi-row">
       <div class="drill-kpi"><div class="dk-val">${fmtNum(ph.ticket_volume)}</div><div class="dk-lbl">Tickets</div></div>
-      <div class="drill-kpi"><div class="dk-val" style="color:#ef4444">${fmtPct(ph.repair_field_visit_rate)}</div><div class="dk-lbl">Repair %</div></div>
-      <div class="drill-kpi"><div class="dk-val" style="color:#f59e0b">${fmtPct(ph.repeat_rate)}</div><div class="dk-lbl">Repeat %</div></div>
-      <div class="drill-kpi"><div class="dk-val" style="color:#22c55e">${fmtPct(ph.bot_deflection_rate)}</div><div class="dk-lbl">Bot resolved</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#8a3520">${fmtPct(ph.repair_field_visit_rate)}</div><div class="dk-lbl">Repair %</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#7a5218">${fmtPct(ph.repeat_rate)}</div><div class="dk-lbl">Repeat %</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#2a6b50">${fmtPct(ph.bot_deflection_rate)}</div><div class="dk-lbl">Bot resolved</div></div>
     </div>
 
     ${botRow.chat_tickets > 0 ? `
     <div class="drill-sub-title">Chatbot performance</div>
     <div class="drill-kpi-row" style="grid-template-columns:repeat(3,1fr)">
       <div class="drill-kpi"><div class="dk-val">${fmtNum(botRow.chat_tickets)}</div><div class="dk-lbl">Chat sessions</div></div>
-      <div class="drill-kpi"><div class="dk-val" style="color:#22c55e">${fmtPct(botRow.bot_resolved_rate)}</div><div class="dk-lbl">Bot resolved</div></div>
-      <div class="drill-kpi"><div class="dk-val" style="color:#ef4444">${fmtPct(botRow.bot_transferred_rate)}</div><div class="dk-lbl">Transferred</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#2a6b50">${fmtPct(botRow.bot_resolved_rate)}</div><div class="dk-lbl">Bot resolved</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#8a3520">${fmtPct(botRow.bot_transferred_rate)}</div><div class="dk-lbl">Transferred</div></div>
     </div>` : ""}
 
     <div class="drill-sub-title">Top issues - ${issues.length} total (click any to drill deeper)</div>
@@ -1736,7 +1885,7 @@ function filterToProduct(product) {
 
 // Channel drill-down — from donut slice or channel mix bar click
 function openChannelDrawer(channel, count, share) {
-  const CHAN_COLORS = { "Chat": "#3b82f6", "Phone": "#a78bfa", "Email": "#22c55e", "WhatsApp": "#f59e0b", "Web": "#06b6d4", "Others": "#64748b" };
+  const CHAN_COLORS = { "Chat": "#2a5580", "Phone": "#5a3875", "Email": "#2a6b50", "WhatsApp": "#7a5218", "Web": "#226060", "Others": "#5c5248" };
   const channelMix = (state.payload?.service_ops?.channel_mix || []);
   const total = channelMix.reduce((s, r) => s + Number(r.count || 0), 0) || 1;
   const sorted = [...channelMix].sort((a, b) => Number(b.count || 0) - Number(a.count || 0));
@@ -1744,7 +1893,7 @@ function openChannelDrawer(channel, count, share) {
 
   const barRows = sorted.map((r) => {
     const isThis = r.label === channel;
-    const col = CHAN_COLORS[r.label] || "#64748b";
+    const col = CHAN_COLORS[r.label] || "#5c5248";
     return `
       <div class="drill-chan-row${isThis ? " drill-chan-active" : ""}">
         <div class="dcr-name" style="color:${col}">${esc(r.label)}</div>
@@ -1773,125 +1922,236 @@ function filterToChannel(channel) {
   loadDashboard();
 }
 
+function buildProductDrawerHtml(productFamily, payload, options = {}) {
+  const ph = (payload?.product_health || []).find((p) => p.product_family === productFamily) || {};
+  const botRow = (payload?.bot_summary?.by_product || []).find((r) => r.product_family === productFamily) || {};
+  const models = (payload?.model_breakdown || {})[productFamily] || [];
+  const issues = collectIssuesFromPayload(payload, productFamily);
+  const categories = aggregateIssueCategories(issues).slice(0, 6);
+  const channels = (payload?.service_ops?.channel_mix || []).slice(0, 6);
+  const resolutions = (payload?.service_ops?.resolution_mix || []).slice(0, 5);
+  const topIssue = issues[0];
+  const topCategory = categories[0];
+  const storyLines = [
+    topIssue ? `${topIssue.fault_code_level_2} is the largest issue with ${fmtNum(topIssue.volume)} tickets.` : "No dominant issue identified yet.",
+    topCategory ? `${topCategory.label} contributes ${fmtPct(topCategory.share)} of this product's coded load.` : "No category concentration available.",
+    `Repair rate is ${fmtPct(ph.repair_field_visit_rate || 0)} and repeat rate is ${fmtPct(ph.repeat_rate || 0)}.`,
+  ];
+  const wordFreq = {};
+  const addW = (t, w) => { if (t && t !== "Unknown" && t !== "-" && t.length > 1) { const k = t.trim(); wordFreq[k] = (wordFreq[k] || 0) + w; } };
+  for (const issue of issues) {
+    addW(issue.fault_code_level_2, issue.volume || 1);
+    addW(issue.top_symptom, Math.round((issue.volume || 1) * 0.5));
+    addW(issue.top_defect, Math.round((issue.volume || 1) * 0.4));
+    addW(issue.top_repair, Math.round((issue.volume || 1) * 0.2));
+  }
+  const cloudWords = Object.entries(wordFreq).sort((a, b) => b[1] - a[1]).slice(0, 24);
+  const maxWF = cloudWords[0]?.[1] || 1;
+  const cloudHtml = cloudWords.map(([word, freq]) => {
+    const sz = 11 + Math.round((freq / maxWF) * 16);
+    const op = 0.5 + (freq / maxWF) * 0.5;
+    return `<span class="cloud-word" style="font-size:${sz}px;color:#1e4f82;opacity:${op}">${esc(word)}</span>`;
+  }).join("");
+  const maxMvol = Math.max(...models.map((m) => m.tickets), 1);
+  const modelRows = models.slice(0, 10).map((m) => `
+    <div class="drill-model-row">
+      <div class="dmr-name" title="${esc(m.model === productFamily ? "Unmapped / family-level" : m.model)}">${esc(m.model === productFamily ? "Unmapped / family-level" : m.model)}</div>
+      <div class="dmr-bar"><div class="dmr-fill" style="width:${(m.tickets / maxMvol) * 100}%"></div></div>
+      <div class="dmr-val">${fmtNum(m.tickets)}</div>
+      <div class="dmr-val ${(m.repair_field_visit_rate || 0) >= 0.12 ? "red" : ""}">${fmtPct(m.repair_field_visit_rate)}</div>
+      <div class="dmr-val ${(m.bot_deflection_rate || 0) >= 0.2 ? "green" : ""}">${fmtPct(m.bot_deflection_rate)}</div>
+    </div>`).join("");
+  return `
+    <div class="drill-kpi-row">
+      <div class="drill-kpi"><div class="dk-val">${fmtNum(ph.ticket_volume || 0)}</div><div class="dk-lbl">Tickets</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#8a3520">${fmtPct(ph.repair_field_visit_rate || 0)}</div><div class="dk-lbl">Repair %</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#7a5218">${fmtPct(ph.installation_field_visit_rate || 0)}</div><div class="dk-lbl">Installation %</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#2a6b50">${fmtPct(ph.bot_deflection_rate || 0)}</div><div class="dk-lbl">Bot resolved</div></div>
+    </div>
+    <div class="insight-grid">
+      ${renderStoryCallout("Product readout", storyLines)}
+      ${renderStoryCallout("Breakdown status", [
+        models.length ? `${models.filter((m) => m.model !== productFamily).length || 0} identifiable models in this slice.` : "Model mix not yet identified.",
+        channels[0] ? `${channels[0].label} is the largest channel for this product.` : "No channel split available.",
+        options.loading ? "More detail is still loading." : "Detailed breakdown is ready.",
+      ])}
+    </div>
+    ${options.loading ? `<div class="drawer-inline-loader">${drawerLoadingHtml("Loading detailed product breakdown...")}</div>` : ""}
+    ${botRow.chat_tickets > 0 ? `
+    <div class="drill-sub-title">Chatbot performance</div>
+    <div class="drill-kpi-row" style="grid-template-columns:repeat(4,1fr)">
+      <div class="drill-kpi"><div class="dk-val">${fmtNum(botRow.chat_tickets)}</div><div class="dk-lbl">Chat sessions</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#2a6b50">${fmtPct(botRow.bot_resolved_rate)}</div><div class="dk-lbl">Bot resolved</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#8a3520">${fmtPct(botRow.bot_transferred_rate)}</div><div class="dk-lbl">Transferred</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#7a5218">${fmtPct(botRow.blank_chat_rate || 0)}</div><div class="dk-lbl">Blank chat</div></div>
+    </div>` : ""}
+    <div class="drawer-two-col">
+      <div>
+        <div class="drill-sub-title">Category concentration</div>
+        ${buildBreakdownRows(categories, { empty: "No category concentration available." })}
+      </div>
+      <div>
+        <div class="drill-sub-title">Channel mix</div>
+        ${buildBreakdownRows(channels, { empty: "No channel mix available." })}
+      </div>
+    </div>
+    <div class="drawer-two-col">
+      <div>
+        <div class="drill-sub-title">Resolution mix</div>
+        ${buildBreakdownRows(resolutions, { empty: "No resolution mix available." })}
+      </div>
+      <div>
+        <div class="drill-sub-title">Top issues</div>
+        ${buildIssueRows(issues, 6)}
+      </div>
+    </div>
+    ${models.length ? `
+    <div class="drill-sub-title">Model breakdown for ${esc(productFamily)}</div>
+    <div class="drill-model-header">
+      <div>Model</div><div></div>
+      <div style="text-align:right">Tickets</div>
+      <div style="text-align:right">Repair %</div>
+      <div style="text-align:right">Bot %</div>
+    </div>
+    <div class="drill-model-list">${modelRows}</div>` : ""}
+    ${cloudHtml ? `
+    <div class="drill-sub-title">Signal cloud</div>
+    <div class="word-cloud">${cloudHtml}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">Word size reflects ticket concentration across issue, symptom, defect, and repair signals.</div>` : ""}
+    <div class="drill-action">
+      <button class="btn-primary" data-action="filter-product" data-product="${esc(productFamily)}">Filter dashboard to ${esc(productFamily)}</button>
+    </div>`;
+}
+
 async function openProductDrawer(productFamily) {
-  openDrawer(`${productFamily} - Deep Dive`, drawerLoadingHtml("Loading product breakdown..."));
+  openDrawer(`${productFamily} - Deep Dive`, buildProductDrawerHtml(productFamily, state.payload, { loading: true }));
   try {
-    const payload = await fetchScopedDashboard({ products: [productFamily] });
-    const ph = (payload.product_health || []).find((p) => p.product_family === productFamily) || {};
-    const botRow = (payload.bot_summary?.by_product || []).find((r) => r.product_family === productFamily) || {};
-    const models = (payload.model_breakdown || {})[productFamily] || [];
-    const issues = collectIssuesFromPayload(payload, productFamily);
-    const categories = aggregateIssueCategories(issues).slice(0, 6);
-    const channels = (payload.service_ops?.channel_mix || []).slice(0, 6);
-    const resolutions = (payload.service_ops?.resolution_mix || []).slice(0, 5);
-    const topIssue = issues[0];
-    const topCategory = categories[0];
-    const storyLines = [
-      topIssue ? `${topIssue.fault_code_level_2} is the largest issue with ${fmtNum(topIssue.volume)} tickets.` : "No dominant issue identified.",
-      topCategory ? `${topCategory.label} contributes ${fmtPct(topCategory.share)} of this product's coded load.` : "No category concentration available.",
-      `Repair rate is ${fmtPct(ph.repair_field_visit_rate)} and repeat rate is ${fmtPct(ph.repeat_rate)}.`,
-    ];
-
-    const wordFreq = {};
-    const addW = (t, w) => { if (t && t !== "Unknown" && t !== "-" && t.length > 1) { const k = t.trim(); wordFreq[k] = (wordFreq[k] || 0) + w; } };
-    for (const issue of issues) {
-      addW(issue.fault_code_level_2, issue.volume || 1);
-      addW(issue.top_symptom, Math.round((issue.volume || 1) * 0.5));
-      addW(issue.top_defect, Math.round((issue.volume || 1) * 0.4));
-      addW(issue.top_repair, Math.round((issue.volume || 1) * 0.2));
-    }
-    const cloudWords = Object.entries(wordFreq).sort((a, b) => b[1] - a[1]).slice(0, 24);
-    const maxWF = cloudWords[0]?.[1] || 1;
-    const cloudHtml = cloudWords.map(([word, freq]) => {
-      const sz = 11 + Math.round((freq / maxWF) * 16);
-      const op = 0.5 + (freq / maxWF) * 0.5;
-      return `<span class="cloud-word" style="font-size:${sz}px;color:#3b82f6;opacity:${op}">${esc(word)}</span>`;
-    }).join("");
-
-    const maxMvol = Math.max(...models.map((m) => m.tickets), 1);
-    const modelRows = models.slice(0, 10).map((m) => `
-      <div class="drill-model-row">
-        <div class="dmr-name" title="${esc(m.model)}">${esc(m.model)}</div>
-        <div class="dmr-bar"><div class="dmr-fill" style="width:${(m.tickets / maxMvol) * 100}%"></div></div>
-        <div class="dmr-val">${fmtNum(m.tickets)}</div>
-        <div class="dmr-val ${(m.repair_field_visit_rate || 0) >= 0.12 ? "red" : ""}">${fmtPct(m.repair_field_visit_rate)}</div>
-        <div class="dmr-val ${(m.bot_deflection_rate || 0) >= 0.2 ? "green" : ""}">${fmtPct(m.bot_deflection_rate)}</div>
-      </div>`).join("");
-
+    const drill = await fetchV2ProductDrill(productFamily);
     els.drawerTitle.textContent = `${productFamily} - Deep Dive`;
-    els.drawerContent.innerHTML = `
-      <div class="drill-kpi-row">
-        <div class="drill-kpi"><div class="dk-val">${fmtNum(ph.ticket_volume)}</div><div class="dk-lbl">Tickets</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:#ef4444">${fmtPct(ph.repair_field_visit_rate)}</div><div class="dk-lbl">Repair %</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:#f59e0b">${fmtPct(ph.repeat_rate)}</div><div class="dk-lbl">Repeat %</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:#22c55e">${fmtPct(ph.bot_deflection_rate)}</div><div class="dk-lbl">Bot resolved</div></div>
-      </div>
-
-      <div class="insight-grid">
-        ${renderStoryCallout("Portfolio readout", storyLines)}
-        ${renderStoryCallout("How to use this view", [
-          "Start with category concentration, then move to models and issues.",
-          "Use the issue rows when one category is broad and you need the exact failure mode.",
-        ])}
-      </div>
-
-      ${botRow.chat_tickets > 0 ? `
-      <div class="drill-sub-title">Chatbot performance</div>
-      <div class="drill-kpi-row" style="grid-template-columns:repeat(4,1fr)">
-        <div class="drill-kpi"><div class="dk-val">${fmtNum(botRow.chat_tickets)}</div><div class="dk-lbl">Chat sessions</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:#22c55e">${fmtPct(botRow.bot_resolved_rate)}</div><div class="dk-lbl">Bot resolved</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:#ef4444">${fmtPct(botRow.bot_transferred_rate)}</div><div class="dk-lbl">Transferred</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:#f59e0b">${fmtPct(botRow.blank_chat_rate)}</div><div class="dk-lbl">Blank chat</div></div>
-      </div>` : ""}
-
-      <div class="drawer-two-col">
-        <div>
-          <div class="drill-sub-title">Category concentration</div>
-          ${buildBreakdownRows(categories, { empty: "No category concentration available." })}
-        </div>
-        <div>
-          <div class="drill-sub-title">Channel mix</div>
-          ${buildBreakdownRows(channels, { empty: "No channel mix available." })}
-        </div>
-      </div>
-
-      <div class="drawer-two-col">
-        <div>
-          <div class="drill-sub-title">Resolution mix</div>
-          ${buildBreakdownRows(resolutions, { empty: "No resolution mix available." })}
-        </div>
-        <div>
-          <div class="drill-sub-title">Top issues</div>
-          ${buildIssueRows(issues, 6)}
-        </div>
-      </div>
-
-      ${models.length ? `
-      <div class="drill-sub-title">Model breakdown</div>
-      <div class="drill-model-header">
-        <div>Model</div><div></div>
-        <div style="text-align:right">Tickets</div>
-        <div style="text-align:right">Repair %</div>
-        <div style="text-align:right">Bot %</div>
-      </div>
-      <div class="drill-model-list">${modelRows}</div>` : ""}
-
-      ${cloudHtml ? `
-      <div class="drill-sub-title">Signal cloud</div>
-      <div class="word-cloud">${cloudHtml}</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:8px">Word size reflects ticket concentration across issue, symptom, defect, and repair signals.</div>` : ""}
-
-      <div class="drill-action">
-        <button class="btn-primary" data-action="filter-product" data-product="${esc(productFamily)}">Filter dashboard to ${esc(productFamily)}</button>
-      </div>`;
+    els.drawerContent.innerHTML = buildProductDrawerHtmlFromV2(productFamily, drill);
     wireDrawerActions();
   } catch (err) {
-    els.drawerContent.innerHTML = `<div class="error-state">Failed to load product breakdown: ${esc(err.message)}</div>`;
+    // V2 drill failed — fall back to legacy scoped dashboard.
+    try {
+      const payload = await fetchScopedDashboard({ products: [productFamily] });
+      els.drawerTitle.textContent = `${productFamily} - Deep Dive`;
+      els.drawerContent.innerHTML = buildProductDrawerHtml(productFamily, payload);
+      wireDrawerActions();
+    } catch (legacyErr) {
+      els.drawerContent.innerHTML = `<div class="error-state">Failed to load product breakdown: ${esc(legacyErr.message)}</div>`;
+    }
   }
 }
 
+async function fetchV2ProductDrill(productFamily) {
+  const params = new URLSearchParams({ date_preset: state.filters.date_preset });
+  if (state.filters.models.length) params.set("models", state.filters.models.join(","));
+  if (state.filters.fault_codes.length) params.set("fault_codes", state.filters.fault_codes.join(","));
+  if (state.filters.channels.length) params.set("channels", state.filters.channels.join(","));
+  if (state.filters.bot_actions.length) params.set("bot_actions", state.filters.bot_actions.join(","));
+  if (state.filters.quick_exclusions.length) params.set("quick_exclusions", state.filters.quick_exclusions.join(","));
+  return fetchJson(`${state.apiBase}/api/v2/drill/product/${encodeURIComponent(productFamily)}?${params}`, { timeoutMs: 15000 });
+}
+
+function buildProductDrawerHtmlFromV2(productFamily, drill) {
+  const kpis = drill.summary || {};
+  const models = drill.models || [];
+  const categories = (drill.categories || []).slice(0, 6);
+  const issues = drill.issues || [];
+  const channels = (drill.channels || []).slice(0, 6);
+  const tickets = kpis.total_tickets?.value || 0;
+  const repair = kpis.repair_field_visit_rate?.value || 0;
+  const installation = kpis.installation_field_visit_rate?.value || 0;
+  const botRate = kpis.bot_deflection_rate?.value || 0;
+  const repeatRate = kpis.repeat_rate?.value || 0;
+  const topIssue = issues[0];
+  const topCat = categories[0];
+
+  const wordFreq = {};
+  const addW = (t, w) => { if (t && t !== "Unknown" && t !== "-" && t.length > 1) { const k = t.trim(); wordFreq[k] = (wordFreq[k] || 0) + w; } };
+  for (const iss of issues) addW(iss.label, iss.count || 1);
+  const cloudWords = Object.entries(wordFreq).sort((a, b) => b[1] - a[1]).slice(0, 24);
+  const maxWF = cloudWords[0]?.[1] || 1;
+  const cloudHtml = cloudWords.map(([word, freq]) => {
+    const sz = 11 + Math.round((freq / maxWF) * 16);
+    const op = 0.5 + (freq / maxWF) * 0.5;
+    return `<span class="cloud-word" style="font-size:${sz}px;color:#1e4f82;opacity:${op}">${esc(word)}</span>`;
+  }).join("");
+
+  const maxMvol = Math.max(...models.map((m) => m.tickets), 1);
+  const modelRows = models.slice(0, 10).map((m) => `
+    <div class="drill-model-row">
+      <div class="dmr-name" title="${esc(m.model_name === productFamily ? "Unmapped / family-level" : m.model_name)}">${esc(m.model_name === productFamily ? "Unmapped / family-level" : m.model_name)}</div>
+      <div class="dmr-bar"><div class="dmr-fill" style="width:${(m.tickets / maxMvol) * 100}%"></div></div>
+      <div class="dmr-val">${fmtNum(m.tickets)}</div>
+      <div class="dmr-val ${(m.repair_rate || 0) >= 0.12 ? "red" : ""}">${fmtPct(m.repair_rate || 0)}</div>
+      <div class="dmr-val ${(m.bot_rate || 0) >= 0.2 ? "green" : ""}">${fmtPct(m.bot_rate || 0)}</div>
+    </div>`).join("");
+
+  const issueRows = issues.slice(0, 8).map((iss) => `
+    <div class="drill-issue-row">
+      <div class="dir-name">${esc(iss.label)}</div>
+      <div class="dir-chips">
+        <span class="chip chip-blue">${fmtNum(iss.count)} tickets</span>
+        ${(iss.repair_rate || 0) > 0.03 ? `<span class="chip chip-red">Repair ${fmtPct(iss.repair_rate)}</span>` : ""}
+        ${(iss.repeat_rate || 0) > 0.05 ? `<span class="chip chip-amber">Repeat ${fmtPct(iss.repeat_rate)}</span>` : ""}
+        ${(iss.bot_rate || 0) > 0.05 ? `<span class="chip chip-green">Bot ${fmtPct(iss.bot_rate)}</span>` : ""}
+      </div>
+    </div>`).join("");
+
+  const catRows = categories.map((c) => ({ label: c.label, count: c.count, share: c.share, detail: "", metrics: [] }));
+  const channelRows = channels.map((c) => ({ label: c.label, count: c.count, share: c.share }));
+
+  return `
+    <div class="drill-kpi-row">
+      <div class="drill-kpi"><div class="dk-val">${fmtNum(tickets)}</div><div class="dk-lbl">Tickets</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#8a3520">${fmtPct(repair)}</div><div class="dk-lbl">Repair %</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#7a5218">${fmtPct(installation)}</div><div class="dk-lbl">Installation %</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#2a6b50">${fmtPct(botRate)}</div><div class="dk-lbl">Bot resolved</div></div>
+    </div>
+    <div class="insight-grid">
+      ${renderStoryCallout("Product readout", [
+        topIssue ? `${topIssue.label} is the largest issue with ${fmtNum(topIssue.count)} tickets.` : "No dominant issue identified yet.",
+        topCat ? `${topCat.label} contributes ${fmtPct(topCat.share)} of this product's coded load.` : "No category concentration available.",
+        `Repair rate is ${fmtPct(repair)} and repeat rate is ${fmtPct(repeatRate)}.`,
+      ])}
+      ${renderStoryCallout("Breakdown status", [
+        models.length ? `${models.filter((m) => m.model_name !== productFamily).length} identifiable models in this slice.` : "Model mix not yet identified.",
+        channels[0] ? `${channels[0].label} is the largest channel for this product.` : "No channel split available.",
+      ])}
+    </div>
+    <div class="drawer-two-col">
+      <div>
+        <div class="drill-sub-title">Category concentration</div>
+        ${buildBreakdownRows(catRows, { empty: "No category concentration available." })}
+      </div>
+      <div>
+        <div class="drill-sub-title">Channel mix</div>
+        ${buildBreakdownRows(channelRows, { empty: "No channel mix available." })}
+      </div>
+    </div>
+    <div class="drill-sub-title">Top issues</div>
+    <div class="drill-issue-list">${issueRows || `<div class="empty-state">No issue data available.</div>`}</div>
+    ${models.length ? `
+    <div class="drill-sub-title">Model breakdown for ${esc(productFamily)}</div>
+    <div class="drill-model-header">
+      <div>Model</div><div></div>
+      <div style="text-align:right">Tickets</div>
+      <div style="text-align:right">Repair %</div>
+      <div style="text-align:right">Bot %</div>
+    </div>
+    <div class="drill-model-list">${modelRows}</div>` : ""}
+    ${cloudHtml ? `
+    <div class="drill-sub-title">Signal cloud</div>
+    <div class="word-cloud">${cloudHtml}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">Word size reflects ticket concentration across issue signals.</div>` : ""}
+    <div class="drill-action">
+      <button class="btn-primary" data-action="filter-product" data-product="${esc(productFamily)}">Filter dashboard to ${esc(productFamily)}</button>
+    </div>`;
+}
+
 async function openChannelDrawer(channel, count, share) {
-  const CHAN_COLORS = { "Chat": "#3b82f6", "Phone": "#a78bfa", "Email": "#22c55e", "WhatsApp": "#f59e0b", "Web": "#06b6d4", "Others": "#64748b" };
+  const CHAN_COLORS = { "Chat": "#2a5580", "Phone": "#5a3875", "Email": "#2a6b50", "WhatsApp": "#7a5218", "Web": "#226060", "Others": "#5c5248" };
   openDrawer(`${channel} - Channel Analysis`, drawerLoadingHtml("Loading channel breakdown..."));
   try {
     const payload = await fetchScopedDashboard({ channels: [channel] });
@@ -1917,9 +2177,9 @@ async function openChannelDrawer(channel, count, share) {
     els.drawerContent.innerHTML = `
       <div class="drill-kpi-row">
         <div class="drill-kpi"><div class="dk-val">${fmtNum(kpis.total_tickets?.value || count)}</div><div class="dk-lbl">Tickets</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:#ef4444">${fmtPct(kpis.repair_field_visit_rate?.value || 0)}</div><div class="dk-lbl">Repair %</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:#f59e0b">${fmtPct(kpis.repeat_rate?.value || 0)}</div><div class="dk-lbl">Repeat %</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:${CHAN_COLORS[channel] || "#22c55e"}">${fmtPct(Number(share))}</div><div class="dk-lbl">Share of volume</div></div>
+        <div class="drill-kpi"><div class="dk-val" style="color:#8a3520">${fmtPct(kpis.repair_field_visit_rate?.value || 0)}</div><div class="dk-lbl">Repair %</div></div>
+        <div class="drill-kpi"><div class="dk-val" style="color:#7a5218">${fmtPct(kpis.repeat_rate?.value || 0)}</div><div class="dk-lbl">Repeat %</div></div>
+        <div class="drill-kpi"><div class="dk-val" style="color:${CHAN_COLORS[channel] || "#1f6645"}">${fmtPct(Number(share))}</div><div class="dk-lbl">Share of volume</div></div>
       </div>
 
       <div class="insight-grid">
@@ -1978,12 +2238,20 @@ async function fetchPeriodBreakdown(startDate, endDate) {
   if (state.filters.channels.length) params.set("channels", state.filters.channels.join(","));
   if (state.filters.bot_actions.length) params.set("bot_actions", state.filters.bot_actions.join(","));
   if (state.filters.quick_exclusions.length) params.set("quick_exclusions", state.filters.quick_exclusions.join(","));
-  return fetchJson(`${state.apiBase}/api/period-breakdown?${params}`, { timeoutMs: 25000 });
+  // Try v2 first — handles all filters via SQL, no source-mode recomputation.
+  try {
+    return await fetchJson(`${state.apiBase}/api/v2/period-breakdown?${params}`, { timeoutMs: 15000 });
+  } catch {
+    return fetchJson(`${state.apiBase}/api/period-breakdown?${params}`, { timeoutMs: 25000 });
+  }
 }
 
-async function fetchJson(url, { timeoutMs = 15000 } = {}) {
+async function fetchJson(url, { timeoutMs = 15000, signal = null } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  // Chain external cancellation signal so aborting the caller also cancels this fetch.
+  const onCancel = () => controller.abort();
+  signal?.addEventListener("abort", onCancel);
   try {
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) throw new Error(`API ${res.status}`);
@@ -1995,6 +2263,7 @@ async function fetchJson(url, { timeoutMs = 15000 } = {}) {
     throw err;
   } finally {
     clearTimeout(timeout);
+    signal?.removeEventListener("abort", onCancel);
   }
 }
 
@@ -2058,7 +2327,7 @@ async function openWeekDrawer(weekKey, weekLabel, ds) {
   const allBucketed = bucketTimeline(state.payload?.timeline || [], state.filters.date_preset);
   const avgT = allBucketed.length > 0 ? Math.round(allBucketed.reduce((s, b) => s + b.tickets, 0) / allBucketed.length) : 0;
   const diff = avgT > 0 ? ((total - avgT) / avgT * 100).toFixed(0) : null;
-  const diffColor = diff > 0 ? "#ef4444" : "#22c55e";
+  const diffColor = diff > 0 ? "#b5300a" : "#1f6645";
 
   const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
   const W2 = 340, H2 = 88, padL2 = 8, padR2 = 8, padT2 = 20, padB2 = 18;
@@ -2072,9 +2341,9 @@ async function openWeekDrawer(weekKey, weekLabel, ds) {
     const y = H2 - padB2 - bH;
     const dt = new Date(p.date + "T00:00:00");
     const dayLbl = DAYS[(dt.getDay() + 6) % 7];
-    return `<rect x="${cx - bW2/2}" y="${y}" width="${bW2}" height="${bH}" fill="#3b82f6" rx="2" opacity="0.85"/>
-      <text x="${cx}" y="${H2 - 4}" text-anchor="middle" font-size="8" fill="#4a5568">${dayLbl}</text>
-      <text x="${cx}" y="${y - 3}" text-anchor="middle" font-size="7.5" fill="#64748b">${fmtNum(v)}</text>`;
+    return `<rect x="${cx - bW2/2}" y="${y}" width="${bW2}" height="${bH}" fill="#1e4f82" rx="2" opacity="0.85"/>
+      <text x="${cx}" y="${H2 - 4}" text-anchor="middle" font-size="8" fill="#6b6659">${dayLbl}</text>
+      <text x="${cx}" y="${y - 3}" text-anchor="middle" font-size="7.5" fill="#8a8070">${fmtNum(v)}</text>`;
   }).join("");
 
   const start = new Date(weekKey + "T00:00:00");
@@ -2083,7 +2352,21 @@ async function openWeekDrawer(weekKey, weekLabel, ds) {
   const startDate = start.toISOString().slice(0, 10);
   const endDate = end.toISOString().slice(0, 10);
 
-  openDrawer(`${isWeekly ? "Week: " : ""}${weekLabel}`, drawerLoadingHtml("Loading period breakdown..."));
+  openDrawer(`${isWeekly ? "Week: " : ""}${weekLabel}`, `
+    <div class="drawer-report-header">
+      <div class="briefing-label">Period Brief</div>
+      <div class="drawer-report-title">${isWeekly ? "Weekly" : "Daily"} operating view for ${esc(weekLabel)}</div>
+      <div class="drawer-report-copy">
+        ${fmtNum(total)} tickets in this period.${diff !== null ? ` This is ${diff > 0 ? "above" : "below"} the run-rate by ${Math.abs(Number(diff))}%.` : ""}
+      </div>
+    </div>
+    <div class="drill-kpi-row">
+      <div class="drill-kpi"><div class="dk-val">${fmtNum(total)}</div><div class="dk-lbl">Total tickets</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#8a3520">${fmtPct(total > 0 ? repair / total : 0)}</div><div class="dk-lbl">Repair visit %</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#7a5218">${fmtPct(total > 0 ? install / total : 0)}</div><div class="dk-lbl">Installation %</div></div>
+      <div class="drill-kpi"><div class="dk-val" style="color:#2a6b50">${fmtPct(total > 0 ? botN / total : 0)}</div><div class="dk-lbl">Bot resolved %</div></div>
+    </div>
+    <div class="drawer-inline-loader">${drawerLoadingHtml("Loading period breakdown...")}</div>`);
   try {
     const periodPayload = await fetchPeriodBreakdown(startDate, endDate);
     const scopedKpis = periodPayload.kpis || {};
@@ -2103,23 +2386,33 @@ async function openWeekDrawer(weekKey, weekLabel, ds) {
 
     els.drawerTitle.textContent = `${isWeekly ? "Week: " : ""}${weekLabel}`;
     els.drawerContent.innerHTML = `
+      <div class="drawer-report-header">
+        <div class="briefing-label">Period Brief</div>
+        <div class="drawer-report-title">${isWeekly ? "Weekly" : "Daily"} operating view for ${esc(weekLabel)}</div>
+        <div class="drawer-report-copy">
+          ${diff !== null
+            ? `${fmtNum(scopedKpis.total_tickets?.value || total)} tickets in this period, ${diff > 0 ? "above" : "below"} the run-rate by ${Math.abs(Number(diff))}% versus the selected-window average.`
+            : `${fmtNum(scopedKpis.total_tickets?.value || total)} tickets in this period.`}
+          ${categories[0] ? ` ${categories[0].label} is the largest issue category in this slice.` : ""}
+        </div>
+      </div>
       <div class="drill-kpi-row">
         <div class="drill-kpi"><div class="dk-val">${fmtNum(scopedKpis.total_tickets?.value || total)}</div><div class="dk-lbl">Total tickets</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:#ef4444">${fmtPct(scopedKpis.repair_field_visit_rate?.value || (total > 0 ? repair / total : 0))}</div><div class="dk-lbl">Repair visit %</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:#f59e0b">${fmtPct(scopedKpis.installation_field_visit_rate?.value || (total > 0 ? install / total : 0))}</div><div class="dk-lbl">Installation %</div></div>
-        <div class="drill-kpi"><div class="dk-val" style="color:#22c55e">${fmtPct(scopedKpis.bot_deflection_rate?.value || (total > 0 ? botN / total : 0))}</div><div class="dk-lbl">Bot resolved %</div></div>
+        <div class="drill-kpi"><div class="dk-val" style="color:#8a3520">${fmtPct(scopedKpis.repair_field_visit_rate?.value || (total > 0 ? repair / total : 0))}</div><div class="dk-lbl">Repair visit %</div></div>
+        <div class="drill-kpi"><div class="dk-val" style="color:#7a5218">${fmtPct(scopedKpis.installation_field_visit_rate?.value || (total > 0 ? install / total : 0))}</div><div class="dk-lbl">Installation %</div></div>
+        <div class="drill-kpi"><div class="dk-val" style="color:#2a6b50">${fmtPct(scopedKpis.bot_deflection_rate?.value || (total > 0 ? botN / total : 0))}</div><div class="dk-lbl">Bot resolved %</div></div>
       </div>
       ${diff !== null ? `<div class="drill-vs">vs period average: <strong style="color:${diffColor}">${diff > 0 ? "+" : ""}${diff}%</strong> tickets &nbsp;(period avg: ${fmtNum(avgT)} / ${isWeekly ? "week" : "day"})</div>` : ""}
       ${isWeekly && points.length > 1 ? `
-        <div class="drill-sub-title">Day-by-day breakdown</div>
+        <div class="drill-sub-title">Within-period pattern</div>
         <svg viewBox="0 0 ${W2} ${H2}" style="width:100%;height:${H2}px;max-width:420px">${dailyBars}</svg>` : ""}
       <div class="drawer-two-col">
         <div>
-          <div class="drill-sub-title">Top products in selected period</div>
+          <div class="drill-sub-title">Product concentration</div>
           ${buildBreakdownRows(scopedProducts, { empty: "No product mix available." })}
         </div>
         <div>
-          <div class="drill-sub-title">Issue category cloud</div>
+          <div class="drill-sub-title">Category concentration</div>
           <div data-role="period-category-cloud">${buildCategoryCloud(categories, selectedCategory)}</div>
         </div>
       </div>

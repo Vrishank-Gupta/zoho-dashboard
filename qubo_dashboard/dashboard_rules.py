@@ -8,6 +8,10 @@ from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RULES_DIR = BASE_DIR / "config" / "dashboard_rules"
+RULE_FILES = (
+    RULES_DIR / "installation_combos.jsonc",
+    RULES_DIR / "sales_marketing_fc2.jsonc",
+)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -56,3 +60,14 @@ def load_sales_marketing_rules() -> list[str]:
         if value:
             rules.append(value)
     return rules
+
+
+def get_rules_signature() -> str:
+    parts: list[str] = []
+    for path in RULE_FILES:
+        try:
+            stat = path.stat()
+            parts.append(f"{path.name}:{stat.st_mtime_ns}:{stat.st_size}")
+        except FileNotFoundError:
+            parts.append(f"{path.name}:missing")
+    return "|".join(parts)
