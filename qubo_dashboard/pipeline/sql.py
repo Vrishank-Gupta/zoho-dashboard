@@ -2,6 +2,33 @@ from __future__ import annotations
 
 
 CREATE_TABLE_STATEMENTS = {
+    "raw_ticket_cache": """
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            ticket_id VARCHAR(100) NOT NULL PRIMARY KEY,
+            created_at DATETIME NOT NULL,
+            closed_at DATETIME NULL,
+            department_name VARCHAR(255) NULL,
+            channel VARCHAR(255) NULL,
+            email VARCHAR(255) NULL,
+            mobile VARCHAR(255) NULL,
+            phone VARCHAR(255) NULL,
+            name VARCHAR(255) NULL,
+            product VARCHAR(255) NULL,
+            device_model VARCHAR(255) NULL,
+            fault_code VARCHAR(255) NULL,
+            fault_code_level_1 VARCHAR(255) NULL,
+            fault_code_level_2 VARCHAR(255) NULL,
+            resolution_code_level_1 VARCHAR(255) NULL,
+            bot_action VARCHAR(255) NULL,
+            software_version VARCHAR(255) NULL,
+            device_serial_number VARCHAR(255) NULL,
+            number_of_reopen VARCHAR(100) NULL,
+            symptom TEXT NULL,
+            defect TEXT NULL,
+            repair TEXT NULL,
+            INDEX idx_created_at (created_at)
+        )
+    """,
     "agg_daily_tickets": """
         CREATE TABLE IF NOT EXISTS {table_name} (
             metric_date DATE NOT NULL,
@@ -18,11 +45,10 @@ CREATE_TABLE_STATEMENTS = {
             bot_deflection_rate DOUBLE NOT NULL,
             bot_transfer_rate DOUBLE NOT NULL,
             blank_chat_rate DOUBLE NOT NULL,
-            fcr_rate DOUBLE NOT NULL,
             repeat_rate DOUBLE NOT NULL,
             logistics_rate DOUBLE NOT NULL,
             handle_time_hours DOUBLE NOT NULL,
-            young_device_rate DOUBLE NOT NULL
+            cancelled_existing_ticket_rate DOUBLE NOT NULL
         )
     """,
     "agg_fc_weekly": """
@@ -39,7 +65,6 @@ CREATE_TABLE_STATEMENTS = {
             bot_deflection_rate DOUBLE NOT NULL,
             bot_transfer_rate DOUBLE NOT NULL,
             blank_chat_rate DOUBLE NOT NULL,
-            fcr_rate DOUBLE NOT NULL,
             logistics_rate DOUBLE NOT NULL,
             top_symptom VARCHAR(255) NOT NULL,
             top_defect VARCHAR(255) NOT NULL,
@@ -66,7 +91,6 @@ CREATE_TABLE_STATEMENTS = {
             product_family VARCHAR(100) NOT NULL,
             resolution_code_level_1 VARCHAR(150) NOT NULL,
             tickets INT NOT NULL,
-            fcr_rate DOUBLE NOT NULL,
             bot_deflection_rate DOUBLE NOT NULL,
             bot_transfer_rate DOUBLE NOT NULL,
             blank_chat_rate DOUBLE NOT NULL,
@@ -79,7 +103,6 @@ CREATE_TABLE_STATEMENTS = {
             channel VARCHAR(100) NOT NULL,
             department_name VARCHAR(100) NOT NULL,
             tickets INT NOT NULL,
-            fcr_rate DOUBLE NOT NULL,
             bot_deflection_rate DOUBLE NOT NULL,
             bot_transfer_rate DOUBLE NOT NULL,
             blank_chat_rate DOUBLE NOT NULL,
@@ -110,6 +133,7 @@ CREATE_TABLE_STATEMENTS = {
             bot_resolved_tickets INT NOT NULL,
             bot_transferred_tickets INT NOT NULL,
             blank_chat_tickets INT NOT NULL,
+            cancelled_existing_ticket_tickets INT NOT NULL,
             blank_chat_returned_7d INT NOT NULL,
             blank_chat_resolved_7d INT NOT NULL,
             blank_chat_transferred_7d INT NOT NULL,
@@ -119,7 +143,8 @@ CREATE_TABLE_STATEMENTS = {
             blank_chat_repeat_rate DOUBLE NOT NULL,
             bot_resolved_rate DOUBLE NOT NULL,
             bot_transferred_rate DOUBLE NOT NULL,
-            blank_chat_rate DOUBLE NOT NULL
+            blank_chat_rate DOUBLE NOT NULL,
+            cancelled_existing_ticket_rate DOUBLE NOT NULL
         )
     """,
     "agg_voc_mismatch": """
@@ -148,8 +173,7 @@ CREATE_TABLE_STATEMENTS = {
             health_score DOUBLE NOT NULL,
             repair_field_rate DOUBLE NOT NULL,
             repeat_rate DOUBLE NOT NULL,
-            bot_deflection_rate DOUBLE NOT NULL,
-            fcr_rate DOUBLE NOT NULL
+            bot_deflection_rate DOUBLE NOT NULL
         )
     """,
     "agg_data_quality": """
@@ -167,6 +191,18 @@ CREATE_TABLE_STATEMENTS = {
             missing_issue_outside_bot_tickets INT NOT NULL,
             dirty_channel_tickets INT NOT NULL,
             email_department_reassigned_tickets INT NOT NULL
+        )
+    """,
+    "agg_model_breakdown": """
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            product_family VARCHAR(100) NOT NULL,
+            canonical_model VARCHAR(150) NOT NULL,
+            tickets INT NOT NULL,
+            repair_field_visit_rate DOUBLE NOT NULL,
+            repeat_rate DOUBLE NOT NULL,
+            bot_deflection_rate DOUBLE NOT NULL,
+            bot_transfer_rate DOUBLE NOT NULL,
+            blank_chat_rate DOUBLE NOT NULL
         )
     """,
     "pipeline_log": """

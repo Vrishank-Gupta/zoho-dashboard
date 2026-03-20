@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from .config import settings
+from .cleaning import normalize_fault_code
+from .dashboard_rules import load_installation_combos, load_sales_marketing_rules
 from .models import DashboardFilters
+from .pipeline.transforms import build_ticket_facts, build_aggregates
 from .repository import TicketRepository
 
 
@@ -24,7 +27,6 @@ class AggregateIssue:
     bot_deflection_rate: float
     bot_transfer_rate: float
     blank_chat_rate: float
-    fcr_rate: float
     logistics_rate: float
     top_symptom: str
     top_defect: str
@@ -60,14 +62,16 @@ class AggregateIssue:
 class AnalyticsService:
     def __init__(self, repository: TicketRepository) -> None:
         self._repository = repository
+        self._source_facts_cache: tuple[list[Any], date] | None = None
 
     def build_dashboard(self, filters: DashboardFilters) -> dict[str, Any]:
-        if settings.has_agg_database:
-            try:
-                return self._build_from_agg(filters)
-            except Exception:
-                pass
-        return self._build_seeded(filters)
+        if self._needs_source_mode(filters):
+            if not settings.has_zoho_database:
+                raise RuntimeError("Source database is not configured for bot-action or model filtering.")
+            return self._build_from_source(filters)
+        if not settings.has_agg_database:
+            raise RuntimeError("Aggregate database is not configured. Run the pipeline first.")
+        return self._build_from_agg(filters)
 
     def get_issue_tickets(self, filters: DashboardFilters, issue_id: str) -> dict[str, Any]:
         dashboard = self.build_dashboard(filters)
@@ -112,7 +116,6 @@ class AnalyticsService:
                     "symptom": ticket.symptom or "Unknown",
                     "defect": ticket.defect or "Unknown",
                     "repair": ticket.repair or "Unknown",
-                    "device_age_days": ticket.device_age_days,
                 }
                 for ticket in tickets
             ],
@@ -120,6 +123,142 @@ class AnalyticsService:
 
     def search_tickets(self, filters: DashboardFilters, query: str = "") -> list[dict[str, Any]]:
         return []
+
+    def get_period_breakdown(self, filters: DashboardFilters, start_date: date, end_date: date) -> dict[str, Any]:
+        if self._needs_source_mode(filters):
+            if not settings.has_zoho_database:
+                raise RuntimeError("Source database is not configured for bot-action or model filtering.")
+            return self._build_period_from_source(filters, start_date, end_date)
+        if not settings.has_agg_database:
+            raise RuntimeError("Aggregate database is not configured. Run the pipeline first.")
+        connection = self._repository.open_agg_connection()
+        cursor = connection.cursor(dictionary=True)
+        current_rows = self._query_dicts(
+            cursor,
+            f"SELECT * FROM {settings.agg_daily_tickets_table} WHERE metric_date BETWEEN %s AND %s",
+            (start_date, end_date),
+        )
+        days = max((end_date - start_date).days + 1, 1)
+        prev_end = start_date - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=days - 1)
+        previous_rows = self._query_dicts(
+            cursor,
+            f"SELECT * FROM {settings.agg_daily_tickets_table} WHERE metric_date BETWEEN %s AND %s",
+            (prev_start, prev_end),
+        )
+        cursor.close()
+        connection.close()
+
+        current_rows = [row for row in current_rows if self._matches_filters(row, filters)]
+        previous_rows = [row for row in previous_rows if self._matches_filters(row, filters)]
+
+        return {
+            "kpis": self._agg_kpis(current_rows, previous_rows),
+            "timeline": self._agg_timeline(current_rows),
+            "products": self._agg_products(current_rows),
+            "categories": self._agg_period_categories(current_rows),
+            "fc2_by_category": self._agg_period_fc2(current_rows),
+            "period": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "days": days,
+            },
+        }
+
+    def _needs_source_mode(self, filters: DashboardFilters) -> bool:
+        return bool(filters.bot_actions or filters.models or filters.quick_exclusions)
+
+    def _build_from_source(self, filters: DashboardFilters) -> dict[str, Any]:
+        facts = self._get_source_facts()
+        if not facts:
+            return self._empty_dashboard(filters, "mysql")
+        latest = max(item.ticket.created_at.date() for item in facts)
+        start_date = self._window_start(latest, filters.date_preset)
+        previous_start = start_date - (latest - start_date) - timedelta(days=1)
+
+        current_facts = [item for item in facts if start_date <= item.ticket.created_at.date() <= latest]
+        previous_facts = [item for item in facts if previous_start <= item.ticket.created_at.date() < start_date]
+        raw_current_facts = current_facts
+        current_facts = [item for item in current_facts if self._ticket_matches_filters(item.ticket, filters)]
+        previous_facts = [item for item in previous_facts if self._ticket_matches_filters(item.ticket, filters)]
+        issue_window_facts = [item for item in facts if previous_start <= item.ticket.created_at.date() <= latest and self._ticket_matches_filters(item.ticket, filters)]
+
+        current_aggs = build_aggregates(current_facts)
+        issue_aggs = build_aggregates(issue_window_facts)
+        previous_aggs = build_aggregates(previous_facts)
+        products = self._agg_products(current_aggs["agg_daily_tickets"])
+        issues = self._agg_issues(issue_aggs["agg_fc_weekly"], start_date)
+        model_breakdown = self._agg_model_breakdown(current_aggs["agg_model_breakdown"])
+        filter_options = self._source_filter_options(raw_current_facts)
+        pipeline_health = self._pipeline_health_from_agg_if_available()
+        cleaning_summary = self._agg_data_quality_summary(current_facts)
+        bot_summary = self._agg_bot_summary(current_aggs["agg_bot"], issues)
+
+        return {
+            "meta": {
+                "source_mode": "mysql",
+                "ticket_count": self._agg_kpis(current_aggs["agg_daily_tickets"], previous_aggs["agg_daily_tickets"])["total_tickets"]["value"],
+                "channel_filter": ",".join(filters.channels),
+                "data_confidence_note": "Dashboard is reading source tickets for bot-action/model filters.",
+                "warehouse_mode": True,
+                "dataset_scope": "Source-backed filtered view",
+                "pipeline_status": {
+                    "last_successful_run": pipeline_health["last_run_at"],
+                    "duration_minutes": pipeline_health["duration_minutes"],
+                    "status": pipeline_health["status"],
+                },
+            },
+            "filters": asdict(filters),
+            "kpis": self._agg_kpis(current_aggs["agg_daily_tickets"], previous_aggs["agg_daily_tickets"]),
+            "executive_summary": self._executive_summary(issues, products),
+            "top_concerns": [self._issue_payload(item) for item in issues[:8]],
+            "improving_signals": [self._issue_payload(item) for item in sorted(issues, key=lambda item: (item.bot_deflection_rate, -(item.volume - item.previous_volume)), reverse=True)[:4]],
+            "action_queue": self._action_queue(issues),
+            "issue_views": self._agg_issue_views(issues),
+            "timeline": self._agg_timeline(current_aggs["agg_daily_tickets"]),
+            "product_health": products,
+            "model_breakdown": model_breakdown,
+            "version_risks": self._agg_versions(current_aggs["agg_sw_version"]),
+            "service_ops": self._agg_service_ops(current_aggs["agg_daily_tickets"], current_aggs["agg_channel"], current_aggs["agg_resolution"]),
+            "bot_summary": bot_summary,
+            "cleaning_summary": cleaning_summary,
+            "pipeline_health": pipeline_health,
+            "filter_options": filter_options,
+        }
+
+    def _build_period_from_source(self, filters: DashboardFilters, start_date: date, end_date: date) -> dict[str, Any]:
+        facts = self._get_source_facts()
+        days = max((end_date - start_date).days + 1, 1)
+        prev_end = start_date - timedelta(days=1)
+        prev_start = prev_end - timedelta(days=days - 1)
+        current_facts = [item for item in facts if start_date <= item.ticket.created_at.date() <= end_date and self._ticket_matches_filters(item.ticket, filters)]
+        previous_facts = [item for item in facts if prev_start <= item.ticket.created_at.date() <= prev_end and self._ticket_matches_filters(item.ticket, filters)]
+        current_aggs = build_aggregates(current_facts)
+        previous_aggs = build_aggregates(previous_facts)
+        return {
+            "kpis": self._agg_kpis(current_aggs["agg_daily_tickets"], previous_aggs["agg_daily_tickets"]),
+            "timeline": self._agg_timeline(current_aggs["agg_daily_tickets"]),
+            "products": self._agg_products(current_aggs["agg_daily_tickets"]),
+            "categories": self._agg_period_categories(current_aggs["agg_daily_tickets"]),
+            "fc2_by_category": self._agg_period_fc2(current_aggs["agg_daily_tickets"]),
+            "period": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat(), "days": days},
+        }
+
+    def _get_source_facts(self):
+        today = date.today()
+        if self._source_facts_cache and self._source_facts_cache[1] == today:
+            return self._source_facts_cache[0]
+        # Source-backed filters should read from the local raw-ticket cache first.
+        # Falling back to Zoho here makes quick filters and drilldowns feel broken.
+        try:
+            tickets = self._repository.fetch_cached_tickets()
+        except Exception:
+            tickets = []
+        if not tickets:
+            tickets = self._repository.fetch_tickets()
+        facts = build_ticket_facts(tickets)
+        self._source_facts_cache = (facts, today)
+        return facts
 
     def _build_from_agg(self, filters: DashboardFilters) -> dict[str, Any]:
         connection = self._repository.open_agg_connection()
@@ -137,8 +276,17 @@ class AnalyticsService:
         bot_rows = self._query_dicts(cursor, f"SELECT * FROM {settings.agg_bot_table}")
         data_quality_rows = self._query_dicts(cursor, f"SELECT * FROM {settings.agg_data_quality_table} ORDER BY as_of_date DESC LIMIT 1")
         pipeline_rows = self._query_dicts(cursor, f"SELECT * FROM {settings.pipeline_log_table} ORDER BY run_started_at DESC LIMIT 5")
+        try:
+            model_rows = self._query_dicts(cursor, f"SELECT * FROM {settings.agg_model_breakdown_table}")
+        except Exception:
+            model_rows = []
         cursor.close()
         connection.close()
+
+        # Keep raw rows for filter_options (always show full option lists)
+        raw_weekly_rows = weekly_rows
+        raw_channel_rows = channel_rows
+        raw_daily_rows = daily_rows
 
         daily_rows = [row for row in daily_rows if self._matches_filters(row, filters)]
         previous_daily_rows = [row for row in previous_daily_rows if self._matches_filters(row, filters)]
@@ -146,23 +294,27 @@ class AnalyticsService:
         version_rows = [row for row in version_rows if self._matches_filters(row, filters)]
         resolution_rows = [row for row in resolution_rows if self._matches_filters(row, filters)]
         channel_rows = [row for row in channel_rows if self._matches_filters(row, filters)]
-        bot_rows = [row for row in bot_rows if filters.product == "All" or row.get("product_family") in {filters.product, "All Chat"}]
+        products_set = set(filters.products)
+        bot_rows = [row for row in bot_rows if not filters.products or row.get("product_family") in products_set | {"All Chat"}]
+        model_rows = [row for row in model_rows if not filters.products or row.get("product_family") in products_set]
 
         kpis = self._agg_kpis(daily_rows, previous_daily_rows)
         issues = self._agg_issues(weekly_rows, start_date)
         products = self._agg_products(daily_rows)
         versions = self._agg_versions(version_rows)
-        filter_options = self._agg_filter_options(daily_rows, weekly_rows, channel_rows, products)
+        all_products = self._agg_products(raw_daily_rows)
+        filter_options = self._agg_filter_options(raw_weekly_rows, all_products, raw_channel_rows, model_rows)
         pipeline_health = self._agg_pipeline_health(pipeline_rows)
         cleaning_summary = self._agg_cleaning_summary(data_quality_rows)
         issue_views = self._agg_issue_views(issues)
         bot_summary = self._agg_bot_summary(bot_rows, issues)
+        model_breakdown = self._agg_model_breakdown(model_rows)
 
         return {
             "meta": {
                 "source_mode": "mysql",
                 "ticket_count": kpis["total_tickets"]["value"],
-                "historical_mode": filters.history_mode,
+                "channel_filter": ",".join(filters.channels),
                 "data_confidence_note": "Dashboard is reading local aggregate tables refreshed by the pipeline.",
                 "warehouse_mode": True,
                 "dataset_scope": "Local aggregate warehouse",
@@ -181,44 +333,13 @@ class AnalyticsService:
             "issue_views": issue_views,
             "timeline": self._agg_timeline(daily_rows),
             "product_health": products,
+            "model_breakdown": model_breakdown,
             "version_risks": versions,
             "service_ops": self._agg_service_ops(daily_rows, channel_rows, resolution_rows),
             "bot_summary": bot_summary,
             "cleaning_summary": cleaning_summary,
             "pipeline_health": pipeline_health,
             "filter_options": filter_options,
-        }
-
-    def _build_seeded(self, filters: DashboardFilters) -> dict[str, Any]:
-        issues = self._seeded_issues(filters)
-        products = self._seeded_products(issues)
-        versions = self._seeded_versions(issues)
-        kpis = self._seeded_kpis(issues)
-        return {
-            "meta": {
-                "source_mode": "sample",
-                "ticket_count": kpis["total_tickets"]["value"],
-                "historical_mode": filters.history_mode,
-                "data_confidence_note": "Sample aggregate data is being used because the local aggregate DB is not configured or not readable.",
-                "warehouse_mode": False,
-                "dataset_scope": "Seeded sample aggregates",
-                "pipeline_status": {"last_successful_run": "N/A", "duration_minutes": 0, "status": "Sample"},
-            },
-            "filters": asdict(filters),
-            "kpis": kpis,
-            "executive_summary": self._executive_summary(issues, products),
-            "top_concerns": [self._issue_payload(item) for item in issues[:8]],
-            "improving_signals": [self._issue_payload(item) for item in sorted(issues, key=lambda item: item.bot_deflection_rate, reverse=True)[:4]],
-            "action_queue": self._action_queue(issues),
-            "issue_views": self._seeded_issue_views(issues),
-            "timeline": self._seeded_timeline(filters),
-            "product_health": products,
-            "version_risks": versions,
-            "service_ops": self._seeded_service_ops(),
-            "bot_summary": self._seeded_bot_summary(),
-            "cleaning_summary": self._seeded_cleaning_summary(),
-            "pipeline_health": self._seeded_pipeline_health(),
-            "filter_options": self._seeded_filter_options(),
         }
 
     def _agg_kpis(self, current: list[dict[str, Any]], previous: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
@@ -237,14 +358,14 @@ class AnalyticsService:
         repair = weighted(current, "repair_field_visit_rate")
         install = weighted(current, "installation_field_visit_rate")
         bot = weighted(current, "bot_deflection_rate")
-        fcr = weighted(current, "fcr_rate")
+        bot_transfer = weighted(current, "bot_transfer_rate")
         repeat = weighted(current, "repeat_rate")
         logistics = weighted(current, "logistics_rate")
         field_total = weighted(current, "field_visit_rate")
         prev_repair = weighted(previous, "repair_field_visit_rate")
         prev_install = weighted(previous, "installation_field_visit_rate")
         prev_bot = weighted(previous, "bot_deflection_rate")
-        prev_fcr = weighted(previous, "fcr_rate")
+        prev_bot_transfer = weighted(previous, "bot_transfer_rate")
         prev_repeat = weighted(previous, "repeat_rate")
         prev_logistics = weighted(previous, "logistics_rate")
         prev_field_total = weighted(previous, "field_visit_rate")
@@ -254,7 +375,7 @@ class AnalyticsService:
             "repair_field_visit_rate": {"value": repair, "change": change(repair, prev_repair)},
             "installation_field_visit_rate": {"value": install, "change": change(install, prev_install)},
             "bot_deflection_rate": {"value": bot, "change": change(bot, prev_bot)},
-            "fcr": {"value": fcr, "change": change(fcr, prev_fcr)},
+            "bot_transfer_rate": {"value": bot_transfer, "change": change(bot_transfer, prev_bot_transfer)},
             "repeat_rate": {"value": repeat, "change": change(repeat, prev_repeat)},
             "logistics_rate": {"value": logistics, "change": change(logistics, prev_logistics)},
         }
@@ -269,7 +390,6 @@ class AnalyticsService:
             "bot_rate_num": 0.0,
             "transfer_rate_num": 0.0,
             "blank_chat_rate_num": 0.0,
-            "fcr_rate_num": 0.0,
             "logistics_rate_num": 0.0,
             "tickets_num": 0,
             "symptom": "",
@@ -296,7 +416,6 @@ class AnalyticsService:
             bucket["bot_rate_num"] += tickets * float(row.get("bot_deflection_rate", 0) or 0)
             bucket["transfer_rate_num"] += tickets * float(row.get("bot_transfer_rate", 0) or 0)
             bucket["blank_chat_rate_num"] += tickets * float(row.get("blank_chat_rate", 0) or 0)
-            bucket["fcr_rate_num"] += tickets * float(row.get("fcr_rate", 0) or 0)
             bucket["logistics_rate_num"] += tickets * float(row.get("logistics_rate", 0) or 0)
             bucket["tickets_num"] += tickets
             bucket["symptom"] = bucket["symptom"] or row.get("top_symptom") or "Unknown"
@@ -318,7 +437,6 @@ class AnalyticsService:
                 bot_deflection_rate=bucket["bot_rate_num"] / denom,
                 bot_transfer_rate=bucket["transfer_rate_num"] / denom,
                 blank_chat_rate=bucket["blank_chat_rate_num"] / denom,
-                fcr_rate=bucket["fcr_rate_num"] / denom,
                 logistics_rate=bucket["logistics_rate_num"] / denom,
                 top_symptom=bucket["symptom"],
                 top_defect=bucket["defect"],
@@ -362,7 +480,6 @@ class AnalyticsService:
             grouped[product]["install_field_num"] += tickets * float(row.get("installation_field_visit_rate", 0) or 0)
             grouped[product]["repeat_num"] += tickets * float(row.get("repeat_rate", 0) or 0)
             grouped[product]["bot_num"] += tickets * float(row.get("bot_deflection_rate", 0) or 0)
-            grouped[product]["fcr_num"] += tickets * float(row.get("fcr_rate", 0) or 0)
             if product not in top_issue or tickets > top_issue[product][1]:
                 top_issue[product] = (row.get("fault_code_level_2", "Unknown"), tickets)
         products = []
@@ -376,13 +493,33 @@ class AnalyticsService:
                     "installation_field_visit_rate": bucket["install_field_num"] / volume,
                     "repeat_rate": bucket["repeat_num"] / volume,
                     "bot_deflection_rate": bucket["bot_num"] / volume,
-                    "fcr": bucket["fcr_num"] / volume,
                     "top_issue": top_issue.get(product, ("Unknown", 0))[0],
                     "rising_issue": top_issue.get(product, ("Unknown", 0))[0],
                     "service_burden": int(bucket["ticket_volume"] * (1 + (bucket["repair_field_num"] / volume) * 2)),
                 }
             )
         return sorted(products, key=lambda item: item["ticket_volume"], reverse=True)
+
+    def _agg_model_breakdown(self, rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        """Group model rows by product_family, sorted by ticket volume descending."""
+        by_family: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            family = row.get("product_family", "")
+            by_family[family].append(
+                {
+                    "model": row.get("canonical_model", ""),
+                    "tickets": int(row.get("tickets", 0) or 0),
+                    "repair_field_visit_rate": float(row.get("repair_field_visit_rate", 0) or 0),
+                    "repeat_rate": float(row.get("repeat_rate", 0) or 0),
+                    "bot_deflection_rate": float(row.get("bot_deflection_rate", 0) or 0),
+                    "bot_transfer_rate": float(row.get("bot_transfer_rate", 0) or 0),
+                    "blank_chat_rate": float(row.get("blank_chat_rate", 0) or 0),
+                }
+            )
+        return {
+            family: sorted(models, key=lambda m: m["tickets"], reverse=True)
+            for family, models in by_family.items()
+        }
 
     def _agg_versions(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         rows = sorted(rows, key=lambda row: float(row.get("severity_index", 0) or 0), reverse=True)
@@ -399,12 +536,13 @@ class AnalyticsService:
         ]
 
     def _agg_timeline(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        grouped: dict[str, dict[str, int]] = defaultdict(lambda: {"tickets": 0, "repair_field": 0, "bot_resolved": 0})
+        grouped: dict[str, dict[str, int]] = defaultdict(lambda: {"tickets": 0, "repair_field": 0, "install_field": 0, "bot_resolved": 0})
         for row in rows:
             key = str(row["metric_date"])
             tickets = int(row.get("tickets", 0) or 0)
             grouped[key]["tickets"] += tickets
             grouped[key]["repair_field"] += round(tickets * float(row.get("repair_field_visit_rate", 0) or 0))
+            grouped[key]["install_field"] += round(tickets * float(row.get("installation_field_visit_rate", 0) or 0))
             grouped[key]["bot_resolved"] += round(tickets * float(row.get("bot_deflection_rate", 0) or 0))
         return [{"date": key, **grouped[key]} for key in sorted(grouped)]
 
@@ -423,7 +561,7 @@ class AnalyticsService:
 
     def _agg_bot_summary(self, bot_rows: list[dict[str, Any]], issues: list[AggregateIssue]) -> dict[str, Any]:
         overall = next((row for row in bot_rows if row.get("product_family") == "All Chat"), {})
-        products = [row for row in bot_rows if row.get("product_family") not in {"All Chat", "Unknown / Dirty Data", "Other / Accessories", "Logistics / Non-product"}]
+        products = [row for row in bot_rows if row.get("product_family") != "All Chat"]
         products = sorted(products, key=lambda row: int(row.get("chat_tickets", 0) or 0), reverse=True)
         return {
             "overview": {
@@ -431,6 +569,7 @@ class AnalyticsService:
                 "bot_resolved_tickets": int(overall.get("bot_resolved_tickets", 0) or 0),
                 "bot_transferred_tickets": int(overall.get("bot_transferred_tickets", 0) or 0),
                 "blank_chat_tickets": int(overall.get("blank_chat_tickets", 0) or 0),
+                "cancelled_existing_ticket_tickets": int(overall.get("cancelled_existing_ticket_tickets", 0) or 0),
                 "blank_chat_returned_7d": int(overall.get("blank_chat_returned_7d", 0) or 0),
                 "blank_chat_resolved_7d": int(overall.get("blank_chat_resolved_7d", 0) or 0),
                 "blank_chat_blank_again_7d": int(overall.get("blank_chat_blank_again_7d", 0) or 0),
@@ -440,6 +579,7 @@ class AnalyticsService:
                 "bot_resolved_rate": float(overall.get("bot_resolved_rate", 0) or 0),
                 "bot_transferred_rate": float(overall.get("bot_transferred_rate", 0) or 0),
                 "blank_chat_rate": float(overall.get("blank_chat_rate", 0) or 0),
+                "cancelled_existing_ticket_rate": float(overall.get("cancelled_existing_ticket_rate", 0) or 0),
             },
             "by_product": [
                 {
@@ -474,6 +614,65 @@ class AnalyticsService:
             ],
         }
 
+    def _agg_period_categories(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        total = 0.0
+        for row in rows:
+            label = row.get("fault_code") or "Unclassified"
+            tickets = float(row.get("tickets", 0) or 0)
+            grouped[label]["tickets"] += tickets
+            grouped[label]["repair_num"] += tickets * float(row.get("repair_field_visit_rate", 0) or 0)
+            grouped[label]["repeat_num"] += tickets * float(row.get("repeat_rate", 0) or 0)
+            grouped[label]["bot_num"] += tickets * float(row.get("bot_deflection_rate", 0) or 0)
+            total += tickets
+        items = []
+        for label, bucket in grouped.items():
+            volume = bucket["tickets"] or 1.0
+            items.append(
+                {
+                    "label": label,
+                    "count": int(bucket["tickets"]),
+                    "share": (bucket["tickets"] / total) if total else 0.0,
+                    "repair_rate": bucket["repair_num"] / volume,
+                    "repeat_rate": bucket["repeat_num"] / volume,
+                    "bot_rate": bucket["bot_num"] / volume,
+                }
+            )
+        return sorted(items, key=lambda item: item["count"], reverse=True)
+
+    def _agg_period_fc2(self, rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        grouped: dict[str, dict[str, dict[str, float]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+        category_totals: dict[str, float] = defaultdict(float)
+        for row in rows:
+            category = row.get("fault_code") or "Unclassified"
+            fc2 = row.get("fault_code_level_2") or "Unknown"
+            tickets = float(row.get("tickets", 0) or 0)
+            bucket = grouped[category][fc2]
+            bucket["tickets"] += tickets
+            bucket["repair_num"] += tickets * float(row.get("repair_field_visit_rate", 0) or 0)
+            bucket["repeat_num"] += tickets * float(row.get("repeat_rate", 0) or 0)
+            bucket["bot_num"] += tickets * float(row.get("bot_deflection_rate", 0) or 0)
+            category_totals[category] += tickets
+
+        payload: dict[str, list[dict[str, Any]]] = {}
+        for category, fc2_map in grouped.items():
+            total = category_totals[category] or 1.0
+            rows_for_category = []
+            for fc2, bucket in fc2_map.items():
+                volume = bucket["tickets"] or 1.0
+                rows_for_category.append(
+                    {
+                        "label": fc2,
+                        "count": int(bucket["tickets"]),
+                        "share": bucket["tickets"] / total,
+                        "repair_rate": bucket["repair_num"] / volume,
+                        "repeat_rate": bucket["repeat_num"] / volume,
+                        "bot_rate": bucket["bot_num"] / volume,
+                    }
+                )
+            payload[category] = sorted(rows_for_category, key=lambda item: item["count"], reverse=True)
+        return payload
+
     def _agg_cleaning_summary(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         row = rows[0] if rows else {}
         total = int(row.get("total_tickets", 0) or 0)
@@ -502,6 +701,8 @@ class AnalyticsService:
         total = 0
         for row in rows:
             label = row.get(key) or "Unknown"
+            if key == "channel" and label == "WhatsApp":
+                label = "Chat"
             tickets = int(row.get("tickets", 0) or 0)
             grouped[label] += tickets
             total += tickets
@@ -513,10 +714,12 @@ class AnalyticsService:
         bot = round(sum(int(row.get("tickets", 0) or 0) * float(row.get("bot_deflection_rate", 0) or 0) for row in chat_rows))
         blank = round(sum(int(row.get("tickets", 0) or 0) * float(row.get("blank_chat_rate", 0) or 0) for row in chat_rows))
         transferred = round(sum(int(row.get("tickets", 0) or 0) * float(row.get("bot_transfer_rate", 0) or 0) for row in chat_rows))
+        cancelled = round(sum(int(row.get("tickets", 0) or 0) * float(row.get("cancelled_existing_ticket_rate", 0) or 0) for row in chat_rows))
         return [
-            {"label": "Bot transferred to agent", "count": transferred, "share": transferred / total if total else 0.0},
             {"label": "Bot resolved ticket", "count": bot, "share": bot / total if total else 0.0},
-            {"label": "Blank chat after 10 mins", "count": blank, "share": blank / total if total else 0.0},
+            {"label": "Bot transferred to agent", "count": transferred, "share": transferred / total if total else 0.0},
+            {"label": "Blank chat (10 min timeout)", "count": blank, "share": blank / total if total else 0.0},
+            {"label": "Cancelled – existing ticket", "count": cancelled, "share": cancelled / total if total else 0.0},
         ]
 
     def _field_service_split(self, daily_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -532,38 +735,124 @@ class AnalyticsService:
         denom = sum(float(row.get("tickets", 0) or 0) for row in rows)
         return sum(float(row.get("tickets", 0) or 0) * float(row.get(key, 0) or 0) for row in rows) / denom if denom else 0.0
 
-    def _matches_filters(self, row: dict[str, Any], filters: DashboardFilters) -> bool:
-        if filters.product != "All" and row.get("product_family") != filters.product:
+    def _ticket_matches_filters(self, ticket, filters: DashboardFilters) -> bool:
+        if filters.products and ticket.canonical_product not in filters.products:
             return False
-        if filters.issue != "All" and row.get("fault_code") != filters.issue:
+        if filters.models and ticket.canonical_model not in filters.models:
             return False
-        if filters.version != "All" and (row.get("software_version") or "Unknown") != filters.version:
+        if filters.fault_codes and ticket.normalized_fault_code not in filters.fault_codes:
             return False
-        if filters.department != "All":
-            department = row.get("department_name")
-            if department and department != filters.department:
-                return False
-        if not filters.include_hero and row.get("department_name") == "Hero Electronix":
+        if filters.channels and ticket.normalized_channel not in filters.channels:
             return False
-        if not filters.include_dirty:
-            if row.get("product_family") in {"Unknown / Dirty Data", "Other / Accessories", "Logistics / Non-product"}:
+        if filters.bot_actions:
+            ticket_bot_action = self._ticket_bot_action_filter_value(ticket)
+            if ticket_bot_action not in filters.bot_actions:
                 return False
-            if row.get("channel") == "Unknown / Dirty Data":
-                return False
-            if row.get("department_name") == "Unknown / Dirty Data":
-                return False
-            if row.get("fault_code") == "Unclassified":
-                return False
-            if row.get("fault_code_level_2") == "Unclassified":
-                return False
+        if filters.quick_exclusions:
+            fc2 = (ticket.normalized_fault_code_l2 or "").strip().lower()
+            fc = (ticket.normalized_fault_code or "").strip().lower()
+            fc1 = (normalize_fault_code(ticket.fault_code_level_1) or "").strip().lower()
+            raw_bot_action = (ticket.bot_action or "").strip().lower()
+            installation_combos = load_installation_combos()
+            sales_marketing_keywords = load_sales_marketing_rules()
+            for group in filters.quick_exclusions:
+                is_field_department = ticket.normalized_department == "Field Service"
+                if group == "installations" and is_field_department and (("" if fc == "unclassified" else fc), ("" if fc1 == "unclassified" else fc1), ("" if fc2 == "unclassified" else fc2)) in installation_combos:
+                    return False
+                if group == "blank_chat" and raw_bot_action == "blank chat (10 min timeout)":
+                    return False
+                if group == "duplicate_tickets" and raw_bot_action == "cancelled due to existing ticket":
+                    return False
+                if group == "sales_marketing" and any(keyword in fc2 for keyword in sales_marketing_keywords):
+                    return False
         return True
+
+    def _ticket_bot_action_filter_value(self, ticket) -> str:
+        value = (ticket.bot_action or "").strip()
+        if not value or value.lower() in {"-", "0", "null", "none", "nan", "-none-"}:
+            return "Non bot tickets"
+        if "cancelled due to existing ticket" in value.lower():
+            return "Cancelled - existing ticket"
+        return value
+
+    def _matches_filters(self, row: dict[str, Any], filters: DashboardFilters) -> bool:
+        if filters.products and row.get("product_family") not in filters.products:
+            return False
+        if filters.fault_codes and row.get("fault_code") not in filters.fault_codes:
+            return False
+        channel = row.get("channel")
+        if channel == "WhatsApp":
+            channel = "Chat"
+        if filters.channels and channel not in filters.channels:
+            return False
+        return True
+
+    def _source_filter_options(self, current_facts) -> dict[str, Any]:
+        product_counts: dict[str, int] = defaultdict(int)
+        fault_counts: dict[str, int] = defaultdict(int)
+        channel_counts: dict[str, int] = defaultdict(int)
+        bot_counts: dict[str, int] = defaultdict(int)
+        models_by_product: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for item in current_facts:
+            ticket = item.ticket
+            product_counts[ticket.canonical_product] += 1
+            models_by_product[ticket.canonical_product][ticket.canonical_model] += 1
+            fault_counts[ticket.normalized_fault_code] += 1
+            channel_counts[ticket.normalized_channel] += 1
+            bot_counts[self._ticket_bot_action_filter_value(ticket)] += 1
+        return {
+            "products": [label for label, _ in sorted(product_counts.items(), key=lambda item: item[1], reverse=True)],
+            "models_by_product": {
+                product: [label for label, _ in sorted(model_counts.items(), key=lambda item: item[1], reverse=True)]
+                for product, model_counts in models_by_product.items()
+            },
+            "fault_codes": [label for label, _ in sorted(fault_counts.items(), key=lambda item: item[1], reverse=True)],
+            "channels": [label for label, _ in sorted(channel_counts.items(), key=lambda item: item[1], reverse=True)],
+            "bot_actions": [label for label, _ in sorted(bot_counts.items(), key=lambda item: item[1], reverse=True)],
+        }
+
+    def _pipeline_health_from_agg_if_available(self) -> dict[str, Any]:
+        if not settings.has_agg_database:
+            return {"last_run_at": "Unknown", "duration_minutes": 0, "status": "Source mode", "latest_job": "source_filter", "tables": []}
+        connection = self._repository.open_agg_connection()
+        cursor = connection.cursor(dictionary=True)
+        rows = self._query_dicts(cursor, f"SELECT * FROM {settings.pipeline_log_table} ORDER BY run_started_at DESC LIMIT 5")
+        cursor.close()
+        connection.close()
+        return self._agg_pipeline_health(rows)
+
+    def _agg_data_quality_summary(self, current_facts) -> dict[str, Any]:
+        rows = build_aggregates(current_facts)["agg_data_quality"]
+        return self._agg_cleaning_summary(rows)
+
+    def _empty_dashboard(self, filters: DashboardFilters, source_mode: str) -> dict[str, Any]:
+        pipeline_health = self._pipeline_health_from_agg_if_available()
+        return {
+            "meta": {"source_mode": source_mode, "ticket_count": 0, "channel_filter": ",".join(filters.channels), "data_confidence_note": "No data available.", "warehouse_mode": True, "dataset_scope": "Empty", "pipeline_status": {"last_successful_run": pipeline_health["last_run_at"], "duration_minutes": pipeline_health["duration_minutes"], "status": pipeline_health["status"]}},
+            "filters": asdict(filters),
+            "kpis": self._agg_kpis([], []),
+            "executive_summary": {"headline": "CS Dashboard", "summary": "No aggregate data available."},
+            "top_concerns": [],
+            "improving_signals": [],
+            "action_queue": [],
+            "issue_views": self._agg_issue_views([]),
+            "timeline": [],
+            "product_health": [],
+            "model_breakdown": {},
+            "version_risks": [],
+            "service_ops": self._agg_service_ops([], [], []),
+            "bot_summary": self._agg_bot_summary([], []),
+            "cleaning_summary": self._agg_cleaning_summary([]),
+            "pipeline_health": pipeline_health,
+            "filter_options": {"products": [], "models_by_product": {}, "fault_codes": [], "channels": [], "bot_actions": []},
+        }
 
     def _agg_filter_options(
         self,
-        daily_rows: list[dict[str, Any]],
         weekly_rows: list[dict[str, Any]],
-        channel_rows: list[dict[str, Any]],
         products: list[dict[str, Any]],
+        channel_rows: list[dict[str, Any]],
+        model_rows: list[dict[str, Any]] | None = None,
     ) -> dict[str, list[str]]:
         def values(rows: list[dict[str, Any]], key: str, exclude: set[str] | None = None, min_tickets: int = 0) -> list[str]:
             exclude = exclude or set()
@@ -575,11 +864,31 @@ class AnalyticsService:
                 grouped[label] += int(row.get("tickets", 0) or 0)
             return [label for label, _ in sorted(grouped.items(), key=lambda item: item[1], reverse=True) if _ >= min_tickets]
 
+        model_rows = model_rows or []
+        raw_channels = values(channel_rows, "channel", set(), min_tickets=0)
+        merged_channels: list[str] = []
+        for label in raw_channels:
+            normalized = "Chat" if label == "WhatsApp" else label
+            if normalized not in merged_channels:
+                merged_channels.append(normalized)
+        models_by_product: dict[str, list[str]] = defaultdict(list)
+        for row in sorted(model_rows, key=lambda item: int(item.get("tickets", 0) or 0), reverse=True):
+            product = str(row.get("product_family") or "")
+            model = str(row.get("canonical_model") or "")
+            if not product or not model or model in models_by_product[product]:
+                continue
+            models_by_product[product].append(model)
         return {
-            "products": [item["product_family"] for item in products[:10]],
-            "departments": values(channel_rows, "department_name", {"Unknown / Dirty Data", "Email"}),
-            "issues": values(weekly_rows, "fault_code", {"Unclassified"}, min_tickets=500),
-            "versions": values(daily_rows, "software_version", {"Unknown"}),
+            "products": [item["product_family"] for item in products],
+            "models_by_product": dict(models_by_product),
+            "fault_codes": values(weekly_rows, "fault_code", set(), min_tickets=0),
+            "channels": merged_channels,
+            "bot_actions": [
+                "Bot resolved ticket",
+                "Bot transferred to agent",
+                "Blank chat (10 min timeout)",
+                "Cancelled – existing ticket",
+            ],
         }
 
     def _window_start(self, latest: date, preset: str) -> date:
@@ -602,12 +911,12 @@ class AnalyticsService:
 
     def _executive_summary(self, concerns: list[AggregateIssue], products: list[dict[str, Any]]) -> dict[str, str]:
         if not concerns or not products:
-            return {"headline": "Support health", "summary": "No aggregate data available."}
+            return {"headline": "CS Dashboard", "summary": "No aggregate data available."}
         top_issue = concerns[0]
         top_product = products[0]
         return {
             "headline": "CS Snapshot",
-            "summary": f"{top_product['product_family']} is carrying the highest support load. {top_issue.fault_code_level_2} on {top_issue.software_version} is the top engineering signal because it is growing and converting into repair visits. Installation traffic is tracked separately.",
+            "summary": f"{top_product['product_family']} is carrying the highest ticket load. {top_issue.fault_code_level_2} on {top_issue.product_family} is the top signal — it is growing and converting into repair visits.",
         }
 
     def _action_queue(self, concerns: list[AggregateIssue]) -> list[dict[str, str]]:
@@ -633,7 +942,6 @@ class AnalyticsService:
             "installation_field_visit_rate": issue.installation_field_visit_rate,
             "repeat_rate": issue.repeat_rate,
             "bot_deflection_rate": issue.bot_deflection_rate,
-            "fcr_rate": issue.fcr_rate,
             "bot_transfer_rate": issue.bot_transfer_rate,
             "blank_chat_rate": issue.blank_chat_rate,
             "logistics_rate": issue.logistics_rate,
@@ -642,170 +950,4 @@ class AnalyticsService:
             "top_repair": issue.top_repair,
             "insight": issue.insight,
             "composite_risk": issue.composite_risk,
-        }
-
-    def _seeded_issues(self, filters: DashboardFilters) -> list[AggregateIssue]:
-        factor = 0.24 if filters.date_preset == "14d" else 0.5 if filters.date_preset == "30d" else 8.4 if filters.date_preset == "history" else 1.0
-        items = [
-            AggregateIssue("Dash Cam", "Product issue", "Intermittent offline", "DC_5.14.2", round(18240 * factor), round(12860 * factor), 0.22, 0.01, 0.14, 0.09, 0.32, 0.05, 0.42, 0.03, "Device drops offline after ignition cycle", "Firmware reconnect regression", "Reflash firmware and replace power harness"),
-            AggregateIssue("Smart Camera", "Application", "Wi-Fi disconnection", "SC_4.8.0", round(14680 * factor), round(11240 * factor), 0.18, 0.00, 0.11, 0.16, 0.28, 0.04, 0.51, 0.02, "Camera disconnects multiple times a day", "Wi-Fi stack instability", "Reconfigure router band and reinstall app"),
-            AggregateIssue("Smart Camera", "Home Product issue", "Video feed issue", "SC_4.8.0", round(13220 * factor), round(9440 * factor), 0.14, 0.00, 0.10, 0.11, 0.34, 0.03, 0.49, 0.02, "Feed freezes after live view starts", "Encoder process crash", "Firmware rollback and app reinstall"),
-            AggregateIssue("Smart Lock", "Lock Product issue", "Lock pairing issue", "SL_2.2.0", round(8240 * factor), round(6380 * factor), 0.16, 0.00, 0.18, 0.06, 0.42, 0.04, 0.37, 0.04, "Lock visible in app but pairing fails", "BLE authentication timeout", "Reset controller and replace board"),
-            AggregateIssue("Video Doorbell", "Installation", "Installation issue", "VDB_3.1.4", round(9260 * factor), round(10180 * factor), 0.02, 0.31, 0.03, 0.04, 0.38, 0.11, 0.28, 0.00, "Customer cannot complete install flow", "No product defect confirmed", "Technician installation completed"),
-            AggregateIssue("Air Purifier", "Product issue", "Auto restart", "AP_2.0.4", round(5620 * factor), round(3980 * factor), 0.21, 0.00, 0.12, 0.05, 0.31, 0.06, 0.31, 0.07, "Purifier restarts repeatedly under load", "Power board instability", "Replace main PCB"),
-            AggregateIssue("GPS Tracker", "Tracker Product issue", "Weak signal strength", "GT_1.9.7", round(4380 * factor), round(5020 * factor), 0.02, 0.00, 0.05, 0.34, 0.18, 0.03, 0.63, 0.00, "Location updates are delayed", "Environmental coverage issue", "Guided settings change"),
-            AggregateIssue("Dash Cam", "Application", "App not connecting", "APP_9.2.1", round(9840 * factor), round(10120 * factor), 0.04, 0.00, 0.06, 0.29, 0.24, 0.08, 0.61, 0.00, "App cannot bind to camera session", "App SDK token expiry issue", "App cache reset and re-login"),
-            AggregateIssue("Smart Plug", "Product issue", "Dead after use", "SP_1.1.1", round(3180 * factor), round(2910 * factor), 0.24, 0.00, 0.15, 0.03, 0.35, 0.02, 0.23, 0.09, "Plug stops responding after normal use", "Hardware failure after thermal event", "Replace device"),
-        ]
-        items = [item for item in items if filters.product == "All" or item.product_family == filters.product]
-        items = [item for item in items if filters.issue == "All" or item.fault_code == filters.issue]
-        items = [item for item in items if filters.version == "All" or item.software_version == filters.version]
-        return sorted(items, key=lambda item: item.composite_risk, reverse=True)
-
-    def _seeded_products(self, issues: list[AggregateIssue]) -> list[dict[str, Any]]:
-        grouped: dict[str, list[AggregateIssue]] = defaultdict(list)
-        for issue in issues:
-            grouped[issue.product_family].append(issue)
-        products = []
-        for product, rows in grouped.items():
-            volume = sum(item.volume for item in rows) or 1
-            products.append(
-                {
-                    "product_family": product,
-                    "ticket_volume": volume,
-                    "repair_field_visit_rate": sum(item.volume * item.repair_field_visit_rate for item in rows) / volume,
-                    "installation_field_visit_rate": sum(item.volume * item.installation_field_visit_rate for item in rows) / volume,
-                    "repeat_rate": sum(item.volume * item.repeat_rate for item in rows) / volume,
-                    "bot_deflection_rate": sum(item.volume * item.bot_deflection_rate for item in rows) / volume,
-                    "fcr": sum(item.volume * item.fcr_rate for item in rows) / volume,
-                    "top_issue": max(rows, key=lambda item: item.volume).fault_code_level_2,
-                    "rising_issue": max(rows, key=lambda item: item.volume - item.previous_volume).fault_code_level_2,
-                    "service_burden": round(volume * (1 + max(rows, key=lambda item: item.repair_field_visit_rate).repair_field_visit_rate * 2)),
-                }
-            )
-        return sorted(products, key=lambda item: item["ticket_volume"], reverse=True)
-
-    def _seeded_versions(self, issues: list[AggregateIssue]) -> list[dict[str, Any]]:
-        return [
-            {
-                "version": item.software_version,
-                "product_family": item.product_family,
-                "ticket_volume": item.volume,
-                "repair_field_visit_rate": item.repair_field_visit_rate,
-                "repeat_rate": item.repeat_rate,
-                "top_issue": item.fault_code_level_2,
-            }
-            for item in issues[:8]
-        ]
-
-    def _seeded_timeline(self, filters: DashboardFilters) -> list[dict[str, Any]]:
-        factor = 0.24 if filters.date_preset == "14d" else 0.5 if filters.date_preset == "30d" else 8.4 if filters.date_preset == "history" else 1.0
-        base = [
-            {"date": "2026-01-18", "tickets": 1380, "repair_field": 164, "bot_resolved": 124},
-            {"date": "2026-01-25", "tickets": 1425, "repair_field": 172, "bot_resolved": 131},
-            {"date": "2026-02-01", "tickets": 1488, "repair_field": 181, "bot_resolved": 139},
-            {"date": "2026-02-08", "tickets": 1510, "repair_field": 186, "bot_resolved": 144},
-            {"date": "2026-02-15", "tickets": 1548, "repair_field": 201, "bot_resolved": 151},
-            {"date": "2026-02-22", "tickets": 1612, "repair_field": 216, "bot_resolved": 157},
-            {"date": "2026-03-01", "tickets": 1686, "repair_field": 224, "bot_resolved": 162},
-            {"date": "2026-03-08", "tickets": 1718, "repair_field": 231, "bot_resolved": 167},
-        ]
-        return [{key: round(value * factor) if key != "date" else value for key, value in row.items()} for row in base]
-
-    def _seeded_kpis(self, issues: list[AggregateIssue]) -> dict[str, dict[str, float]]:
-        total = sum(item.volume for item in issues) or 1
-        previous_total = sum(item.previous_volume for item in issues) or 1
-        weighted = lambda attr: sum(item.volume * getattr(item, attr) for item in issues) / total
-        field = weighted("repair_field_visit_rate") + weighted("installation_field_visit_rate")
-        return {
-            "total_tickets": {"value": total, "change": (total - previous_total) / previous_total},
-            "field_visit_rate": {"value": field, "change": 0.02},
-            "repair_field_visit_rate": {"value": weighted("repair_field_visit_rate"), "change": 0.08},
-            "installation_field_visit_rate": {"value": weighted("installation_field_visit_rate"), "change": -0.03},
-            "bot_deflection_rate": {"value": weighted("bot_deflection_rate"), "change": 0.05},
-            "fcr": {"value": weighted("fcr_rate"), "change": 0.03},
-            "repeat_rate": {"value": weighted("repeat_rate"), "change": 0.06},
-            "logistics_rate": {"value": weighted("logistics_rate"), "change": 0.01},
-        }
-
-    def _seeded_service_ops(self) -> dict[str, Any]:
-        return {
-            "department_mix": [{"label": "Call Center", "count": 41820, "share": 0.50}, {"label": "Field Service", "count": 15760, "share": 0.19}, {"label": "Hero Electronix", "count": 24890, "share": 0.29}, {"label": "Logistics", "count": 1450, "share": 0.02}],
-            "channel_mix": [{"label": "Chat", "count": 35200, "share": 0.37}, {"label": "Phone", "count": 27850, "share": 0.30}, {"label": "Email", "count": 16120, "share": 0.17}, {"label": "WhatsApp", "count": 10940, "share": 0.12}, {"label": "Web", "count": 4260, "share": 0.04}],
-            "bot_outcomes": [{"label": "Bot transferred to agent", "count": 21480, "share": 0.51}, {"label": "Bot resolved ticket", "count": 10520, "share": 0.25}, {"label": "Blank chat after 10 mins", "count": 10040, "share": 0.24}],
-            "resolution_mix": [{"label": "Troubleshooting done issue resolved", "count": 22840, "share": 0.25}, {"label": "Issue Escalated", "count": 17210, "share": 0.19}, {"label": "Features Explained", "count": 13360, "share": 0.15}, {"label": "Resolved", "count": 12120, "share": 0.13}, {"label": "TAT informed", "count": 10140, "share": 0.11}, {"label": "Reset device", "count": 9640, "share": 0.10}],
-            "handle_time_distribution": {"median_minutes": 19.2, "p75_minutes": 43.6},
-            "field_service_split": [{"label": "Repair visits", "count": 6280, "share": 0.40}, {"label": "Installation visits", "count": 9480, "share": 0.60}],
-        }
-
-    def _seeded_bot_summary(self) -> dict[str, Any]:
-        return {
-            "overview": {
-                "chat_tickets": 42040,
-                "bot_resolved_tickets": 10520,
-                "bot_transferred_tickets": 21480,
-                "blank_chat_tickets": 10040,
-                "blank_chat_returned_7d": 3120,
-                "blank_chat_resolved_7d": 980,
-                "blank_chat_blank_again_7d": 1240,
-                "blank_chat_return_rate": 0.311,
-                "blank_chat_recovery_rate": 0.098,
-                "blank_chat_repeat_rate": 0.123,
-                "bot_resolved_rate": 0.25,
-                "bot_transferred_rate": 0.51,
-                "blank_chat_rate": 0.24,
-            },
-            "by_product": [
-                {"product_family": "Dash Cam", "chat_tickets": 9600, "bot_resolved_rate": 0.31, "bot_transferred_rate": 0.43, "blank_chat_rate": 0.18, "blank_chat_return_rate": 0.27, "blank_chat_recovery_rate": 0.11},
-                {"product_family": "Smart Camera", "chat_tickets": 11800, "bot_resolved_rate": 0.24, "bot_transferred_rate": 0.49, "blank_chat_rate": 0.21, "blank_chat_return_rate": 0.33, "blank_chat_recovery_rate": 0.10},
-                {"product_family": "Video Doorbell", "chat_tickets": 6400, "bot_resolved_rate": 0.17, "bot_transferred_rate": 0.58, "blank_chat_rate": 0.22, "blank_chat_return_rate": 0.29, "blank_chat_recovery_rate": 0.07},
-            ],
-            "best_issues": [self._issue_payload(item) for item in sorted(issues, key=lambda item: item.bot_deflection_rate, reverse=True)[:6]],
-            "leaky_issues": [self._issue_payload(item) for item in sorted(issues, key=lambda item: item.bot_transfer_rate, reverse=True)[:6]],
-        }
-
-    def _seeded_issue_views(self, issues: list[AggregateIssue]) -> dict[str, list[dict[str, Any]]]:
-        return self._agg_issue_views(issues)
-
-    def _seeded_pipeline_health(self) -> dict[str, Any]:
-        return {
-            "last_run_at": "Not run",
-            "duration_minutes": 0,
-            "status": "Sample",
-            "latest_job": "seeded_dashboard_payload",
-            "tables": [
-                {"table": settings.agg_daily_tickets_table, "status": "Sample"},
-                {"table": settings.agg_fc_weekly_table, "status": "Sample"},
-                {"table": settings.agg_bot_table, "status": "Sample"},
-                {"table": settings.agg_sw_version_table, "status": "Sample"},
-                {"table": settings.agg_resolution_table, "status": "Sample"},
-                {"table": settings.pipeline_log_table, "status": "Sample"},
-            ],
-        }
-
-    def _seeded_cleaning_summary(self) -> dict[str, Any]:
-        return {
-            "as_of_date": "Sample",
-            "total_tickets": 95000,
-            "usable_issue_tickets": 70200,
-            "actionable_issue_tickets": 49800,
-            "blank_fault_code_tickets": 16800,
-            "blank_fault_code_l2_tickets": 11200,
-            "unknown_product_tickets": 21000,
-            "hero_internal_tickets": 24890,
-            "version_coverage_tickets": 0,
-            "dropped_in_bot_tickets": 10040,
-            "missing_issue_outside_bot_tickets": 9100,
-            "dirty_channel_tickets": 1800,
-            "email_department_reassigned_tickets": 9230,
-            "usable_issue_rate": 0.739,
-            "actionable_issue_rate": 0.524,
-        }
-
-    def _seeded_filter_options(self) -> dict[str, list[str]]:
-        return {
-            "products": ["Air Purifier", "Dash Cam", "GPS Tracker", "Smart Camera", "Smart Lock", "Smart Plug", "Video Doorbell"],
-            "departments": ["Call Center", "Field Service", "Hero Electronix", "Logistics"],
-            "issues": ["Application", "Home Product issue", "Installation", "Lock Product issue", "Product issue", "Tracker Product issue"],
-            "versions": [],
         }

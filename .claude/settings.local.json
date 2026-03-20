@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from qubo_dashboard.models import DashboardFilters; f = DashboardFilters\\(\\); print\\(''Fields:'', list\\(f.__dataclass_fields__.keys\\(\\)\\)\\)\")",
+      "Bash(python -c \"from qubo_dashboard.analytics import AnalyticsService, AggregateIssue; print\\(''AggregateIssue fields:'', [f.name for f in AggregateIssue.__dataclass_fields__.values\\(\\)]\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(python -c \"from qubo_dashboard.cleaning import canonical_product, normalize_model, normalize_channel, normalize_department; print\\(''cleaning OK''\\); print\\(canonical_product\\(None, None\\)\\); print\\(canonical_product\\(''Other stuff'', None\\)\\); print\\(normalize_model\\(''Dash Cam'', ''Dashcam 4G'', None\\)\\); print\\(normalize_channel\\(None, None\\)\\); print\\(normalize_department\\(''Email''\\)\\)\")",
+      "Bash(python -c \"from qubo_dashboard.analytics import AnalyticsService; from qubo_dashboard.pipeline.transforms import agg_model_breakdown; print\\(''analytics OK''\\); print\\(''transforms OK''\\)\")",
+      "Bash(python -c \"from qubo_dashboard.pipeline.sql import CREATE_TABLE_STATEMENTS; print\\(''sql OK''\\); print\\(''agg_model_breakdown'' in CREATE_TABLE_STATEMENTS\\)\")"
+    ]
+  }
+}

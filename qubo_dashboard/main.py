@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -29,26 +30,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def _parse_multi(s: str) -> list[str]:
+    return [v.strip() for v in s.split(",") if v.strip()] if s else []
+
+
 @app.get("/api/dashboard")
 def dashboard(
     date_preset: str = Query(default="60d"),
-    product: str = Query(default="All"),
-    department: str = Query(default="All"),
-    issue: str = Query(default="All"),
-    version: str = Query(default="All"),
-    include_hero: bool = Query(default=False),
-    include_dirty: bool = Query(default=False),
-    history_mode: bool = Query(default=False),
+    products: str = Query(default=""),
+    models: str = Query(default=""),
+    fault_codes: str = Query(default=""),
+    channels: str = Query(default=""),
+    bot_actions: str = Query(default=""),
+    quick_exclusions: str = Query(default=""),
 ) -> dict:
     filters = DashboardFilters(
         date_preset=date_preset,
-        product=product,
-        department=department,
-        issue=issue,
-        version=version,
-        include_hero=include_hero,
-        include_dirty=include_dirty,
-        history_mode=history_mode,
+        products=_parse_multi(products),
+        models=_parse_multi(models),
+        fault_codes=_parse_multi(fault_codes),
+        channels=_parse_multi(channels),
+        bot_actions=_parse_multi(bot_actions),
+        quick_exclusions=_parse_multi(quick_exclusions),
     )
     return service.build_dashboard(filters)
 
@@ -57,48 +60,66 @@ def dashboard(
 def issue_details(
     issue_id: str,
     date_preset: str = Query(default="60d"),
-    product: str = Query(default="All"),
-    department: str = Query(default="All"),
-    issue: str = Query(default="All"),
-    version: str = Query(default="All"),
-    include_hero: bool = Query(default=False),
-    include_dirty: bool = Query(default=False),
-    history_mode: bool = Query(default=False),
+    products: str = Query(default=""),
+    models: str = Query(default=""),
+    fault_codes: str = Query(default=""),
+    channels: str = Query(default=""),
+    bot_actions: str = Query(default=""),
+    quick_exclusions: str = Query(default=""),
 ) -> dict:
     filters = DashboardFilters(
         date_preset=date_preset,
-        product=product,
-        department=department,
-        issue=issue,
-        version=version,
-        include_hero=include_hero,
-        include_dirty=include_dirty,
-        history_mode=history_mode,
+        products=_parse_multi(products),
+        models=_parse_multi(models),
+        fault_codes=_parse_multi(fault_codes),
+        channels=_parse_multi(channels),
+        bot_actions=_parse_multi(bot_actions),
+        quick_exclusions=_parse_multi(quick_exclusions),
     )
     return service.get_issue_tickets(filters, issue_id)
+
+
+@app.get("/api/period-breakdown")
+def period_breakdown(
+    start_date: date,
+    end_date: date,
+    date_preset: str = Query(default="60d"),
+    products: str = Query(default=""),
+    models: str = Query(default=""),
+    fault_codes: str = Query(default=""),
+    channels: str = Query(default=""),
+    bot_actions: str = Query(default=""),
+    quick_exclusions: str = Query(default=""),
+) -> dict:
+    filters = DashboardFilters(
+        date_preset=date_preset,
+        products=_parse_multi(products),
+        models=_parse_multi(models),
+        fault_codes=_parse_multi(fault_codes),
+        channels=_parse_multi(channels),
+        bot_actions=_parse_multi(bot_actions),
+        quick_exclusions=_parse_multi(quick_exclusions),
+    )
+    return service.get_period_breakdown(filters, start_date, end_date)
 
 
 @app.get("/api/tickets")
 def tickets(
     query: str = Query(default=""),
     date_preset: str = Query(default="60d"),
-    product: str = Query(default="All"),
-    department: str = Query(default="All"),
-    issue: str = Query(default="All"),
-    version: str = Query(default="All"),
-    include_hero: bool = Query(default=False),
-    include_dirty: bool = Query(default=False),
-    history_mode: bool = Query(default=False),
+    products: str = Query(default=""),
+    models: str = Query(default=""),
+    fault_codes: str = Query(default=""),
+    channels: str = Query(default=""),
+    quick_exclusions: str = Query(default=""),
 ) -> dict:
     filters = DashboardFilters(
         date_preset=date_preset,
-        product=product,
-        department=department,
-        issue=issue,
-        version=version,
-        include_hero=include_hero,
-        include_dirty=include_dirty,
-        history_mode=history_mode,
+        products=_parse_multi(products),
+        models=_parse_multi(models),
+        fault_codes=_parse_multi(fault_codes),
+        channels=_parse_multi(channels),
+        quick_exclusions=_parse_multi(quick_exclusions),
     )
     return {"tickets": service.search_tickets(filters, query)}
 
@@ -152,7 +173,7 @@ def health() -> dict:
     repo_status = repository.get_connection_status()
     return {
         "status": "ok",
-        "data_source": "sample" if settings.use_sample_data or not settings.has_zoho_database else "mysql",
+        "data_source": "mysql" if settings.has_zoho_database else "unconfigured",
         "zoho_db_configured": repo_status["zoho_configured"],
         "agg_db_configured": repo_status["agg_configured"],
         "serve_frontend": settings.serve_frontend,

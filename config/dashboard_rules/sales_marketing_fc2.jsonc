@@ -1,0 +1,17 @@
+{
+  // Comment out any keyword object to disable it.
+  "keyword_substrings": [
+    {
+      "enabled": true,
+      "value": "sales"
+    },
+    {
+      "enabled": true,
+      "value": "marketing"
+    },
+    {
+      "enabled": true,
+      "value": "collaboration"
+    }
+  ]
+}

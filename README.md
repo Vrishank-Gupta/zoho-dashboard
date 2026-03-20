@@ -1,192 +1,137 @@
-# Qubo Support Health Command Center
+# Qubo CS Dashboard
 
-This repo is now split into two deployable parts:
+Qubo CS Dashboard is split into two deployable parts:
 
-- `qubo_dashboard/` - Python API backend and pipeline
-- `frontend/` - static dashboard frontend for Netlify, Vercel, S3, or any static host
+- `qubo_dashboard/`: FastAPI backend + pipeline
+- `frontend/`: static dashboard UI
 
-## Architecture
+Local development remains unchanged. Production deployment is intended as:
 
-- Backend:
-  - FastAPI API
-  - reads raw Zoho tickets from the remote MySQL source
-  - writes aggregates into the local analytics MySQL database
-  - serves dashboard APIs and ticket drilldown
-- Frontend:
-  - plain HTML, CSS, and JS
-  - talks to the backend through `frontend/config.js`
-  - can be deployed independently from the backend
+- backend on a VM or container host
+- frontend on a static hosting service such as Netlify
 
-## Backend deployment
+## Repo layout
 
-Backend is intended to run on a VM or container host.
+- [qubo_dashboard](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/qubo_dashboard)
+- [frontend](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/frontend)
+- [deploy](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy)
+- [run_local.py](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/run_local.py)
 
-Recommended:
+## Local run
 
-- Docker on the VM
-- reverse proxy with HTTPS
-- frontend hosted separately
+Use the local runner:
 
-### Backend environment
-
-Copy `.env.example` to `.env` and fill in values.
-
-For production handoff, DevOps should start from:
-
-- [deploy/.env.backend.production.example](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop/Bot%20Analytics/deploy/.env.backend.production.example)
-
-Important backend settings:
-
-```env
-QUBO_APP_HOST=0.0.0.0
-QUBO_APP_PORT=8000
-QUBO_APP_RELOAD=false
-QUBO_SERVE_FRONTEND=false
-QUBO_USE_SAMPLE_DATA=false
-QUBO_PIPELINE_RECREATE_TABLES=false
-QUBO_CORS_ALLOWED_ORIGINS=https://your-frontend-domain.netlify.app
+```powershell
+python run_local.py
 ```
 
-Database mappings:
+Manual local backend run:
 
-- `QUBO_ZOHO_*` = remote Zoho source table
-- `QUBO_AGG_*` = local aggregate analytics database
-- aggregate table names are also env-driven for:
-  - hourly heatmap
-  - VOC mismatch
-
-### Run backend locally
-
-```bash
-pip install -r requirements.txt
+```powershell
 python -m uvicorn qubo_dashboard.main:app --host 127.0.0.1 --port 8010 --reload
 ```
 
-API health:
+Manual pipeline run:
 
-- `http://127.0.0.1:8010/api/health`
-
-### Run backend with Docker
-
-```bash
-docker compose up --build
-```
-
-The backend container exposes port `8000`.
-
-## Frontend deployment
-
-The frontend is fully static.
-
-Files:
-
-- `frontend/index.html`
-- `frontend/styles.css`
-- `frontend/app.js`
-- `frontend/config.js`
-
-### Configure the frontend API URL
-
-Edit `frontend/config.js` before deployment:
-
-```js
-window.QUBO_APP_CONFIG = {
-  apiBaseUrl: "https://api-support.example.com",
-};
-```
-
-`frontend/config.example.js` is included as a template.
-
-For production handoff, DevOps should start from:
-
-- [frontend.config.production.example.js](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop/Bot%20Analytics/deploy/frontend.config.production.example.js)
-
-### Static hosting
-
-You can deploy the `frontend/` directory directly to:
-
-- Netlify
-- Vercel
-- S3 + CloudFront
-- Nginx static hosting
-
-`netlify.toml` is included for Netlify and publishes `frontend/`.
-
-## Pipeline
-
-The pipeline is part of the backend codebase.
-
-Manual CLI run:
-
-```bash
+```powershell
 python -m qubo_dashboard.pipeline.run
 ```
 
-Manual dashboard-triggered run:
+## Production deployment model
 
-- the frontend has a `Run pipeline` button
-- it calls `POST /api/pipeline/run`
-- it is open in the current internal deployment model
+- backend API domain, for example `https://qubo-support-api.companydomain.com`
+- frontend domain, for example `https://qubo-support.companydomain.com`
+- frontend points to backend through `frontend/config.js`
+- backend CORS allows the frontend domain
 
-Production recommendation:
+Frontend config example:
 
-- schedule the CLI pipeline every 15 to 60 minutes
-- keep the dashboard button as an admin fallback
+```js
+window.QUBO_APP_CONFIG = {
+  apiBaseUrl: "https://qubo-support-api.companydomain.com",
+};
+```
 
-Pipeline status endpoint:
+Backend CORS example:
 
-- `GET /api/pipeline/status`
+```env
+QUBO_CORS_ALLOWED_ORIGINS=https://qubo-support.companydomain.com
+```
 
-## SQL bootstrap
+## DevOps handoff files
 
-Run the aggregate schema bootstrap against the aggregate MySQL database:
+Primary handoff docs:
 
-- [bootstrap_analytics.sql](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop/Bot%20Analytics/deploy/sql/bootstrap_analytics.sql)
+- [DEVOPS_HANDOFF.md](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/DEVOPS_HANDOFF.md)
+- [DEVOPS_DEPLOYMENT_GUIDE.md](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/DEVOPS_DEPLOYMENT_GUIDE.md)
+- [DEVOPS_CHECKLIST.md](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/DEVOPS_CHECKLIST.md)
+- [CICD_GUIDE.md](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/CICD_GUIDE.md)
 
-This creates:
+Production config/templates:
 
-- `agg_daily_tickets`
-- `agg_fc_weekly`
-- `agg_sw_version`
-- `agg_resolution`
-- `agg_channel`
-- `agg_hourly_heatmap`
-- `agg_replacements`
-- `agg_bot`
-- `agg_voc_mismatch`
-- `agg_anomalies`
-- `agg_health_score`
-- `agg_data_quality`
-- `pipeline_log`
+- [deploy/.env.backend.production.example](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/.env.backend.production.example)
+- [frontend.config.production.example.js](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/frontend.config.production.example.js)
+- [docker-compose.yml](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/docker-compose.yml)
+- [Dockerfile](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/Dockerfile)
+- [deploy/nginx/qubo-dashboard-api.conf.example](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/nginx/qubo-dashboard-api.conf.example)
 
-## DevOps handoff
+SQL and verification:
 
-Use:
+- [bootstrap_analytics.sql](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/sql/bootstrap_analytics.sql)
+- [verification_queries.sql](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/sql/verification_queries.sql)
 
-- [DEVOPS_CHECKLIST.md](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop/Bot%20Analytics/deploy/DEVOPS_CHECKLIST.md)
-- [DEVOPS_DEPLOYMENT_GUIDE.md](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop/Bot%20Analytics/deploy/DEVOPS_DEPLOYMENT_GUIDE.md)
+Operational scripts:
 
-That file lists:
+- [bootstrap_analytics.sh](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/scripts/bootstrap_analytics.sh)
+- [run_pipeline.sh](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/scripts/run_pipeline.sh)
+- [deploy_backend.sh](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/scripts/deploy_backend.sh)
+- [qubo-dashboard-pipeline.service](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/systemd/qubo-dashboard-pipeline.service)
+- [qubo-dashboard-pipeline.timer](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/systemd/qubo-dashboard-pipeline.timer)
 
-- VM requirements
-- Docker expectations
-- MySQL access requirements
-- firewall and CORS requirements
-- secrets needed
-- frontend hosting requirements
-- monitoring expectations
+## Production backend quick start
 
-## Current production-facing endpoints
+1. Copy the repo to the VM.
+2. Copy [deploy/.env.backend.production.example](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/deploy/.env.backend.production.example) to `.env` and fill in real values.
+3. Bootstrap schema:
 
-- `GET /api/health`
-- `GET /api/dashboard`
-- `GET /api/issues/{issue_id}`
-- `GET /api/tickets`
-- `GET /api/pipeline/status`
-- `POST /api/pipeline/run`
+```bash
+bash deploy/scripts/bootstrap_analytics.sh
+```
+
+4. Start API:
+
+```bash
+docker compose up -d --build
+```
+
+5. Health check:
+
+```bash
+curl http://127.0.0.1:8000/api/health
+```
+
+6. First pipeline run:
+
+```bash
+bash deploy/scripts/run_pipeline.sh
+```
+
+## Frontend deployment quick start
+
+1. Set production API URL in deployed `frontend/config.js`
+2. Publish the `frontend/` directory to Netlify, Vercel, S3, or Nginx static hosting
+3. Ensure backend CORS allows the frontend hostname
+
+## CI/CD
+
+GitHub workflows:
+
+- [ci.yml](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/.github/workflows/ci.yml)
+- [deploy-backend.yml](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/.github/workflows/deploy-backend.yml)
+- [deploy-frontend.yml](C:/Users/User/OneDrive%20-%20Hero%20Electronix%20Pvt.%20Ltd/Desktop%20Bot%20Analytics/.github/workflows/deploy-frontend.yml)
 
 ## Notes
 
-- The backend defaults to API-only mode. Set `QUBO_SERVE_FRONTEND=true` only if you intentionally want FastAPI to serve the static dashboard files.
-- The pipeline and dashboard are generalized against incoming ticket data. The product rollups and issue cleaning are rule-based, not hardcoded to current row counts.
-- Version analysis remains limited by source coverage if software version is missing upstream.
+- Production deployment files do not change local `run_local.py` behavior.
+- `docker-compose.yml` now exposes `${QUBO_PUBLIC_PORT:-8000}` for VM flexibility.
+- The pipeline now relies on `raw_ticket_cache` for incremental source fetches, so that table is part of the required production schema.

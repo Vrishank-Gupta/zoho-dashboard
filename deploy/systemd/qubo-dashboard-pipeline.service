@@ -1,0 +1,8 @@
+[Unit]
+Description=Qubo dashboard pipeline run
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/qubo-support-dashboard
+ExecStart=/usr/bin/env bash /opt/qubo-support-dashboard/deploy/scripts/run_pipeline.sh

@@ -12,6 +12,7 @@ from .cleaning import (
     normalize_channel,
     normalize_department,
     normalize_fault_code,
+    normalize_model,
     normalize_resolution,
     normalize_version,
 )
@@ -31,6 +32,7 @@ class TicketRecord:
     product: str | None
     device_model: str | None
     fault_code: str | None
+    fault_code_level_1: str | None
     fault_code_level_2: str | None
     resolution_code_level_1: str | None
     bot_action: str | None
@@ -40,12 +42,18 @@ class TicketRecord:
     symptom: str | None
     defect: str | None
     repair: str | None
-    first_commissioning_date: datetime | None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property
     def canonical_product(self) -> str:
-        return canonical_product(self.product, self.device_model)
+        base = canonical_product(self.product, self.device_model)
+        if base == "Miscellaneous" and self.normalized_channel in {"Chat", "WhatsApp"}:
+            return "Blank Chats"
+        return base
+
+    @property
+    def canonical_model(self) -> str:
+        return normalize_model(self.canonical_product, self.product, self.device_model)
 
     @property
     def is_core_product(self) -> bool:
@@ -104,22 +112,20 @@ class TicketRecord:
         return "blank chat" in (self.bot_action or "").lower()
 
     @property
+    def is_cancelled_existing_ticket(self) -> bool:
+        return (self.bot_action or "").strip().lower() == "cancelled due to existing ticket"
+
+    @property
     def quality(self):
         return evaluate_quality(
             channel=self.normalized_channel,
             department=self.normalized_department,
             fault_code=self.normalized_fault_code,
+            fault_code_l1=normalize_fault_code(self.fault_code_level_1),
             fault_code_l2=self.normalized_fault_code_l2,
             bot_action=self.bot_action,
         )
 
-    @property
-    def is_fcr_eligible(self) -> bool:
-        return self.normalized_department == "Call Center"
-
-    @property
-    def is_fcr_success(self) -> bool:
-        return self.is_fcr_eligible and (self.number_of_reopen or "").strip() == "0"
 
     @property
     def has_repeat_key(self) -> bool:
@@ -141,7 +147,8 @@ class TicketRecord:
     def field_visit_type(self) -> str | None:
         if not self.is_field_service:
             return None
-        return "Installation" if is_installation_ticket(self.normalized_fault_code, self.normalized_fault_code_l2, self.normalized_resolution, self.repair) else "Repair"
+        fc_l1 = normalize_fault_code(self.fault_code_level_1)
+        return "Installation" if is_installation_ticket(self.normalized_fault_code, fc_l1, self.normalized_fault_code_l2) else "Repair"
 
     @property
     def handle_time_minutes(self) -> float | None:
@@ -151,21 +158,13 @@ class TicketRecord:
         minutes = delta.total_seconds() / 60
         return minutes if minutes >= 0 else None
 
-    @property
-    def device_age_days(self) -> int | None:
-        if not self.first_commissioning_date:
-            return None
-        delta = self.created_at.date() - self.first_commissioning_date.date()
-        return delta.days if delta.days >= 0 else None
-
 
 @dataclass(slots=True)
 class DashboardFilters:
     date_preset: str = "60d"
-    product: str = "All"
-    department: str = "All"
-    issue: str = "All"
-    version: str = "All"
-    include_hero: bool = False
-    include_dirty: bool = False
-    history_mode: bool = False
+    products: list[str] = field(default_factory=list)
+    models: list[str] = field(default_factory=list)
+    fault_codes: list[str] = field(default_factory=list)
+    channels: list[str] = field(default_factory=list)
+    bot_actions: list[str] = field(default_factory=list)
+    quick_exclusions: list[str] = field(default_factory=list)

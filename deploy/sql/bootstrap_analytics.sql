@@ -2,6 +2,32 @@
 -- Bootstrap script for the aggregate analytics schema.
 -- Run this against the aggregate MySQL database configured via QUBO_AGG_*.
 
+CREATE TABLE IF NOT EXISTS raw_ticket_cache (
+    ticket_id VARCHAR(100) NOT NULL PRIMARY KEY,
+    created_at DATETIME NOT NULL,
+    closed_at DATETIME NULL,
+    department_name VARCHAR(255) NULL,
+    channel VARCHAR(255) NULL,
+    email VARCHAR(255) NULL,
+    mobile VARCHAR(255) NULL,
+    phone VARCHAR(255) NULL,
+    name VARCHAR(255) NULL,
+    product VARCHAR(255) NULL,
+    device_model VARCHAR(255) NULL,
+    fault_code VARCHAR(255) NULL,
+    fault_code_level_1 VARCHAR(255) NULL,
+    fault_code_level_2 VARCHAR(255) NULL,
+    resolution_code_level_1 VARCHAR(255) NULL,
+    bot_action VARCHAR(255) NULL,
+    software_version VARCHAR(255) NULL,
+    device_serial_number VARCHAR(255) NULL,
+    number_of_reopen VARCHAR(100) NULL,
+    symptom TEXT NULL,
+    defect TEXT NULL,
+    repair TEXT NULL,
+    KEY idx_raw_ticket_cache_created_at (created_at)
+);
+
 CREATE TABLE IF NOT EXISTS agg_daily_tickets (
     metric_date DATE NOT NULL,
     product_family VARCHAR(100) NOT NULL,
@@ -17,11 +43,10 @@ CREATE TABLE IF NOT EXISTS agg_daily_tickets (
     bot_deflection_rate DOUBLE NOT NULL,
     bot_transfer_rate DOUBLE NOT NULL,
     blank_chat_rate DOUBLE NOT NULL,
-    fcr_rate DOUBLE NOT NULL,
     repeat_rate DOUBLE NOT NULL,
     logistics_rate DOUBLE NOT NULL,
     handle_time_hours DOUBLE NOT NULL,
-    young_device_rate DOUBLE NOT NULL,
+    cancelled_existing_ticket_rate DOUBLE NOT NULL,
     KEY idx_agg_daily_metric_date (metric_date),
     KEY idx_agg_daily_product_issue (product_family, fault_code, fault_code_level_2),
     KEY idx_agg_daily_department_channel (department_name, channel)
@@ -40,7 +65,6 @@ CREATE TABLE IF NOT EXISTS agg_fc_weekly (
     bot_deflection_rate DOUBLE NOT NULL,
     bot_transfer_rate DOUBLE NOT NULL,
     blank_chat_rate DOUBLE NOT NULL,
-    fcr_rate DOUBLE NOT NULL,
     logistics_rate DOUBLE NOT NULL,
     top_symptom VARCHAR(255) NOT NULL,
     top_defect VARCHAR(255) NOT NULL,
@@ -71,7 +95,6 @@ CREATE TABLE IF NOT EXISTS agg_resolution (
     product_family VARCHAR(100) NOT NULL,
     resolution_code_level_1 VARCHAR(150) NOT NULL,
     tickets INT NOT NULL,
-    fcr_rate DOUBLE NOT NULL,
     bot_deflection_rate DOUBLE NOT NULL,
     bot_transfer_rate DOUBLE NOT NULL,
     blank_chat_rate DOUBLE NOT NULL,
@@ -86,7 +109,6 @@ CREATE TABLE IF NOT EXISTS agg_channel (
     channel VARCHAR(100) NOT NULL,
     department_name VARCHAR(100) NOT NULL,
     tickets INT NOT NULL,
-    fcr_rate DOUBLE NOT NULL,
     bot_deflection_rate DOUBLE NOT NULL,
     bot_transfer_rate DOUBLE NOT NULL,
     blank_chat_rate DOUBLE NOT NULL,
@@ -120,6 +142,7 @@ CREATE TABLE IF NOT EXISTS agg_bot (
     bot_resolved_tickets INT NOT NULL,
     bot_transferred_tickets INT NOT NULL,
     blank_chat_tickets INT NOT NULL,
+    cancelled_existing_ticket_tickets INT NOT NULL,
     blank_chat_returned_7d INT NOT NULL,
     blank_chat_resolved_7d INT NOT NULL,
     blank_chat_transferred_7d INT NOT NULL,
@@ -130,6 +153,7 @@ CREATE TABLE IF NOT EXISTS agg_bot (
     bot_resolved_rate DOUBLE NOT NULL,
     bot_transferred_rate DOUBLE NOT NULL,
     blank_chat_rate DOUBLE NOT NULL,
+    cancelled_existing_ticket_rate DOUBLE NOT NULL,
     KEY idx_agg_bot_product (product_family)
 );
 
@@ -161,7 +185,6 @@ CREATE TABLE IF NOT EXISTS agg_health_score (
     repair_field_rate DOUBLE NOT NULL,
     repeat_rate DOUBLE NOT NULL,
     bot_deflection_rate DOUBLE NOT NULL,
-    fcr_rate DOUBLE NOT NULL,
     KEY idx_agg_health_score_date (metric_date)
 );
 
@@ -180,6 +203,19 @@ CREATE TABLE IF NOT EXISTS agg_data_quality (
     dirty_channel_tickets INT NOT NULL,
     email_department_reassigned_tickets INT NOT NULL,
     KEY idx_agg_data_quality_date (as_of_date)
+);
+
+CREATE TABLE IF NOT EXISTS agg_model_breakdown (
+    product_family VARCHAR(100) NOT NULL,
+    canonical_model VARCHAR(150) NOT NULL,
+    tickets INT NOT NULL,
+    repair_field_visit_rate DOUBLE NOT NULL,
+    repeat_rate DOUBLE NOT NULL,
+    bot_deflection_rate DOUBLE NOT NULL,
+    bot_transfer_rate DOUBLE NOT NULL,
+    blank_chat_rate DOUBLE NOT NULL,
+    KEY idx_agg_model_breakdown_product (product_family),
+    KEY idx_agg_model_breakdown_model (canonical_model)
 );
 
 CREATE TABLE IF NOT EXISTS pipeline_log (

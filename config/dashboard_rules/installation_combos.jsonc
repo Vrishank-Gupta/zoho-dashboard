@@ -1,0 +1,1403 @@
+{
+  // Comment out any combo object to disable it.
+  "combos": [
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "audio taking too much time/not clear"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "registration process"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "stuck outside"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "ai alerts missed",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "field related",
+      "fc2": "100 engineer visit for installation"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "installation",
+      "fc2": "raise installation request"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "installation form request received",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "sd card issue",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "ap product enquiry",
+      "fc1": "ap enquiry",
+      "fc2": "installtion enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "ap product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "ap product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "ap product issue",
+      "fc1": "installation city enquiry",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "anti tampering issue"
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "audio taking too much time/not clear"
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "application issue",
+      "fc2": "installation follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "installation city enquiry",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "auto part enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "auto part enquiry",
+      "fc1": "enquiry",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "auto part enquiry",
+      "fc1": "installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "auto product enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    // {
+    //   "enabled": true,
+    //   "fc": "auto product enquiry",
+    //   "fc1": "ap enquiry",
+    //   "fc2": "installation"
+    // },
+    // {
+    //   "enabled": true,
+    //   "fc": "auto product enquiry",
+    //   "fc1": "ap enquiry",
+    //   "fc2": "installtion enquiry"
+    // },
+    // {
+    //   "enabled": true,
+    //   "fc": "auto product enquiry",
+    //   "fc1": "enquiry",
+    //   "fc2": "installation"
+    // },
+    // {
+    //   "enabled": true,
+    //   "fc": "auto product enquiry",
+    //   "fc1": "enquiry",
+    //   "fc2": "installtion enquiry"
+    // },
+    // {
+    //   "enabled": true,
+    //   "fc": "auto product enquiry",
+    //   "fc1": "rear camera",
+    //   "fc2": "installation enquiry"
+    // },
+    {
+      "enabled": true,
+      "fc": "auto product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "auto product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "auto restart"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product issue",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "installation"
+    },
+    // {
+    //   "enabled": true,
+    //   "fc": "auto product issue",
+    //   "fc1": "installation city enquiry",
+    //   "fc2": ""
+    // },
+    {
+      "enabled": true,
+      "fc": "auto product issue",
+      "fc1": "rear camera",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "bluetooth not sync",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "camera part product",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "camera part product",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "camera part product",
+      "fc1": "enquiry",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "chime",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "dead after use",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "faulty speaker",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "refund required"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for installation visit",
+      "fc2": "raise installation request"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "raise installation request"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "re-installation"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 part dispatch for adaptor",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "door lock issue",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "field related",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "field related",
+      "fc2": "raise installation request"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation",
+      "fc2": "within tat"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation city enquiry",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation follow up",
+      "fc2": "incorrect qr code"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation follow up",
+      "fc2": "within tat"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation form request received",
+      "fc2": "within tat"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "re-installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "re-installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "fingerprint issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "gateway product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "device connected to another account"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "device prompted no wifi check access point and password"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "raise installation request"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "ai alerts missed",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "ai alerts missed",
+      "fc2": "installation follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "ai alerts missed",
+      "fc2": "raise installation request"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "ai alerts missed",
+      "fc2": "re-installation"
+    },
+    {
+      "enabled": true,
+      "fc": "installation",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "installation",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "installation",
+      "fc1": "field related",
+      "fc2": "100 engineer visit for installation"
+    },
+    {
+      "enabled": true,
+      "fc": "installation",
+      "fc1": "installation enquiry",
+      "fc2": "installation cost"
+    },
+    {
+      "enabled": true,
+      "fc": "installation",
+      "fc1": "installation enquiry",
+      "fc2": "installation follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "installation",
+      "fc1": "installation enquiry",
+      "fc2": "installation request"
+    },
+    {
+      "enabled": true,
+      "fc": "installation",
+      "fc1": "installation enquiry",
+      "fc2": "no prompt after scanning qr code"
+    },
+    {
+      "enabled": true,
+      "fc": "installation",
+      "fc1": "price enquiry",
+      "fc2": "hardwiring kit"
+    },
+    {
+      "enabled": true,
+      "fc": "installtion enquiry",
+      "fc1": "installation enquiry",
+      "fc2": "enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "language barrier",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "language barrier",
+      "fc1": "language barrier",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "lock product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "lock product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "access card issue"
+    },
+    {
+      "enabled": true,
+      "fc": "lock product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "other issues"
+    },
+    {
+      "enabled": true,
+      "fc": "lock product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "video time lag issue"
+    },
+    {
+      "enabled": true,
+      "fc": "lock product issue",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "lock product issue",
+      "fc1": "installation city enquiry",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "order related",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "order related",
+      "fc1": "order status",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "outbound",
+      "fc1": "not using",
+      "fc2": "not installed yet"
+    },
+    {
+      "enabled": true,
+      "fc": "product enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "product enquiry",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "product enquiry",
+      "fc1": "enquiry",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "product enquiry",
+      "fc1": "installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "dead after use"
+    },
+    {
+      "enabled": true,
+      "fc": "product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "product issue",
+      "fc1": "dead device",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "product issue",
+      "fc1": "installation city enquiry",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "prompt ( incorrect qr",
+      "fc1": "code ) 100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "shiprocket",
+      "fc1": "installation city enquiry",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "subscription plan issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "touch issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "unable to lock through",
+      "fc1": "gateway 100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "vdb part product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "vdb part product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "vdb part product issue",
+      "fc1": "installation city enquiry",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "video call is not coming",
+      "fc1": "on phone 100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "",
+      "fc2": "installation follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "false notification"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation form request received"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "only video call is not coming on phn"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation visit",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for installation visit",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "installation form request received"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "100 part dispatch for adaptor",
+      "fc2": "installation form request received"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "ai alerts missed",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "door lock issue",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "installation form request received",
+      "fc2": "installation done"
+    },
+    {
+      "enabled": true,
+      "fc": "",
+      "fc1": "installation form request received",
+      "fc2": "installation form request received"
+    },
+    {
+      "enabled": true,
+      "fc": "ap product enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "app is getting crashed"
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation done"
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "100 engineer visit for installation visit",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "100 engineer visit for installation visit",
+      "fc2": "chime not pairing"
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "100 engineer visit for installation visit",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "application issue",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "application",
+      "fc1": "installation form request received",
+      "fc2": "installation form request received"
+    },
+    {
+      "enabled": true,
+      "fc": "auto part enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "hardwire kit"
+    },
+    {
+      "enabled": true,
+      "fc": "auto part enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "auto part product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "auto part product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "hardwire kit"
+    },
+    {
+      "enabled": true,
+      "fc": "auto part product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "hardwiring kit"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product enquiry",
+      "fc1": "enquiry",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product enquiry",
+      "fc1": "installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product enquiry",
+      "fc1": "installation",
+      "fc2": "raise installation request"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product enquiry",
+      "fc1": "price enquiry",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "auto product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "camera part product",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "camera part product",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "chime",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "order status"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "raise installation request"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "installation follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "100 enquiry for order status",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "field related",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation",
+      "fc2": "installation follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation",
+      "fc2": "raise installation request"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation",
+      "fc2": "re-installation"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation",
+      "fc2": "tat breached"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation follow up",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation follow up",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "installation follow up",
+      "fc2": "tat breached"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "re-installation",
+      "fc2": "different location"
+    },
+    {
+      "enabled": true,
+      "fc": "field related",
+      "fc1": "re-installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "customer wifi not visible in app"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "touch issue"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "raise installation request"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "ai alerts missed",
+      "fc2": "cx does not want installation"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "ai alerts missed",
+      "fc2": "installation done"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "ai alerts missed",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "ai alerts missed",
+      "fc2": "installation non-serviceable"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "dead device",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "home product issue",
+      "fc1": "video call not coming",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "ht product/application",
+      "fc1": "issue 100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "ht product/application",
+      "fc1": "issue 100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "ht product/application",
+      "fc1": "issue 100 engineer visit for installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "ht product/application",
+      "fc1": "issue 100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "ht product/application",
+      "fc1": "issue enquiry",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "ht product/application",
+      "fc1": "issue installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "ht product/application",
+      "fc1": "issue installation city enquiry",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "installation",
+      "fc1": "installation",
+      "fc2": "installation enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "installation",
+      "fc1": "installation enquiry",
+      "fc2": "check service area"
+    },
+    {
+      "enabled": true,
+      "fc": "language barrier",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "lock product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "lock product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "lock product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "lock product issue",
+      "fc1": "door lock issue",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "lock product issue",
+      "fc1": "door lock issue",
+      "fc2": "installation follow up"
+    },
+    {
+      "enabled": true,
+      "fc": "ls product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "need to update wi-fi",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "need to update wi-fi",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "update wifi"
+    },
+    {
+      "enabled": true,
+      "fc": "only video call is not coming",
+      "fc1": "on phn 100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "only video call is not coming",
+      "fc1": "on phn installation city enquiry",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "order related",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "order related",
+      "fc1": "cancel order",
+      "fc2": "installation non-serviceable"
+    },
+    {
+      "enabled": true,
+      "fc": "order related",
+      "fc1": "installation follow up",
+      "fc2": "within tat"
+    },
+    {
+      "enabled": true,
+      "fc": "plug product",
+      "fc1": "plug product issue",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "product enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "product enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "product enquiry",
+      "fc1": "enquiry",
+      "fc2": "installtion enquiry"
+    },
+    {
+      "enabled": true,
+      "fc": "product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "no prompt after scanning qr code"
+    },
+    {
+      "enabled": true,
+      "fc": "product issue",
+      "fc1": "100 engineer visit for service call",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "shiprocket",
+      "fc1": "shiprocket",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "spare part enquiry",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "stuck outside",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "tracker product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "tracker product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "tracker product issue",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "tracker product issue",
+      "fc1": "location/trip issue",
+      "fc2": "installation non-serviceable"
+    },
+    {
+      "enabled": true,
+      "fc": "unable to lock through",
+      "fc1": "gateway 100 engineer visit for installation",
+      "fc2": "service call"
+    },
+    {
+      "enabled": true,
+      "fc": "unable to lock through",
+      "fc1": "gateway 100 engineer visit for installation",
+      "fc2": "touch issue"
+    },
+    {
+      "enabled": true,
+      "fc": "unable to lock through",
+      "fc1": "gateway installation city enquiry",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "unable to login",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "update wi-fi",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    },
+    {
+      "enabled": true,
+      "fc": "usage education",
+      "fc1": "100 engineer visit for installation",
+      "fc2": "installation"
+    },
+    {
+      "enabled": true,
+      "fc": "wifi unlocking issues",
+      "fc1": "100 engineer visit for installation",
+      "fc2": ""
+    }
+  ]
+}

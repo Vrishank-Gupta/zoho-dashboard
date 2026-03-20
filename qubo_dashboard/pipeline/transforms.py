@@ -57,15 +57,15 @@ def build_ticket_facts(tickets: list[TicketRecord]) -> list[TicketFacts]:
     facts: list[TicketFacts] = []
     for ticket in tickets:
         quality = ticket.quality
-        usable_product = ticket.is_core_product
+        usable_product = True
         version_covered = ticket.normalized_version != "Unknown"
         returned_7d, resolved_7d, transferred_7d, blank_again_7d = blank_return_flags.get(ticket.ticket_id, (False, False, False, False))
         facts.append(
             TicketFacts(
                 ticket=ticket,
                 repeat_flag=ticket.ticket_id in repeat_ids,
-                usable_issue=quality.usable_issue,
-                actionable_issue=quality.actionable_issue and usable_product,
+                usable_issue=True,
+                actionable_issue=True,
                 usable_product=usable_product,
                 version_covered=version_covered,
                 bot_journey=quality.bot_journey,
@@ -96,6 +96,7 @@ def build_aggregates(ticket_facts: list[TicketFacts]) -> dict[str, list[dict]]:
         "agg_anomalies": agg_anomalies(ticket_facts),
         "agg_health_score": agg_health_score(ticket_facts),
         "agg_data_quality": agg_data_quality(ticket_facts),
+        "agg_model_breakdown": agg_model_breakdown(ticket_facts),
     }
 
 
@@ -132,11 +133,10 @@ def agg_daily_tickets(ticket_facts: list[TicketFacts]) -> list[dict]:
                 "bot_deflection_rate": ratio(sum(1 for item in items if item.ticket.is_bot_resolved), count),
                 "bot_transfer_rate": ratio(sum(1 for item in items if item.ticket.is_bot_transferred), count),
                 "blank_chat_rate": ratio(sum(1 for item in items if item.dropped_in_bot), count),
-                "fcr_rate": ratio(sum(1 for item in items if item.ticket.is_fcr_success), count),
                 "repeat_rate": ratio(sum(1 for item in items if item.repeat_flag), count),
                 "logistics_rate": ratio(sum(1 for item in items if item.ticket.is_logistics), count),
                 "handle_time_hours": average([item.ticket.handle_time_minutes / 60 for item in items if item.ticket.handle_time_minutes is not None]),
-                "young_device_rate": ratio(sum(1 for item in items if (item.ticket.device_age_days or 9999) <= 30), count),
+                "cancelled_existing_ticket_rate": ratio(sum(1 for item in items if item.ticket.is_cancelled_existing_ticket), count),
             }
         )
     return rows
@@ -145,8 +145,6 @@ def agg_daily_tickets(ticket_facts: list[TicketFacts]) -> list[dict]:
 def agg_fc_weekly(ticket_facts: list[TicketFacts]) -> list[dict]:
     grouped = defaultdict(list)
     for fact in ticket_facts:
-        if not fact.actionable_issue:
-            continue
         ticket = fact.ticket
         week_start = ticket.created_at.date() - timedelta(days=ticket.created_at.weekday())
         key = (week_start, ticket.canonical_product, ticket.normalized_fault_code, ticket.normalized_fault_code_l2, ticket.normalized_version)
@@ -168,7 +166,6 @@ def agg_fc_weekly(ticket_facts: list[TicketFacts]) -> list[dict]:
                 "bot_deflection_rate": ratio(sum(1 for item in items if item.ticket.is_bot_resolved), count),
                 "bot_transfer_rate": ratio(sum(1 for item in items if item.ticket.is_bot_transferred), count),
                 "blank_chat_rate": ratio(sum(1 for item in items if item.dropped_in_bot), count),
-                "fcr_rate": ratio(sum(1 for item in items if item.ticket.is_fcr_success), count),
                 "logistics_rate": ratio(sum(1 for item in items if item.ticket.is_logistics), count),
                 "top_symptom": top_text([item.ticket.symptom for item in items]),
                 "top_defect": top_text([item.ticket.defect for item in items]),
@@ -187,7 +184,7 @@ def agg_sw_version(ticket_facts: list[TicketFacts]) -> list[dict]:
     grouped_recent = defaultdict(list)
     grouped_previous = defaultdict(list)
     for fact in ticket_facts:
-        if not fact.actionable_issue or not fact.version_covered:
+        if not fact.version_covered:
             continue
         ticket = fact.ticket
         key = (ticket.canonical_product, ticket.normalized_version, ticket.normalized_fault_code_l2)
@@ -233,7 +230,6 @@ def agg_resolution(ticket_facts: list[TicketFacts]) -> list[dict]:
             "product_family": key[1],
             "resolution_code_level_1": key[2],
             "tickets": len(items),
-            "fcr_rate": ratio(sum(1 for item in items if item.ticket.is_fcr_success), len(items)),
             "bot_deflection_rate": ratio(sum(1 for item in items if item.ticket.is_bot_resolved), len(items)),
             "bot_transfer_rate": ratio(sum(1 for item in items if item.ticket.is_bot_transferred), len(items)),
             "blank_chat_rate": ratio(sum(1 for item in items if item.dropped_in_bot), len(items)),
@@ -256,7 +252,6 @@ def agg_channel(ticket_facts: list[TicketFacts]) -> list[dict]:
             "channel": key[1],
             "department_name": key[2],
             "tickets": len(items),
-            "fcr_rate": ratio(sum(1 for item in items if item.ticket.is_fcr_success), len(items)),
             "bot_deflection_rate": ratio(sum(1 for item in items if item.ticket.is_bot_resolved), len(items)),
             "bot_transfer_rate": ratio(sum(1 for item in items if item.ticket.is_bot_transferred), len(items)),
             "blank_chat_rate": ratio(sum(1 for item in items if item.dropped_in_bot), len(items)),
@@ -298,6 +293,7 @@ def agg_bot(ticket_facts: list[TicketFacts]) -> list[dict]:
         total = len(items)
         blanks = [item for item in items if item.dropped_in_bot]
         blank_count = len(blanks)
+        cancelled_count = sum(1 for item in items if item.ticket.is_cancelled_existing_ticket)
         rows.append(
             {
                 "product_family": product_family,
@@ -305,6 +301,7 @@ def agg_bot(ticket_facts: list[TicketFacts]) -> list[dict]:
                 "bot_resolved_tickets": sum(1 for item in items if item.ticket.is_bot_resolved),
                 "bot_transferred_tickets": sum(1 for item in items if item.ticket.is_bot_transferred),
                 "blank_chat_tickets": blank_count,
+                "cancelled_existing_ticket_tickets": cancelled_count,
                 "blank_chat_returned_7d": sum(1 for item in blanks if item.blank_chat_returned_7d),
                 "blank_chat_resolved_7d": sum(1 for item in blanks if item.blank_chat_resolved_7d),
                 "blank_chat_transferred_7d": sum(1 for item in blanks if item.blank_chat_transferred_7d),
@@ -315,6 +312,7 @@ def agg_bot(ticket_facts: list[TicketFacts]) -> list[dict]:
                 "bot_resolved_rate": ratio(sum(1 for item in items if item.ticket.is_bot_resolved), total),
                 "bot_transferred_rate": ratio(sum(1 for item in items if item.ticket.is_bot_transferred), total),
                 "blank_chat_rate": ratio(blank_count, total),
+                "cancelled_existing_ticket_rate": ratio(cancelled_count, total),
             }
         )
     return rows
@@ -323,8 +321,6 @@ def agg_bot(ticket_facts: list[TicketFacts]) -> list[dict]:
 def agg_voc_mismatch(ticket_facts: list[TicketFacts]) -> list[dict]:
     grouped = defaultdict(list)
     for fact in ticket_facts:
-        if not fact.actionable_issue:
-            continue
         ticket = fact.ticket
         key = (ticket.canonical_product, ticket.normalized_fault_code_l2, ticket.defect or "Unknown")
         grouped[key].append(fact)
@@ -344,8 +340,6 @@ def agg_anomalies(ticket_facts: list[TicketFacts]) -> list[dict]:
     grouped_recent = Counter()
     grouped_baseline = defaultdict(list)
     for fact in ticket_facts:
-        if not fact.actionable_issue:
-            continue
         ticket = fact.ticket
         key = (ticket.canonical_product, ticket.normalized_fault_code, ticket.normalized_department)
         if ticket.created_at >= recent_start:
@@ -371,9 +365,8 @@ def agg_health_score(ticket_facts: list[TicketFacts]) -> list[dict]:
         repair_rate = ratio(sum(1 for item in items if item.ticket.field_visit_type == "Repair"), count)
         repeat_rate = ratio(sum(1 for item in items if item.repeat_flag), count)
         bot = ratio(sum(1 for item in items if item.ticket.is_bot_resolved), count)
-        fcr = ratio(sum(1 for item in items if item.ticket.is_fcr_success), count)
-        score = max(0.0, min(10.0, 10 - (repair_rate * 15) - (repeat_rate * 10) + (bot * 2.5) + (fcr * 2)))
-        rows.append({"metric_date": day, "health_score": round(score, 2), "repair_field_rate": repair_rate, "repeat_rate": repeat_rate, "bot_deflection_rate": bot, "fcr_rate": fcr})
+        score = max(0.0, min(10.0, 10 - (repair_rate * 15) - (repeat_rate * 10) + (bot * 2.5)))
+        rows.append({"metric_date": day, "health_score": round(score, 2), "repair_field_rate": repair_rate, "repeat_rate": repeat_rate, "bot_deflection_rate": bot})
     return rows
 
 
@@ -390,7 +383,7 @@ def agg_data_quality(ticket_facts: list[TicketFacts]) -> list[dict]:
             "actionable_issue_tickets": sum(1 for item in ticket_facts if item.actionable_issue),
             "blank_fault_code_tickets": sum(1 for item in ticket_facts if item.ticket.normalized_fault_code == "Unclassified"),
             "blank_fault_code_l2_tickets": sum(1 for item in ticket_facts if item.ticket.normalized_fault_code_l2 == "Unclassified"),
-            "unknown_product_tickets": sum(1 for item in ticket_facts if item.ticket.canonical_product == "Unknown / Dirty Data"),
+            "unknown_product_tickets": sum(1 for item in ticket_facts if item.ticket.canonical_product in {"Miscellaneous", "Blank Chats"}),
             "hero_internal_tickets": sum(1 for item in ticket_facts if item.ticket.is_internal_hero),
             "version_coverage_tickets": sum(1 for item in ticket_facts if item.version_covered),
             "dropped_in_bot_tickets": sum(1 for item in ticket_facts if item.dropped_in_bot),
@@ -399,6 +392,30 @@ def agg_data_quality(ticket_facts: list[TicketFacts]) -> list[dict]:
             "email_department_reassigned_tickets": sum(1 for item in ticket_facts if item.reassigned_email_department and item.ticket.normalized_channel == "Email"),
         }
     ]
+
+
+def agg_model_breakdown(ticket_facts: list[TicketFacts]) -> list[dict]:
+    grouped = defaultdict(list)
+    for fact in ticket_facts:
+        ticket = fact.ticket
+        key = (ticket.canonical_product, ticket.canonical_model)
+        grouped[key].append(fact)
+    rows = []
+    for key, items in grouped.items():
+        count = len(items)
+        rows.append(
+            {
+                "product_family": key[0],
+                "canonical_model": key[1],
+                "tickets": count,
+                "repair_field_visit_rate": ratio(sum(1 for item in items if item.ticket.field_visit_type == "Repair"), count),
+                "repeat_rate": ratio(sum(1 for item in items if item.repeat_flag), count),
+                "bot_deflection_rate": ratio(sum(1 for item in items if item.ticket.is_bot_resolved), count),
+                "bot_transfer_rate": ratio(sum(1 for item in items if item.ticket.is_bot_transferred), count),
+                "blank_chat_rate": ratio(sum(1 for item in items if item.dropped_in_bot), count),
+            }
+        )
+    return rows
 
 
 def top_text(values: list[str | None]) -> str:

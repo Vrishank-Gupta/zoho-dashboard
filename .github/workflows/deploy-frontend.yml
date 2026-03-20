@@ -1,0 +1,41 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - "netlify.toml"
+      - ".github/workflows/deploy-frontend.yml"
+      - "deploy/frontend.config.production.example.js"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare production frontend config
+        run: |
+          cat <<'EOF' > frontend/config.js
+          window.QUBO_APP_CONFIG = {
+            apiBaseUrl: "${{ secrets.QUBO_FRONTEND_API_BASE_URL }}",
+          };
+          EOF
+
+      - name: Deploy to Netlify
+        uses: nwtgck/actions-netlify@v3.0
+        with:
+          publish-dir: "./frontend"
+          production-branch: "main"
+          production-deploy: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          deploy-message: "GitHub Actions production deploy"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+

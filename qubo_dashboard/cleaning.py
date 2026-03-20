@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .dashboard_rules import load_installation_combos
 
-VALID_CHANNELS = {"Chat", "Phone", "Email", "WhatsApp", "Web"}
+
+VALID_CHANNELS = {"Chat", "Phone", "Email", "Web"}
 CORE_PRODUCT_FAMILIES = {
     "Dash Cam",
     "Smart Camera",
@@ -14,8 +16,8 @@ CORE_PRODUCT_FAMILIES = {
     "Smart Plug",
 }
 CHANNEL_ALIASES = {
-    "whats app": "WhatsApp",
-    "whatsapp": "WhatsApp",
+    "whats app": "Chat",
+    "whatsapp": "Chat",
     "chat": "Chat",
     "phone": "Phone",
     "email": "Email",
@@ -82,20 +84,22 @@ def normalize_channel(channel: str | None, department: str | None) -> str:
         mapped = CHANNEL_ALIASES.get(raw_channel.lower())
         if mapped:
             return mapped
+        if raw_channel == "WhatsApp":
+            return "Chat"
         if raw_channel in VALID_CHANNELS:
             return raw_channel
     if raw_department == "Email":
         return "Email"
-    return "Unknown / Dirty Data"
+    return "Others"
 
 
 def normalize_department(department: str | None) -> str:
     raw_department = (department or "").strip()
     if raw_department == "Email":
-        return "Unknown / Dirty Data"
+        return "Miscellaneous"
     if raw_department in REAL_DEPARTMENTS:
         return raw_department
-    return "Unknown / Dirty Data"
+    return "Miscellaneous"
 
 
 def normalize_fault_code(value: str | None) -> str:
@@ -114,11 +118,11 @@ def normalize_resolution(value: str | None) -> str:
 
 
 def canonical_product(product: str | None, device_model: str | None = None) -> str:
+    """Returns product family, 'Miscellaneous' for blank fields, or 'Others' for unrecognised products."""
     raw_product = (product or "").strip()
     raw_model = (device_model or "").strip()
-    if not raw_product or raw_product == "-":
-        if not raw_model or raw_model == "-":
-            return "Unknown / Dirty Data"
+    if (not raw_product or raw_product == "-") and (not raw_model or raw_model == "-"):
+        return "Miscellaneous"
     lowered = " ".join([raw_product.lower(), raw_model.lower()]).strip()
     if lowered == "shiprocket":
         return "Logistics / Non-product"
@@ -129,12 +133,118 @@ def canonical_product(product: str | None, device_model: str | None = None) -> s
     for family, prefixes in MODEL_PREFIXES:
         if any(prefix in compact_model for prefix in prefixes):
             return family
-    return "Other / Accessories"
+    return "Others"
 
 
-def is_installation_ticket(fault_code: str, fault_code_l2: str, resolution: str, repair: str | None) -> bool:
-    haystack = " ".join([fault_code.lower(), fault_code_l2.lower(), resolution.lower(), (repair or "").lower()])
-    return "install" in haystack
+MODEL_KEYWORDS: dict[str, list[tuple[str, tuple[str, ...]]]] = {
+    "Dash Cam": [
+        ("Dash Cam 4G", ("dashcam 4g", "dash cam 4g", "4g dashcam")),
+        ("Dash Cam Pro", ("dashcam pro", "dash cam pro")),
+        ("Dashplay", ("dashplay",)),
+        ("Dash Cam Trio", ("dashcam trio", "dash cam trio")),
+        ("Dash Cam 3-Channel", ("dashcam 3 channel", "dash cam 3 channel", "3 channel")),
+        ("Bike Cam", ("bike cam", "bikecam")),
+    ],
+    "Smart Camera": [
+        ("Smart Camera 360", ("cam 360", "camera 360", "360")),
+        ("Bullet Cam", ("bullet cam", "bulletcam")),
+        ("Baby Camera", ("baby camera", "baby cam")),
+        ("Outdoor Camera", ("outdoor camera", "outdoor cam")),
+        ("Indoor Camera", ("indoor camera", "indoor cam")),
+    ],
+}
+
+
+def normalize_model(product_family: str, raw_product: str | None, raw_model: str | None) -> str:
+    """Return a specific model name within a product family, or the family name as fallback."""
+    family_models = MODEL_KEYWORDS.get(product_family)
+    if not family_models:
+        return product_family
+    lowered = " ".join([(raw_product or "").lower(), (raw_model or "").lower()]).strip()
+    for model_name, needles in family_models:
+        if any(needle in lowered for needle in needles):
+            return model_name
+    return product_family
+
+
+# ── Installation ticket classification ────────────────────────────────────────
+# A Field Service ticket is an INSTALLATION visit when its
+# (Fault_Code, Fault_Code_Level_1, Fault_Code_Level_2) triple — after lowercasing
+# and normalising blank markers to "" — exactly matches one of the tuples in
+# INSTALLATION_COMBOS below (AND condition across all three fields).
+#
+# "" in a tuple position means "blank / unspecified" (source value was -, -None-,
+# null, 0, etc. — normalised to "Unclassified" by normalize_fault_code, then
+# mapped to "" here for combo matching).
+#
+# ── HOW TO ADD A NEW INSTALLATION COMBINATION ────────────────────────────────
+# 1. Run this query against the Zoho source table:
+#      SELECT Fault_Code, Fault_Code_Level_1, Fault_Code_Level_2, COUNT(*) AS cnt
+#      FROM <table> WHERE Department_Name = 'Field Service'
+#      GROUP BY 1, 2, 3 ORDER BY cnt DESC LIMIT 40;
+# 2. Identify the row you want to classify as Installation.
+# 3. Append a new 3-tuple to INSTALLATION_COMBOS (all values lowercase, blank → "").
+# 4. Re-run the pipeline (pipeline_recreate_tables=true drops and recreates tables).
+# ─────────────────────────────────────────────────────────────────────────────
+
+INSTALLATION_COMBOS: tuple[tuple[str, str, str], ...] = (
+    # (fault_code, fault_code_level_1, fault_code_level_2) — all lowercase, "" = blank
+
+    # blank FC / Installation form request received
+    ("", "installation form request received", "installation form request received"),
+
+    # blank or generic FC / 100 engineer visit for installation / blank or confirmed L2
+    ("", "100 engineer visit for installation", ""),
+    ("", "100 engineer visit for installation", "installation"),
+    ("", "100 engineer visit for installation", "installation form request received"),
+    ("", "100 engineer visit for installation", "installation done"),
+    ("", "100 engineer visit for installation", "raise installation request"),
+
+    # field related FC / 100 engineer visit for installation
+    ("field related", "100 engineer visit for installation", ""),
+    ("field related", "100 engineer visit for installation", "installation"),
+    ("field related", "100 engineer visit for installation", "installation done"),
+
+    # product-category FCs / 100 engineer visit for installation
+    ("product issue", "100 engineer visit for installation", ""),
+    ("application", "100 engineer visit for installation", ""),
+    ("lock product issue", "100 engineer visit for installation", ""),
+    ("auto product issue", "100 engineer visit for installation", ""),
+    ("home product issue", "100 engineer visit for installation", ""),
+    ("ap product issue", "100 engineer visit for installation", ""),
+
+    # field related FC / installation-type L1
+    ("field related", "installation", "raise installation request"),
+    ("field related", "installation", "installation enquiry"),
+    ("field related", "installation", "installation"),
+    ("field related", "installation", "re-installation"),
+    ("field related", "installation", "installation done"),
+)
+
+# Pre-built frozenset for O(1) look-up (populated once at import time).
+_INSTALLATION_COMBOS_SET: frozenset[tuple[str, str, str]] = frozenset(INSTALLATION_COMBOS)
+
+
+def _fc_key(value: str) -> str:
+    """Map a pre-normalised fault-code value to an installation-matching key.
+
+    'Unclassified' (placeholder for blank/missing source values) maps to ""
+    so it matches the "" wildcard entries in INSTALLATION_COMBOS.
+    """
+    return "" if value == "Unclassified" else value.lower()
+
+
+def is_installation_ticket(fault_code: str, fault_code_l1: str, fault_code_l2: str) -> bool:
+    """True when this Field Service ticket is an installation visit.
+
+    The (Fault_Code, Fault_Code_Level_1, Fault_Code_Level_2) combination — after
+    lowercasing and mapping blank/unclassified values to "" — must exactly match
+    one of the entries in INSTALLATION_COMBOS (AND condition across all three
+    fields; no substring matching).
+
+    To extend classification: edit `config/dashboard_rules/installation_combos.json`.
+    """
+    return (_fc_key(fault_code), _fc_key(fault_code_l1), _fc_key(fault_code_l2)) in load_installation_combos()
 
 
 def is_actionable_issue(fault_code: str, fault_code_l2: str) -> bool:
@@ -164,6 +274,7 @@ def evaluate_quality(
     channel: str,
     department: str,
     fault_code: str,
+    fault_code_l1: str,
     fault_code_l2: str,
     bot_action: str | None,
 ) -> TicketQuality:
@@ -172,13 +283,14 @@ def evaluate_quality(
     bot_journey = channel == "Chat" and bot_action_text not in {"", "-", "0"}
     missing_issue = fault_code == "Unclassified" or fault_code_l2 == "Unclassified"
     usable_issue = not missing_issue and not dropped_in_bot
-    actionable_issue = usable_issue and is_actionable_issue(fault_code, fault_code_l2) and not is_installation_ticket(fault_code, fault_code_l2, "", None)
+    installation_match = department == "Field Service" and is_installation_ticket(fault_code, fault_code_l1, fault_code_l2)
+    actionable_issue = usable_issue and is_actionable_issue(fault_code, fault_code_l2) and not installation_match
     return TicketQuality(
         usable_issue=usable_issue,
         actionable_issue=actionable_issue,
         bot_journey=bot_journey,
         dropped_in_bot=dropped_in_bot,
         missing_issue_outside_bot=missing_issue and channel != "Chat",
-        dirty_channel=channel == "Unknown / Dirty Data",
-        reassigned_email_department=(department == "Unknown / Dirty Data"),
+        dirty_channel=False,
+        reassigned_email_department=(department == "Miscellaneous"),
     )

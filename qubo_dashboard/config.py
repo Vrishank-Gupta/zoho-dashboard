@@ -31,8 +31,9 @@ class Settings:
     app_port: int = int(os.getenv("QUBO_APP_PORT", "8000"))
     app_reload: bool = os.getenv("QUBO_APP_RELOAD", "true").lower() == "true"
     serve_frontend: bool = os.getenv("QUBO_SERVE_FRONTEND", "false").lower() == "true"
-    use_sample_data: bool = os.getenv("QUBO_USE_SAMPLE_DATA", "false").lower() == "true"
     pipeline_recreate_tables: bool = os.getenv("QUBO_PIPELINE_RECREATE_TABLES", "true").lower() == "true"
+    pipeline_source_cutoff: str = os.getenv("QUBO_PIPELINE_SOURCE_CUTOFF", "2026-01-01")
+    raw_ticket_cache_table: str = os.getenv("QUBO_RAW_TICKET_CACHE_TABLE", "raw_ticket_cache")
     cors_allowed_origins_raw: str = os.getenv("QUBO_CORS_ALLOWED_ORIGINS", "*")
     zoho_ticket_table: str = os.getenv("QUBO_ZOHO_TICKET_TABLE", "Call_Driver_Data_Zoho_FromAug2024")
     agg_daily_tickets_table: str = os.getenv("QUBO_AGG_DAILY_TICKETS_TABLE", "agg_daily_tickets")
@@ -47,6 +48,7 @@ class Settings:
     agg_anomalies_table: str = os.getenv("QUBO_AGG_ANOMALIES_TABLE", "agg_anomalies")
     agg_health_score_table: str = os.getenv("QUBO_AGG_HEALTH_SCORE_TABLE", "agg_health_score")
     agg_data_quality_table: str = os.getenv("QUBO_AGG_DATA_QUALITY_TABLE", "agg_data_quality")
+    agg_model_breakdown_table: str = os.getenv("QUBO_AGG_MODEL_BREAKDOWN_TABLE", "agg_model_breakdown")
     pipeline_log_table: str = os.getenv("QUBO_PIPELINE_LOG_TABLE", "pipeline_log")
 
     @property
@@ -71,11 +73,11 @@ class Settings:
 
     @property
     def has_zoho_database(self) -> bool:
-        return bool(not self.use_sample_data and self.zoho_db.is_configured)
+        return self.zoho_db.is_configured
 
     @property
     def has_agg_database(self) -> bool:
-        return bool(not self.use_sample_data and self.agg_db.is_configured)
+        return self.agg_db.is_configured
 
     @property
     def cors_allowed_origins(self) -> list[str]:

@@ -1,0 +1,40 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "qubo_dashboard/**"
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".github/workflows/deploy-backend.yml"
+      - "deploy/sql/**"
+      - "deploy/.env.backend.production.example"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy backend on VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.QUBO_VM_HOST }}
+          username: ${{ secrets.QUBO_VM_USER }}
+          key: ${{ secrets.QUBO_VM_SSH_KEY }}
+          port: ${{ secrets.QUBO_VM_PORT }}
+          script_stop: true
+          script: |
+            set -e
+            cd "${{ secrets.QUBO_VM_APP_DIR }}"
+            git fetch --all
+            git checkout main
+            git pull origin main
+            docker compose up -d --build

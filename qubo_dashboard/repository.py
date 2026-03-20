@@ -5,25 +5,19 @@ from typing import Any
 
 from .config import settings
 from .models import TicketRecord
-from .sample_data import generate_sample_tickets
 
 
 class TicketRepository:
     def __init__(self) -> None:
         self._zoho_columns_cache: set[str] | None = None
 
-    def fetch_tickets(self) -> list[TicketRecord]:
-        if not settings.has_zoho_database:
-            return generate_sample_tickets()
-        try:
-            return self._fetch_zoho_mysql()
-        except Exception:
-            return generate_sample_tickets()
-
-    def fetch_tickets_strict(self) -> list[TicketRecord]:
+    def fetch_tickets(self, since: datetime | None = None) -> list[TicketRecord]:
         if not settings.has_zoho_database:
             raise RuntimeError("Remote Zoho DB is not configured.")
-        return self._fetch_zoho_mysql()
+        return self._fetch_zoho_mysql(since=since)
+
+    def fetch_tickets_strict(self, since: datetime | None = None) -> list[TicketRecord]:
+        return self.fetch_tickets(since=since)
 
     def fetch_issue_tickets(
         self,
@@ -34,15 +28,7 @@ class TicketRepository:
         limit: int = 24,
     ) -> list[TicketRecord]:
         if not settings.has_zoho_database:
-            tickets = generate_sample_tickets()
-            return [
-                ticket
-                for ticket in tickets
-                if ticket.canonical_product == product_family
-                and ticket.normalized_fault_code == fault_code
-                and ticket.normalized_fault_code_l2 == fault_code_level_2
-                and ticket.normalized_version == software_version
-            ][:limit]
+            return []
         try:
             return self._fetch_issue_tickets_from_zoho(
                 product_family=product_family,
@@ -56,10 +42,10 @@ class TicketRepository:
 
     def get_connection_status(self) -> dict[str, Any]:
         return {
-            "use_sample_data": settings.use_sample_data,
             "zoho_configured": settings.has_zoho_database,
             "agg_configured": settings.has_agg_database,
             "zoho_ticket_table": settings.zoho_ticket_table,
+            "raw_ticket_cache_table": settings.raw_ticket_cache_table,
             "agg_tables": {
                 "agg_daily_tickets": settings.agg_daily_tickets_table,
                 "agg_fc_weekly": settings.agg_fc_weekly_table,
@@ -77,7 +63,109 @@ class TicketRepository:
             },
         }
 
-    def _fetch_zoho_mysql(self) -> list[TicketRecord]:
+    def get_latest_cached_ticket_created_at(self) -> datetime | None:
+        connection = self.open_agg_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            f"SELECT MAX(created_at) FROM {settings.raw_ticket_cache_table}"
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        latest = row[0] if row else None
+        return parse_datetime(latest)
+
+    def fetch_cached_tickets(self, since: datetime | None = None) -> list[TicketRecord]:
+        connection = self.open_agg_connection()
+        cursor = connection.cursor(dictionary=True)
+        query = self._build_cached_ticket_select_query(since=since)
+        if since:
+            cursor.execute(query, (since.strftime("%Y-%m-%d %H:%M:%S"),))
+        else:
+            cursor.execute(query)
+        rows = cursor.fetchall()
+        cursor.close()
+        connection.close()
+        tickets: list[TicketRecord] = []
+        for row in rows:
+            ticket = self._cached_row_to_ticket(row)
+            if ticket:
+                tickets.append(ticket)
+        return tickets
+
+    def upsert_cached_tickets(self, tickets: list[TicketRecord]) -> int:
+        if not tickets:
+            return 0
+        connection = self.open_agg_connection()
+        cursor = connection.cursor()
+        columns = [
+            "ticket_id",
+            "created_at",
+            "closed_at",
+            "department_name",
+            "channel",
+            "email",
+            "mobile",
+            "phone",
+            "name",
+            "product",
+            "device_model",
+            "fault_code",
+            "fault_code_level_1",
+            "fault_code_level_2",
+            "resolution_code_level_1",
+            "bot_action",
+            "software_version",
+            "device_serial_number",
+            "number_of_reopen",
+            "symptom",
+            "defect",
+            "repair",
+        ]
+        placeholders = ", ".join(["%s"] * len(columns))
+        updates = ", ".join(
+            f"{column}=VALUES({column})" for column in columns if column != "ticket_id"
+        )
+        sql = (
+            f"INSERT INTO {settings.raw_ticket_cache_table} ({', '.join(columns)}) "
+            f"VALUES ({placeholders}) "
+            f"ON DUPLICATE KEY UPDATE {updates}"
+        )
+        values = [
+            (
+                ticket.ticket_id,
+                ticket.created_at,
+                ticket.closed_at,
+                ticket.department_name,
+                ticket.channel,
+                ticket.email,
+                ticket.mobile,
+                ticket.phone,
+                ticket.name,
+                ticket.product,
+                ticket.device_model,
+                ticket.fault_code,
+                ticket.fault_code_level_1,
+                ticket.fault_code_level_2,
+                ticket.resolution_code_level_1,
+                ticket.bot_action,
+                ticket.software_version,
+                ticket.device_serial_number,
+                ticket.number_of_reopen,
+                ticket.symptom,
+                ticket.defect,
+                ticket.repair,
+            )
+            for ticket in tickets
+        ]
+        cursor.executemany(sql, values)
+        affected = cursor.rowcount
+        connection.commit()
+        cursor.close()
+        connection.close()
+        return affected
+
+    def _fetch_zoho_mysql(self, since: datetime | None = None) -> list[TicketRecord]:
         import mysql.connector
 
         connection = mysql.connector.connect(
@@ -90,8 +178,12 @@ class TicketRepository:
         self._set_zoho_session(connection)
         available_columns = self._get_zoho_columns(connection)
         cursor = connection.cursor(dictionary=True)
-        query = self._build_zoho_select_query(available_columns)
-        cursor.execute(query)
+        where_clause = "WHERE Created_Time >= %s" if since else ""
+        query = self._build_zoho_select_query(available_columns, where_clause=where_clause)
+        if since:
+            cursor.execute(query, (since.strftime("%Y-%m-%d %H:%M:%S"),))
+        else:
+            cursor.execute(query)
         rows = cursor.fetchall()
         cursor.close()
         connection.close()
@@ -101,6 +193,17 @@ class TicketRepository:
             if ticket:
                 tickets.append(ticket)
         return tickets
+
+    def _build_cached_ticket_select_query(self, since: datetime | None = None) -> str:
+        where_clause = "WHERE created_at >= %s" if since else ""
+        return (
+            "SELECT "
+            "ticket_id, created_at, closed_at, department_name, channel, email, mobile, phone, "
+            "name, product, device_model, fault_code, fault_code_level_1, fault_code_level_2, "
+            "resolution_code_level_1, bot_action, software_version, device_serial_number, "
+            "number_of_reopen, symptom, defect, repair "
+            f"FROM {settings.raw_ticket_cache_table} {where_clause} ORDER BY created_at"
+        ).strip()
 
     def _fetch_issue_tickets_from_zoho(
         self,
@@ -185,6 +288,7 @@ class TicketRepository:
             "Product",
             "Device_Model",
             "Fault_Code",
+            "Fault_Code_Level_1",
             "Fault_Code_Level_2",
             "Resolution_Code_Level_1",
             "Bot_Action",
@@ -194,7 +298,6 @@ class TicketRepository:
             "Symptom",
             "Defect",
             "Repair",
-            "First_Commissioning_Date",
         ]
         select_parts = []
         for column in desired_columns:
@@ -221,6 +324,7 @@ class TicketRepository:
             product=clean_text(row.get("Product")),
             device_model=clean_text(row.get("Device_Model")),
             fault_code=clean_text(row.get("Fault_Code")),
+            fault_code_level_1=clean_text(row.get("Fault_Code_Level_1")),
             fault_code_level_2=clean_text(row.get("Fault_Code_Level_2")),
             resolution_code_level_1=clean_text(row.get("Resolution_Code_Level_1")),
             bot_action=clean_text(row.get("Bot_Action")),
@@ -230,7 +334,36 @@ class TicketRepository:
             symptom=clean_text(row.get("Symptom")),
             defect=clean_text(row.get("Defect")),
             repair=clean_text(row.get("Repair")),
-            first_commissioning_date=parse_datetime(row.get("First_Commissioning_Date")),
+            raw={str(key): value for key, value in row.items()},
+        )
+
+    def _cached_row_to_ticket(self, row: dict[str, object]) -> TicketRecord | None:
+        created_at = parse_datetime(row.get("created_at"))
+        if not created_at:
+            return None
+        return TicketRecord(
+            ticket_id=str(row.get("ticket_id") or ""),
+            created_at=created_at,
+            closed_at=parse_datetime(row.get("closed_at")),
+            department_name=clean_text(row.get("department_name")),
+            channel=clean_text(row.get("channel")),
+            email=clean_text(row.get("email")),
+            mobile=clean_text(row.get("mobile")),
+            phone=clean_text(row.get("phone")),
+            name=clean_text(row.get("name")),
+            product=clean_text(row.get("product")),
+            device_model=clean_text(row.get("device_model")),
+            fault_code=clean_text(row.get("fault_code")),
+            fault_code_level_1=clean_text(row.get("fault_code_level_1")),
+            fault_code_level_2=clean_text(row.get("fault_code_level_2")),
+            resolution_code_level_1=clean_text(row.get("resolution_code_level_1")),
+            bot_action=clean_text(row.get("bot_action")),
+            software_version=clean_text(row.get("software_version")),
+            device_serial_number=clean_text(row.get("device_serial_number")),
+            number_of_reopen=clean_text(row.get("number_of_reopen")),
+            symptom=clean_text(row.get("symptom")),
+            defect=clean_text(row.get("defect")),
+            repair=clean_text(row.get("repair")),
             raw={str(key): value for key, value in row.items()},
         )
 
