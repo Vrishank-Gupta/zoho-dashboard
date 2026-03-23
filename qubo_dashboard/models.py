@@ -47,7 +47,7 @@ class TicketRecord:
     @property
     def canonical_product(self) -> str:
         base = canonical_product(self.product, self.device_model)
-        if base == "Miscellaneous" and self.normalized_channel in {"Chat", "WhatsApp"}:
+        if self.is_blank_chat and base == "Miscellaneous":
             return "Blank Chats"
         return base
 

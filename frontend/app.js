@@ -983,41 +983,54 @@ function renderModelBreakdown(breakdown) {
   el.innerHTML = families.map((family) => {
     const models = breakdown[family] || [];
     if (!models.length) return "";
-    const maxVol = Math.max(...models.map((m) => m.tickets), 1);
-    const resolvedModels = models.map((m) => ({
-      ...m,
-      display_model: m.model === family ? "Unmapped / family-level" : m.model,
-    }));
+    const totalTickets = models.reduce((sum, m) => sum + Number(m.tickets || 0), 0);
+    const weighted = (key) => {
+      if (!totalTickets) return 0;
+      return models.reduce((sum, m) => sum + (Number(m[key] || 0) * Number(m.tickets || 0)), 0) / totalTickets;
+    };
+    const topSignals = models
+      .filter((m) => (m.model || "") && m.model !== family)
+      .sort((a, b) => Number(b.tickets || 0) - Number(a.tickets || 0))
+      .slice(0, 3)
+      .map((m) => m.model);
+    const summary = {
+      name: family,
+      tickets: totalTickets,
+      repair_field_visit_rate: weighted("repair_field_visit_rate"),
+      repeat_rate: weighted("repeat_rate"),
+      bot_deflection_rate: weighted("bot_deflection_rate"),
+      bot_transfer_rate: weighted("bot_transfer_rate"),
+    };
     return `
       <div class="model-family-block">
         <div class="model-family-title">${esc(family)}</div>
-        <div class="model-family-note">Models within ${esc(family)}. If a row says "Unmapped / family-level", the source ticket did not carry a specific model cleanly.</div>
+        <div class="model-family-note">Product-level summary only. Raw model codes are hidden for readability.${topSignals.length ? ` Dominant source labels seen: ${esc(topSignals.join(", "))}.` : ""}</div>
         <div class="pt-header model-header">
-          <div>Model</div>
+          <div>Product</div>
           <div style="text-align:right">Tickets</div>
           <div style="text-align:right">Repair %</div>
           <div style="text-align:right">Repeat %</div>
           <div style="text-align:right">Bot res.</div>
           <div style="text-align:right">Transfer %</div>
         </div>
-        ${resolvedModels.map((m) => {
-          const repairCls = m.repair_field_visit_rate >= 0.12 ? "red" : "muted";
-          const repeatCls = m.repeat_rate >= 0.15 ? "amber" : "muted";
-          const botCls = m.bot_deflection_rate >= 0.2 ? "green" : "muted";
-          const xferCls = m.bot_transfer_rate >= 0.2 ? "amber" : "muted";
+        ${(() => {
+          const repairCls = summary.repair_field_visit_rate >= 0.12 ? "red" : "muted";
+          const repeatCls = summary.repeat_rate >= 0.15 ? "amber" : "muted";
+          const botCls = summary.bot_deflection_rate >= 0.2 ? "green" : "muted";
+          const xferCls = summary.bot_transfer_rate >= 0.2 ? "amber" : "muted";
           return `
             <div class="pt-row model-row">
-              <div class="pt-name" title="${esc(m.display_model)}">${esc(m.display_model)}</div>
+              <div class="pt-name" title="${esc(summary.name)}">${esc(summary.name)}</div>
               <div class="pt-bar-wrap" style="text-align:right">
-                <div class="pt-val">${fmtNum(m.tickets)}</div>
-                <div class="bar-track" style="margin-top:3px"><div class="bar-fill" style="width:${(m.tickets / maxVol) * 100}%"></div></div>
+                <div class="pt-val">${fmtNum(summary.tickets)}</div>
+                <div class="bar-track" style="margin-top:3px"><div class="bar-fill" style="width:100%"></div></div>
               </div>
-              <div class="pt-val ${repairCls}">${fmtPct(m.repair_field_visit_rate)}</div>
-              <div class="pt-val ${repeatCls}">${fmtPct(m.repeat_rate)}</div>
-              <div class="pt-val ${botCls}">${fmtPct(m.bot_deflection_rate)}</div>
-              <div class="pt-val ${xferCls}">${fmtPct(m.bot_transfer_rate)}</div>
+              <div class="pt-val ${repairCls}">${fmtPct(summary.repair_field_visit_rate)}</div>
+              <div class="pt-val ${repeatCls}">${fmtPct(summary.repeat_rate)}</div>
+              <div class="pt-val ${botCls}">${fmtPct(summary.bot_deflection_rate)}</div>
+              <div class="pt-val ${xferCls}">${fmtPct(summary.bot_transfer_rate)}</div>
             </div>`;
-        }).join("")}
+        })()}
       </div>`;
   }).join("");
 }
