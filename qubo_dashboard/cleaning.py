@@ -79,23 +79,27 @@ def normalize_channel(channel: str | None, department: str | None) -> str:
     raw_channel = (channel or "").strip()
     raw_department = (department or "").strip()
     if raw_channel:
-        mapped = CHANNEL_ALIASES.get(raw_channel.lower())
-        if mapped:
-            return mapped
-        if raw_channel in VALID_CHANNELS:
-            return raw_channel
+        lowered = raw_channel.lower()
+        if lowered in {"bot", "chat", "whats app", "whatsapp"}:
+            return "Chat"
+        if lowered == "phone":
+            return "Phone"
+        if lowered == "email":
+            return "Email"
+        if lowered == "web":
+            return "Others"
     if raw_department == "Email":
         return "Email"
-    return "Unknown / Dirty Data"
+    return "Others"
 
 
 def normalize_department(department: str | None) -> str:
     raw_department = (department or "").strip()
-    if raw_department == "Email":
-        return "Unknown / Dirty Data"
-    if raw_department in REAL_DEPARTMENTS:
+    if raw_department in {"Hero Electronix", "Email", "Call Center"}:
+        return "Call Center"
+    if raw_department in {"Field Service", "Logistics"}:
         return raw_department
-    return "Unknown / Dirty Data"
+    return "Others"
 
 
 def normalize_fault_code(value: str | None) -> str:
@@ -105,7 +109,7 @@ def normalize_fault_code(value: str | None) -> str:
 
 def normalize_version(value: str | None) -> str:
     raw = (value or "").strip()
-    return raw if raw and raw.lower() not in BLANK_MARKERS else "Unknown"
+    return raw if raw and raw.lower() not in BLANK_MARKERS else "Not available in source"
 
 
 def normalize_resolution(value: str | None) -> str:
@@ -118,10 +122,8 @@ def canonical_product(product: str | None, device_model: str | None = None) -> s
     raw_model = (device_model or "").strip()
     if not raw_product or raw_product == "-":
         if not raw_model or raw_model == "-":
-            return "Unknown / Dirty Data"
+            return "Others"
     lowered = " ".join([raw_product.lower(), raw_model.lower()]).strip()
-    if lowered == "shiprocket":
-        return "Logistics / Non-product"
     for family, needles in PRODUCT_KEYWORDS:
         if any(needle in lowered for needle in needles):
             return family
@@ -129,7 +131,21 @@ def canonical_product(product: str | None, device_model: str | None = None) -> s
     for family, prefixes in MODEL_PREFIXES:
         if any(prefix in compact_model for prefix in prefixes):
             return family
-    return "Other / Accessories"
+    return "Others"
+
+
+def normalize_bot_action(value: str | None) -> str:
+    raw = (value or "").strip()
+    lowered = raw.lower()
+    if not raw or lowered in BLANK_MARKERS:
+        return "No bot action"
+    if "blank chat" in lowered:
+        return "Blank chat"
+    if "bot resolved" in lowered:
+        return "Bot resolved"
+    if "bot transfer" in lowered or "transferred to agent" in lowered:
+        return "Bot transferred to agent"
+    return "Other bot/system action"
 
 
 def is_installation_ticket(fault_code: str, fault_code_l2: str, resolution: str, repair: str | None) -> bool:
@@ -161,16 +177,23 @@ class TicketQuality:
 
 
 def evaluate_quality(
+    raw_channel: str | None,
+    raw_department: str | None,
     channel: str,
     department: str,
     fault_code: str,
+    fault_code_l1: str,
     fault_code_l2: str,
     bot_action: str | None,
 ) -> TicketQuality:
-    bot_action_text = (bot_action or "").strip().lower()
-    dropped_in_bot = "blank chat" in bot_action_text
-    bot_journey = channel == "Chat" and bot_action_text not in {"", "-", "0"}
-    missing_issue = fault_code == "Unclassified" or fault_code_l2 == "Unclassified"
+    normalized_bot_action = normalize_bot_action(bot_action)
+    dropped_in_bot = normalized_bot_action == "Blank chat"
+    bot_journey = channel == "Chat" and normalized_bot_action != "No bot action"
+    missing_issue = (
+        fault_code == "Unclassified"
+        or fault_code_l1 == "Unclassified"
+        or fault_code_l2 == "Unclassified"
+    )
     usable_issue = not missing_issue and not dropped_in_bot
     actionable_issue = usable_issue and is_actionable_issue(fault_code, fault_code_l2) and not is_installation_ticket(fault_code, fault_code_l2, "", None)
     return TicketQuality(
@@ -179,6 +202,6 @@ def evaluate_quality(
         bot_journey=bot_journey,
         dropped_in_bot=dropped_in_bot,
         missing_issue_outside_bot=missing_issue and channel != "Chat",
-        dirty_channel=channel == "Unknown / Dirty Data",
-        reassigned_email_department=(department == "Unknown / Dirty Data"),
+        dirty_channel=((raw_channel or "").strip().lower() not in {"", "chat", "phone", "email", "web", "whatsapp", "whats app", "bot"}),
+        reassigned_email_department=((raw_department or "").strip() == "Email"),
     )

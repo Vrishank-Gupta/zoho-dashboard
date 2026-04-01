@@ -29,8 +29,8 @@ class TicketRepository:
         self,
         product_family: str,
         fault_code: str,
+        fault_code_level_1: str,
         fault_code_level_2: str,
-        software_version: str,
         limit: int = 24,
     ) -> list[TicketRecord]:
         if not settings.has_zoho_database:
@@ -40,15 +40,15 @@ class TicketRepository:
                 for ticket in tickets
                 if ticket.canonical_product == product_family
                 and ticket.normalized_fault_code == fault_code
+                and ticket.normalized_fault_code_l1 == fault_code_level_1
                 and ticket.normalized_fault_code_l2 == fault_code_level_2
-                and ticket.normalized_version == software_version
             ][:limit]
         try:
             return self._fetch_issue_tickets_from_zoho(
                 product_family=product_family,
                 fault_code=fault_code,
+                fault_code_level_1=fault_code_level_1,
                 fault_code_level_2=fault_code_level_2,
-                software_version=software_version,
                 limit=limit,
             )
         except Exception:
@@ -90,8 +90,11 @@ class TicketRepository:
         self._set_zoho_session(connection)
         available_columns = self._get_zoho_columns(connection)
         cursor = connection.cursor(dictionary=True)
-        query = self._build_zoho_select_query(available_columns)
-        cursor.execute(query)
+        query = self._build_zoho_select_query(
+            available_columns,
+            where_clause="WHERE Created_Time >= %s ORDER BY Created_Time DESC",
+        )
+        cursor.execute(query, (settings.source_start_date,))
         rows = cursor.fetchall()
         cursor.close()
         connection.close()
@@ -106,8 +109,8 @@ class TicketRepository:
         self,
         product_family: str,
         fault_code: str,
+        fault_code_level_1: str,
         fault_code_level_2: str,
-        software_version: str,
         limit: int,
     ) -> list[TicketRecord]:
         import mysql.connector
@@ -125,13 +128,15 @@ class TicketRepository:
         query = self._build_zoho_select_query(
             available_columns,
             where_clause=(
-                "WHERE Fault_Code = %s "
+                "WHERE Created_Time >= %s "
+                "AND Fault_Code = %s "
+                "AND Fault_Code_Level_1 = %s "
                 "AND Fault_Code_Level_2 = %s "
                 "ORDER BY Created_Time DESC "
                 "LIMIT %s"
             ),
         )
-        cursor.execute(query, (fault_code, fault_code_level_2, limit * 8))
+        cursor.execute(query, (settings.source_start_date, fault_code, fault_code_level_1, fault_code_level_2, limit * 8))
         rows = cursor.fetchall()
         cursor.close()
         connection.close()
@@ -185,10 +190,11 @@ class TicketRepository:
             "Product",
             "Device_Model",
             "Fault_Code",
+            "Fault_Code_Level_1",
             "Fault_Code_Level_2",
             "Resolution_Code_Level_1",
             "Bot_Action",
-            "Software_Version",
+            "Status",
             "Device_Serial_Number",
             "Number_of_Reopen",
             "Symptom",
@@ -221,10 +227,12 @@ class TicketRepository:
             product=clean_text(row.get("Product")),
             device_model=clean_text(row.get("Device_Model")),
             fault_code=clean_text(row.get("Fault_Code")),
+            fault_code_level_1=clean_text(row.get("Fault_Code_Level_1")),
             fault_code_level_2=clean_text(row.get("Fault_Code_Level_2")),
             resolution_code_level_1=clean_text(row.get("Resolution_Code_Level_1")),
             bot_action=clean_text(row.get("Bot_Action")),
-            software_version=clean_text(row.get("Software_Version")),
+            software_version=None,
+            status=clean_text(row.get("Status")),
             device_serial_number=clean_text(row.get("Device_Serial_Number")),
             number_of_reopen=clean_text(row.get("Number_of_Reopen")),
             symptom=clean_text(row.get("Symptom")),

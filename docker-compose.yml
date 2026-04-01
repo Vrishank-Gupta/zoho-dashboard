@@ -1,8 +1,37 @@
 services:
+  qubo-clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    ports:
+    - "8123:8123"
+    - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: ${QUBO_CLICKHOUSE_DATABASE:-qubo_analytics}
+      CLICKHOUSE_USER: ${QUBO_CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${QUBO_CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+    - clickhouse_data:/var/lib/clickhouse
+    - clickhouse_logs:/var/log/clickhouse-server
+    restart: unless-stopped
   qubo-dashboard-api:
     build: .
     ports:
     - "8020:8000"
     env_file:
       - .env
+    depends_on:
+      - qubo-clickhouse
     restart: unless-stopped
+  qubo-clickhouse-etl:
+    build:
+      context: .
+      dockerfile: Dockerfile.etl
+    env_file:
+      - .env
+    depends_on:
+      - qubo-clickhouse
+    restart: unless-stopped
+
+volumes:
+  clickhouse_data:
+  clickhouse_logs:

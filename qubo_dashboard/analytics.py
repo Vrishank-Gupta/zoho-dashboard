@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from typing import Any
 
+from .clickhouse_analytics import ClickHouseAnalyticsRepository
 from .config import settings
 from .models import DashboardFilters
 from .repository import TicketRepository
@@ -14,6 +15,7 @@ from .repository import TicketRepository
 class AggregateIssue:
     product_family: str
     fault_code: str
+    fault_code_level_1: str
     fault_code_level_2: str
     software_version: str
     volume: int
@@ -32,7 +34,7 @@ class AggregateIssue:
 
     @property
     def issue_id(self) -> str:
-        return "|".join([self.product_family, self.fault_code, self.fault_code_level_2, self.software_version])
+        return "|".join([self.product_family, self.fault_code, self.fault_code_level_1, self.fault_code_level_2])
 
     @property
     def insight(self) -> str:
@@ -60,8 +62,14 @@ class AggregateIssue:
 class AnalyticsService:
     def __init__(self, repository: TicketRepository) -> None:
         self._repository = repository
+        self._clickhouse = ClickHouseAnalyticsRepository() if settings.has_clickhouse else None
 
     def build_dashboard(self, filters: DashboardFilters) -> dict[str, Any]:
+        if self._clickhouse and settings.analytics_backend == "clickhouse":
+            try:
+                return self._build_from_clickhouse(filters)
+            except Exception:
+                pass
         if settings.has_agg_database:
             try:
                 return self._build_from_agg(filters)
@@ -87,11 +95,14 @@ class AnalyticsService:
                 break
         if not issue:
             return {"issue": None, "tickets": []}
+        if self._clickhouse and settings.analytics_backend == "clickhouse":
+            tickets = self._clickhouse.fetch_issue_tickets(filters, issue_id, limit=24)
+            return {"issue": issue, "tickets": [self._format_clickhouse_ticket(item) for item in tickets]}
         tickets = self._repository.fetch_issue_tickets(
             product_family=issue["product_family"],
             fault_code=issue["fault_code"],
+            fault_code_level_1=issue["fault_code_level_1"],
             fault_code_level_2=issue["fault_code_level_2"],
-            software_version=issue["software_version"],
             limit=24,
         )
         return {
@@ -105,10 +116,12 @@ class AnalyticsService:
                     "department": ticket.normalized_department,
                     "channel": ticket.normalized_channel,
                     "fault_code": ticket.normalized_fault_code,
+                    "fault_code_level_1": ticket.normalized_fault_code_l1,
                     "fault_code_level_2": ticket.normalized_fault_code_l2,
                     "resolution": ticket.normalized_resolution,
                     "bot_action": ticket.bot_action or "Unknown",
                     "software_version": ticket.normalized_version,
+                    "status": ticket.status or "Unknown",
                     "symptom": ticket.symptom or "Unknown",
                     "defect": ticket.defect or "Unknown",
                     "repair": ticket.repair or "Unknown",
@@ -119,7 +132,89 @@ class AnalyticsService:
         }
 
     def search_tickets(self, filters: DashboardFilters, query: str = "") -> list[dict[str, Any]]:
+        if self._clickhouse and settings.analytics_backend == "clickhouse":
+            return self._clickhouse.search_tickets(filters, query)
         return []
+
+    def _build_from_clickhouse(self, filters: DashboardFilters) -> dict[str, Any]:
+        if not self._clickhouse:
+            raise RuntimeError("ClickHouse is not configured.")
+        max_date = self._clickhouse.fetch_max_metric_date() or date.today()
+        start_date = self._window_start(max_date, filters.date_preset)
+        previous_start = start_date - (max_date - start_date) - timedelta(days=1)
+
+        daily_rows = self._clickhouse.fetch_daily_rows(start_date, max_date, filters)
+        previous_daily_rows = self._clickhouse.fetch_daily_rows(previous_start, start_date - timedelta(days=1), filters)
+        weekly_rows = self._clickhouse.fetch_issue_rows(previous_start, max_date, filters)
+        version_rows = self._clickhouse.fetch_version_rows(max_date, filters)
+        resolution_rows = self._clickhouse.fetch_resolution_rows(previous_start, max_date, filters)
+        channel_rows = self._clickhouse.fetch_channel_rows(previous_start, max_date, filters)
+        bot_rows = self._clickhouse.fetch_bot_rows(start_date, max_date, filters)
+        data_quality_rows = self._clickhouse.fetch_data_quality_row(start_date, max_date, filters)
+        pipeline_rows = self._clickhouse.fetch_pipeline_rows()
+
+        kpis = self._agg_kpis(daily_rows, previous_daily_rows)
+        issues = self._agg_issues(weekly_rows, start_date)
+        products = self._agg_products(daily_rows)
+        versions = self._agg_versions(version_rows)
+        filter_options = self._agg_filter_options(daily_rows, weekly_rows, channel_rows, products)
+        pipeline_health = self._agg_pipeline_health(pipeline_rows)
+        cleaning_summary = self._agg_cleaning_summary(data_quality_rows)
+        issue_views = self._agg_issue_views(issues)
+        bot_summary = self._agg_bot_summary(bot_rows, issues)
+
+        return {
+            "meta": {
+                "source_mode": "clickhouse",
+                "ticket_count": kpis["total_tickets"]["value"],
+                "historical_mode": filters.history_mode,
+                "data_confidence_note": "Dashboard is reading ClickHouse summaries and drilldowns from the ClickHouse fact table only.",
+                "warehouse_mode": True,
+                "dataset_scope": "ClickHouse analytics warehouse",
+                "pipeline_status": {
+                    "last_successful_run": pipeline_health["last_run_at"],
+                    "duration_minutes": pipeline_health["duration_minutes"],
+                    "status": pipeline_health["status"],
+                },
+            },
+            "filters": asdict(filters),
+            "kpis": kpis,
+            "executive_summary": self._executive_summary(issues, products),
+            "top_concerns": [self._issue_payload(item) for item in issues[:8]],
+            "improving_signals": [self._issue_payload(item) for item in sorted(issues, key=lambda item: (item.bot_deflection_rate, -(item.volume - item.previous_volume)), reverse=True)[:4]],
+            "action_queue": self._action_queue(issues),
+            "issue_views": issue_views,
+            "timeline": self._agg_timeline(daily_rows),
+            "product_health": products,
+            "version_risks": versions,
+            "service_ops": self._agg_service_ops(daily_rows, channel_rows, resolution_rows),
+            "bot_summary": bot_summary,
+            "cleaning_summary": cleaning_summary,
+            "pipeline_health": pipeline_health,
+            "filter_options": filter_options,
+        }
+
+    def _format_clickhouse_ticket(self, item: dict[str, Any]) -> dict[str, Any]:
+        created_at = item.get("created_at")
+        return {
+            "ticket_id": item.get("ticket_id"),
+            "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+            "product_family": item.get("product_family") or "Unknown",
+            "product": item.get("product") or item.get("product_family") or "Unknown",
+            "department": item.get("department") or "Unknown",
+            "channel": item.get("channel") or "Unknown",
+            "fault_code": item.get("fault_code") or "Unknown",
+            "fault_code_level_1": item.get("fault_code_level_1") or "Unknown",
+            "fault_code_level_2": item.get("fault_code_level_2") or "Unknown",
+            "resolution": item.get("resolution") or "Unknown",
+            "bot_action": item.get("bot_action") or "Unknown",
+            "software_version": item.get("software_version") or "Unknown",
+            "status": item.get("status") or "Unknown",
+            "symptom": item.get("symptom") or "Unknown",
+            "defect": item.get("defect") or "Unknown",
+            "repair": item.get("repair") or "Unknown",
+            "device_age_days": item.get("device_age_days"),
+        }
 
     def _build_from_agg(self, filters: DashboardFilters) -> dict[str, Any]:
         connection = self._repository.open_agg_connection()
@@ -215,7 +310,7 @@ class AnalyticsService:
             "product_health": products,
             "version_risks": versions,
             "service_ops": self._seeded_service_ops(),
-            "bot_summary": self._seeded_bot_summary(),
+            "bot_summary": self._seeded_bot_summary(issues),
             "cleaning_summary": self._seeded_cleaning_summary(),
             "pipeline_health": self._seeded_pipeline_health(),
             "filter_options": self._seeded_filter_options(),
@@ -281,8 +376,8 @@ class AnalyticsService:
             key = (
                 row["product_family"],
                 row["fault_code"],
+                row.get("fault_code_level_1") or "Unclassified",
                 row["fault_code_level_2"],
-                row.get("software_version") or "Unknown",
             )
             tickets = int(row.get("tickets", 0) or 0)
             bucket = grouped[key]
@@ -308,8 +403,9 @@ class AnalyticsService:
             issue = AggregateIssue(
                 product_family=key[0],
                 fault_code=key[1],
-                fault_code_level_2=key[2],
-                software_version=key[3],
+                fault_code_level_1=key[2],
+                fault_code_level_2=key[3],
+                software_version="Not available in source",
                 volume=bucket["recent"],
                 previous_volume=bucket["previous"],
                 repair_field_visit_rate=bucket["repair_rate_num"] / denom,
@@ -423,7 +519,7 @@ class AnalyticsService:
 
     def _agg_bot_summary(self, bot_rows: list[dict[str, Any]], issues: list[AggregateIssue]) -> dict[str, Any]:
         overall = next((row for row in bot_rows if row.get("product_family") == "All Chat"), {})
-        products = [row for row in bot_rows if row.get("product_family") not in {"All Chat", "Unknown / Dirty Data", "Other / Accessories", "Logistics / Non-product"}]
+        products = [row for row in bot_rows if row.get("product_family") != "All Chat"]
         products = sorted(products, key=lambda row: int(row.get("chat_tickets", 0) or 0), reverse=True)
         return {
             "overview": {
@@ -485,8 +581,9 @@ class AnalyticsService:
             "usable_issue_tickets": usable,
             "actionable_issue_tickets": actionable,
             "blank_fault_code_tickets": int(row.get("blank_fault_code_tickets", 0) or 0),
+            "blank_fault_code_l1_tickets": int(row.get("blank_fault_code_l1_tickets", 0) or 0),
             "blank_fault_code_l2_tickets": int(row.get("blank_fault_code_l2_tickets", 0) or 0),
-            "unknown_product_tickets": int(row.get("unknown_product_tickets", 0) or 0),
+            "other_product_tickets": int(row.get("other_product_tickets", row.get("unknown_product_tickets", 0)) or 0),
             "hero_internal_tickets": int(row.get("hero_internal_tickets", 0) or 0),
             "version_coverage_tickets": int(row.get("version_coverage_tickets", 0) or 0),
             "dropped_in_bot_tickets": int(row.get("dropped_in_bot_tickets", 0) or 0),
@@ -537,24 +634,9 @@ class AnalyticsService:
             return False
         if filters.issue != "All" and row.get("fault_code") != filters.issue:
             return False
-        if filters.version != "All" and (row.get("software_version") or "Unknown") != filters.version:
-            return False
         if filters.department != "All":
             department = row.get("department_name")
             if department and department != filters.department:
-                return False
-        if not filters.include_hero and row.get("department_name") == "Hero Electronix":
-            return False
-        if not filters.include_dirty:
-            if row.get("product_family") in {"Unknown / Dirty Data", "Other / Accessories", "Logistics / Non-product"}:
-                return False
-            if row.get("channel") == "Unknown / Dirty Data":
-                return False
-            if row.get("department_name") == "Unknown / Dirty Data":
-                return False
-            if row.get("fault_code") == "Unclassified":
-                return False
-            if row.get("fault_code_level_2") == "Unclassified":
                 return False
         return True
 
@@ -577,9 +659,9 @@ class AnalyticsService:
 
         return {
             "products": [item["product_family"] for item in products[:10]],
-            "departments": values(channel_rows, "department_name", {"Unknown / Dirty Data", "Email"}),
+            "departments": values(channel_rows, "department_name", set()),
             "issues": values(weekly_rows, "fault_code", {"Unclassified"}, min_tickets=500),
-            "versions": values(daily_rows, "software_version", {"Unknown"}),
+            "versions": [],
         }
 
     def _window_start(self, latest: date, preset: str) -> date:
@@ -607,7 +689,7 @@ class AnalyticsService:
         top_product = products[0]
         return {
             "headline": "CS Snapshot",
-            "summary": f"{top_product['product_family']} is carrying the highest support load. {top_issue.fault_code_level_2} on {top_issue.software_version} is the top engineering signal because it is growing and converting into repair visits. Installation traffic is tracked separately.",
+            "summary": f"{top_product['product_family']} is carrying the highest support load. {top_issue.fault_code_level_2} is the top engineering signal because it is growing and converting into repair visits. Installation traffic is tracked separately.",
         }
 
     def _action_queue(self, concerns: list[AggregateIssue]) -> list[dict[str, str]]:
@@ -625,6 +707,7 @@ class AnalyticsService:
             "issue_id": issue.issue_id,
             "product_family": issue.product_family,
             "fault_code": issue.fault_code,
+            "fault_code_level_1": issue.fault_code_level_1,
             "fault_code_level_2": issue.fault_code_level_2,
             "software_version": issue.software_version,
             "volume": issue.volume,
@@ -647,15 +730,15 @@ class AnalyticsService:
     def _seeded_issues(self, filters: DashboardFilters) -> list[AggregateIssue]:
         factor = 0.24 if filters.date_preset == "14d" else 0.5 if filters.date_preset == "30d" else 8.4 if filters.date_preset == "history" else 1.0
         items = [
-            AggregateIssue("Dash Cam", "Product issue", "Intermittent offline", "DC_5.14.2", round(18240 * factor), round(12860 * factor), 0.22, 0.01, 0.14, 0.09, 0.32, 0.05, 0.42, 0.03, "Device drops offline after ignition cycle", "Firmware reconnect regression", "Reflash firmware and replace power harness"),
-            AggregateIssue("Smart Camera", "Application", "Wi-Fi disconnection", "SC_4.8.0", round(14680 * factor), round(11240 * factor), 0.18, 0.00, 0.11, 0.16, 0.28, 0.04, 0.51, 0.02, "Camera disconnects multiple times a day", "Wi-Fi stack instability", "Reconfigure router band and reinstall app"),
-            AggregateIssue("Smart Camera", "Home Product issue", "Video feed issue", "SC_4.8.0", round(13220 * factor), round(9440 * factor), 0.14, 0.00, 0.10, 0.11, 0.34, 0.03, 0.49, 0.02, "Feed freezes after live view starts", "Encoder process crash", "Firmware rollback and app reinstall"),
-            AggregateIssue("Smart Lock", "Lock Product issue", "Lock pairing issue", "SL_2.2.0", round(8240 * factor), round(6380 * factor), 0.16, 0.00, 0.18, 0.06, 0.42, 0.04, 0.37, 0.04, "Lock visible in app but pairing fails", "BLE authentication timeout", "Reset controller and replace board"),
-            AggregateIssue("Video Doorbell", "Installation", "Installation issue", "VDB_3.1.4", round(9260 * factor), round(10180 * factor), 0.02, 0.31, 0.03, 0.04, 0.38, 0.11, 0.28, 0.00, "Customer cannot complete install flow", "No product defect confirmed", "Technician installation completed"),
-            AggregateIssue("Air Purifier", "Product issue", "Auto restart", "AP_2.0.4", round(5620 * factor), round(3980 * factor), 0.21, 0.00, 0.12, 0.05, 0.31, 0.06, 0.31, 0.07, "Purifier restarts repeatedly under load", "Power board instability", "Replace main PCB"),
-            AggregateIssue("GPS Tracker", "Tracker Product issue", "Weak signal strength", "GT_1.9.7", round(4380 * factor), round(5020 * factor), 0.02, 0.00, 0.05, 0.34, 0.18, 0.03, 0.63, 0.00, "Location updates are delayed", "Environmental coverage issue", "Guided settings change"),
-            AggregateIssue("Dash Cam", "Application", "App not connecting", "APP_9.2.1", round(9840 * factor), round(10120 * factor), 0.04, 0.00, 0.06, 0.29, 0.24, 0.08, 0.61, 0.00, "App cannot bind to camera session", "App SDK token expiry issue", "App cache reset and re-login"),
-            AggregateIssue("Smart Plug", "Product issue", "Dead after use", "SP_1.1.1", round(3180 * factor), round(2910 * factor), 0.24, 0.00, 0.15, 0.03, 0.35, 0.02, 0.23, 0.09, "Plug stops responding after normal use", "Hardware failure after thermal event", "Replace device"),
+            AggregateIssue("Dash Cam", "Product issue", "Product issue", "Intermittent offline", "DC_5.14.2", round(18240 * factor), round(12860 * factor), 0.22, 0.01, 0.14, 0.09, 0.32, 0.05, 0.42, 0.03, "Device drops offline after ignition cycle", "Firmware reconnect regression", "Reflash firmware and replace power harness"),
+            AggregateIssue("Smart Camera", "Application", "Application", "Wi-Fi disconnection", "SC_4.8.0", round(14680 * factor), round(11240 * factor), 0.18, 0.00, 0.11, 0.16, 0.28, 0.04, 0.51, 0.02, "Camera disconnects multiple times a day", "Wi-Fi stack instability", "Reconfigure router band and reinstall app"),
+            AggregateIssue("Smart Camera", "Home Product issue", "Home Product issue", "Video feed issue", "SC_4.8.0", round(13220 * factor), round(9440 * factor), 0.14, 0.00, 0.10, 0.11, 0.34, 0.03, 0.49, 0.02, "Feed freezes after live view starts", "Encoder process crash", "Firmware rollback and app reinstall"),
+            AggregateIssue("Smart Lock", "Lock Product issue", "Lock Product issue", "Lock pairing issue", "SL_2.2.0", round(8240 * factor), round(6380 * factor), 0.16, 0.00, 0.18, 0.06, 0.42, 0.04, 0.37, 0.04, "Lock visible in app but pairing fails", "BLE authentication timeout", "Reset controller and replace board"),
+            AggregateIssue("Video Doorbell", "Installation", "Installation", "Installation issue", "VDB_3.1.4", round(9260 * factor), round(10180 * factor), 0.02, 0.31, 0.03, 0.04, 0.38, 0.11, 0.28, 0.00, "Customer cannot complete install flow", "No product defect confirmed", "Technician installation completed"),
+            AggregateIssue("Air Purifier", "Product issue", "Product issue", "Auto restart", "AP_2.0.4", round(5620 * factor), round(3980 * factor), 0.21, 0.00, 0.12, 0.05, 0.31, 0.06, 0.31, 0.07, "Purifier restarts repeatedly under load", "Power board instability", "Replace main PCB"),
+            AggregateIssue("GPS Tracker", "Tracker Product issue", "Tracker Product issue", "Weak signal strength", "GT_1.9.7", round(4380 * factor), round(5020 * factor), 0.02, 0.00, 0.05, 0.34, 0.18, 0.03, 0.63, 0.00, "Location updates are delayed", "Environmental coverage issue", "Guided settings change"),
+            AggregateIssue("Dash Cam", "Application", "Application", "App not connecting", "APP_9.2.1", round(9840 * factor), round(10120 * factor), 0.04, 0.00, 0.06, 0.29, 0.24, 0.08, 0.61, 0.00, "App cannot bind to camera session", "App SDK token expiry issue", "App cache reset and re-login"),
+            AggregateIssue("Smart Plug", "Product issue", "Product issue", "Dead after use", "SP_1.1.1", round(3180 * factor), round(2910 * factor), 0.24, 0.00, 0.15, 0.03, 0.35, 0.02, 0.23, 0.09, "Plug stops responding after normal use", "Hardware failure after thermal event", "Replace device"),
         ]
         items = [item for item in items if filters.product == "All" or item.product_family == filters.product]
         items = [item for item in items if filters.issue == "All" or item.fault_code == filters.issue]
@@ -738,7 +821,7 @@ class AnalyticsService:
             "field_service_split": [{"label": "Repair visits", "count": 6280, "share": 0.40}, {"label": "Installation visits", "count": 9480, "share": 0.60}],
         }
 
-    def _seeded_bot_summary(self) -> dict[str, Any]:
+    def _seeded_bot_summary(self, issues: list[AggregateIssue]) -> dict[str, Any]:
         return {
             "overview": {
                 "chat_tickets": 42040,

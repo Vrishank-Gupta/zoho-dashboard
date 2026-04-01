@@ -58,7 +58,7 @@ def build_ticket_facts(tickets: list[TicketRecord]) -> list[TicketFacts]:
     for ticket in tickets:
         quality = ticket.quality
         usable_product = ticket.is_core_product
-        version_covered = ticket.normalized_version != "Unknown"
+        version_covered = bool(ticket.software_version and ticket.normalized_version not in {"Unknown", "Not available in source"})
         returned_7d, resolved_7d, transferred_7d, blank_again_7d = blank_return_flags.get(ticket.ticket_id, (False, False, False, False))
         facts.append(
             TicketFacts(
@@ -107,6 +107,7 @@ def agg_daily_tickets(ticket_facts: list[TicketFacts]) -> list[dict]:
             ticket.created_at.date(),
             ticket.canonical_product,
             ticket.normalized_fault_code,
+            ticket.normalized_fault_code_l1,
             ticket.normalized_fault_code_l2,
             ticket.normalized_department,
             ticket.normalized_channel,
@@ -121,10 +122,11 @@ def agg_daily_tickets(ticket_facts: list[TicketFacts]) -> list[dict]:
                 "metric_date": key[0],
                 "product_family": key[1],
                 "fault_code": key[2],
-                "fault_code_level_2": key[3],
-                "department_name": key[4],
-                "channel": key[5],
-                "software_version": key[6],
+                "fault_code_level_1": key[3],
+                "fault_code_level_2": key[4],
+                "department_name": key[5],
+                "channel": key[6],
+                "software_version": key[7],
                 "tickets": count,
                 "field_visit_rate": ratio(sum(1 for item in items if item.ticket.is_field_service), count),
                 "repair_field_visit_rate": ratio(sum(1 for item in items if item.ticket.field_visit_type == "Repair"), count),
@@ -149,7 +151,14 @@ def agg_fc_weekly(ticket_facts: list[TicketFacts]) -> list[dict]:
             continue
         ticket = fact.ticket
         week_start = ticket.created_at.date() - timedelta(days=ticket.created_at.weekday())
-        key = (week_start, ticket.canonical_product, ticket.normalized_fault_code, ticket.normalized_fault_code_l2, ticket.normalized_version)
+        key = (
+            week_start,
+            ticket.canonical_product,
+            ticket.normalized_fault_code,
+            ticket.normalized_fault_code_l1,
+            ticket.normalized_fault_code_l2,
+            ticket.normalized_version,
+        )
         grouped[key].append(fact)
     rows = []
     for key, items in grouped.items():
@@ -159,8 +168,9 @@ def agg_fc_weekly(ticket_facts: list[TicketFacts]) -> list[dict]:
                 "week_start": key[0],
                 "product_family": key[1],
                 "fault_code": key[2],
-                "fault_code_level_2": key[3],
-                "software_version": key[4],
+                "fault_code_level_1": key[3],
+                "fault_code_level_2": key[4],
+                "software_version": key[5],
                 "tickets": count,
                 "repair_field_visit_rate": ratio(sum(1 for item in items if item.ticket.field_visit_type == "Repair"), count),
                 "installation_field_visit_rate": ratio(sum(1 for item in items if item.ticket.field_visit_type == "Installation"), count),
@@ -390,7 +400,7 @@ def agg_data_quality(ticket_facts: list[TicketFacts]) -> list[dict]:
             "actionable_issue_tickets": sum(1 for item in ticket_facts if item.actionable_issue),
             "blank_fault_code_tickets": sum(1 for item in ticket_facts if item.ticket.normalized_fault_code == "Unclassified"),
             "blank_fault_code_l2_tickets": sum(1 for item in ticket_facts if item.ticket.normalized_fault_code_l2 == "Unclassified"),
-            "unknown_product_tickets": sum(1 for item in ticket_facts if item.ticket.canonical_product == "Unknown / Dirty Data"),
+            "unknown_product_tickets": sum(1 for item in ticket_facts if item.ticket.canonical_product == "Others"),
             "hero_internal_tickets": sum(1 for item in ticket_facts if item.ticket.is_internal_hero),
             "version_coverage_tickets": sum(1 for item in ticket_facts if item.version_covered),
             "dropped_in_bot_tickets": sum(1 for item in ticket_facts if item.dropped_in_bot),

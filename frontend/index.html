@@ -13,9 +13,9 @@
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-kicker">Hero Electronix</div>
+        <div class="brand-kicker">Qubo Support Ops</div>
         <h1>Qubo Support Health</h1>
-        <p>Leadership view of customer pain, service cost, and automation performance.</p>
+        <p>Leadership view of customer pain, service cost, and bot performance from the ClickHouse analytics layer.</p>
       </div>
 
       <nav class="side-nav">
@@ -56,12 +56,8 @@
           <label><span>Product family</span><select id="productFilter"></select></label>
           <label><span>Department</span><select id="departmentFilter"></select></label>
           <label><span>Issue family</span><select id="issueFilter"></select></label>
-          <label><span>Version</span><select id="versionFilter"></select></label>
         </div>
         <div class="filter-toggles">
-          <label class="toggle"><input type="checkbox" id="includeHero"> <span>Include Hero Electronix</span></label>
-          <label class="toggle"><input type="checkbox" id="includeDirty"> <span>Include low-confidence rows</span></label>
-          <label class="toggle"><input type="checkbox" id="historyMode"> <span>Full history view</span></label>
           <button id="resetFilters" class="secondary-btn">Reset filters</button>
         </div>
       </section>
@@ -210,8 +206,8 @@
           </div>
           <div class="mini-grid">
             <div><div class="title-row compact"><h4>Field service split</h4><button class="info-dot" type="button" data-tip="Separates installation visits from repair visits so service cost and product-health pressure are not conflated.">i</button></div><div id="fieldSplit" class="metric-list"></div></div>
-            <div><div class="title-row compact"><h4>Department mix</h4><button class="info-dot" type="button" data-tip="Share of support load handled by Call Center, Field Service, Logistics, and Hero Electronix where included.">i</button></div><div id="departmentMix" class="metric-list"></div></div>
-            <div><div class="title-row compact"><h4>Channel mix</h4><button class="info-dot" type="button" data-tip="Distribution of inbound demand across Chat, Phone, Email, WhatsApp, and Web after channel cleanup.">i</button></div><div id="channelMix" class="metric-list"></div></div>
+            <div><div class="title-row compact"><h4>Department mix</h4><button class="info-dot" type="button" data-tip="Share of support load handled by Call Center, Field Service, and Logistics after legacy department remapping.">i</button></div><div id="departmentMix" class="metric-list"></div></div>
+            <div><div class="title-row compact"><h4>Channel mix</h4><button class="info-dot" type="button" data-tip="Distribution of inbound demand across Chat, Phone, Email, and Others after cleanup. Web is folded into Others.">i</button></div><div id="channelMix" class="metric-list"></div></div>
             <div><div class="title-row compact"><h4>Bot outcomes</h4><button class="info-dot" type="button" data-tip="Breakdown of chat sessions into bot resolved, transferred to agent, and blank chat abandonment.">i</button></div><div id="botOutcomes" class="metric-list"></div></div>
           </div>
         </article>
@@ -234,14 +230,14 @@
         <article class="panel">
           <div class="panel-head">
             <div>
-              <div class="eyebrow">Freshness</div>
+              <div class="eyebrow">Source contract</div>
               <div class="title-row">
-                <h3>Pipeline status and version signals</h3>
-                <button class="info-dot" type="button" data-tip="Pipeline freshness confirms how current the warehouse is. Version cards stay lightweight because version coverage is still limited in source data.">i</button>
+                <h3>Pipeline status and source notes</h3>
+                <button class="info-dot" type="button" data-tip="Shows pipeline freshness plus key source-model assumptions now enforced in the analytics layer: department remapping, channel cleanup, and retained fault-code hierarchy.">i</button>
               </div>
             </div>
           </div>
-          <div id="versionRisks" class="stack-list"></div>
+          <div id="sourceNotes" class="stack-list"></div>
           <div id="pipelineHealth" class="pipeline-box" style="margin-top:16px"></div>
         </article>
       </section>

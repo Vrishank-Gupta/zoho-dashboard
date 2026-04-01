@@ -26,15 +26,45 @@ class DatabaseConfig:
 
 
 @dataclass(slots=True)
+class ClickHouseConfig:
+    host: str | None
+    port: int
+    user: str | None
+    password: str | None
+    database: str | None
+    secure: bool
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.host and self.user and self.database)
+
+
+@dataclass(slots=True)
 class Settings:
     app_host: str = os.getenv("QUBO_APP_HOST", "127.0.0.1")
     app_port: int = int(os.getenv("QUBO_APP_PORT", "8000"))
     app_reload: bool = os.getenv("QUBO_APP_RELOAD", "true").lower() == "true"
     serve_frontend: bool = os.getenv("QUBO_SERVE_FRONTEND", "false").lower() == "true"
     use_sample_data: bool = os.getenv("QUBO_USE_SAMPLE_DATA", "false").lower() == "true"
+    analytics_backend: str = os.getenv("QUBO_ANALYTICS_BACKEND", "clickhouse").lower()
     pipeline_recreate_tables: bool = os.getenv("QUBO_PIPELINE_RECREATE_TABLES", "true").lower() == "true"
     cors_allowed_origins_raw: str = os.getenv("QUBO_CORS_ALLOWED_ORIGINS", "*")
     zoho_ticket_table: str = os.getenv("QUBO_ZOHO_TICKET_TABLE", "Call_Driver_Data_Zoho_FromAug2024")
+    zoho_primary_key: str = os.getenv("QUBO_ZOHO_PRIMARY_KEY", "Ticket_Id")
+    zoho_created_column: str = os.getenv("QUBO_ZOHO_CREATED_COLUMN", "Created_Time")
+    zoho_modified_column: str = os.getenv("QUBO_ZOHO_MODIFIED_COLUMN", "Modified_Time")
+    source_start_date: str = os.getenv("QUBO_SOURCE_START_DATE", "2026-02-01")
+    clickhouse_fact_table: str = os.getenv("QUBO_CLICKHOUSE_FACT_TABLE", "tickets_fact_recent")
+    clickhouse_daily_summary_table: str = os.getenv("QUBO_CLICKHOUSE_DAILY_SUMMARY_TABLE", "tickets_daily_summary")
+    clickhouse_issues_summary_table: str = os.getenv("QUBO_CLICKHOUSE_ISSUES_SUMMARY_TABLE", "issues_daily_summary")
+    clickhouse_sync_state_table: str = os.getenv("QUBO_CLICKHOUSE_SYNC_STATE_TABLE", "etl_sync_state")
+    clickhouse_run_log_table: str = os.getenv("QUBO_CLICKHOUSE_RUN_LOG_TABLE", "etl_run_log")
+    etl_schedule: str = os.getenv("QUBO_ETL_SCHEDULE", "0 2 * * *")
+    etl_timezone: str = os.getenv("QUBO_ETL_TIMEZONE", "Asia/Calcutta")
+    etl_batch_size: int = int(os.getenv("QUBO_ETL_BATCH_SIZE", "5000"))
+    etl_backfill_days: int = int(os.getenv("QUBO_ETL_BACKFILL_DAYS", "90"))
+    etl_overlap_hours: int = int(os.getenv("QUBO_ETL_OVERLAP_HOURS", "24"))
+    etl_job_name: str = os.getenv("QUBO_ETL_JOB_NAME", "mysql_to_clickhouse")
     agg_daily_tickets_table: str = os.getenv("QUBO_AGG_DAILY_TICKETS_TABLE", "agg_daily_tickets")
     agg_fc_weekly_table: str = os.getenv("QUBO_AGG_FC_WEEKLY_TABLE", "agg_fc_weekly")
     agg_sw_version_table: str = os.getenv("QUBO_AGG_SW_VERSION_TABLE", "agg_sw_version")
@@ -70,12 +100,27 @@ class Settings:
         )
 
     @property
+    def clickhouse(self) -> ClickHouseConfig:
+        return ClickHouseConfig(
+            host=os.getenv("QUBO_CLICKHOUSE_HOST"),
+            port=int(os.getenv("QUBO_CLICKHOUSE_PORT", "8123")),
+            user=os.getenv("QUBO_CLICKHOUSE_USER", "default"),
+            password=os.getenv("QUBO_CLICKHOUSE_PASSWORD"),
+            database=os.getenv("QUBO_CLICKHOUSE_DATABASE"),
+            secure=os.getenv("QUBO_CLICKHOUSE_SECURE", "false").lower() == "true",
+        )
+
+    @property
     def has_zoho_database(self) -> bool:
         return bool(not self.use_sample_data and self.zoho_db.is_configured)
 
     @property
     def has_agg_database(self) -> bool:
         return bool(not self.use_sample_data and self.agg_db.is_configured)
+
+    @property
+    def has_clickhouse(self) -> bool:
+        return bool(not self.use_sample_data and self.clickhouse.is_configured)
 
     @property
     def cors_allowed_origins(self) -> list[str]:

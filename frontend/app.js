@@ -5,10 +5,6 @@ const state = {
     product: "All",
     department: "All",
     issue: "All",
-    version: "All",
-    include_hero: false,
-    include_dirty: false,
-    history_mode: false,
   },
   issueView: "biggest_burden",
 };
@@ -37,7 +33,7 @@ const els = {
   channelMix: document.getElementById("channelMix"),
   botOutcomes: document.getElementById("botOutcomes"),
   qualityCards: document.getElementById("qualityCards"),
-  versionRisks: document.getElementById("versionRisks"),
+  sourceNotes: document.getElementById("sourceNotes"),
   pipelineHealth: document.getElementById("pipelineHealth"),
   issueTabs: document.getElementById("issueTabs"),
   drawer: document.getElementById("issueDrawer"),
@@ -48,10 +44,6 @@ const els = {
   productFilter: document.getElementById("productFilter"),
   departmentFilter: document.getElementById("departmentFilter"),
   issueFilter: document.getElementById("issueFilter"),
-  versionFilter: document.getElementById("versionFilter"),
-  includeHero: document.getElementById("includeHero"),
-  includeDirty: document.getElementById("includeDirty"),
-  historyMode: document.getElementById("historyMode"),
   resetFilters: document.getElementById("resetFilters"),
 };
 
@@ -64,7 +56,6 @@ function bindEvents() {
     [els.productFilter, "product"],
     [els.departmentFilter, "department"],
     [els.issueFilter, "issue"],
-    [els.versionFilter, "version"],
   ].forEach(([element, key]) => {
     element.addEventListener("change", () => {
       state.filters[key] = element.value;
@@ -72,28 +63,12 @@ function bindEvents() {
     });
   });
 
-  els.includeHero.addEventListener("change", () => {
-    state.filters.include_hero = els.includeHero.checked;
-    loadDashboard();
-  });
-  els.includeDirty.addEventListener("change", () => {
-    state.filters.include_dirty = els.includeDirty.checked;
-    loadDashboard();
-  });
-  els.historyMode.addEventListener("change", () => {
-    state.filters.history_mode = els.historyMode.checked;
-    loadDashboard();
-  });
   els.resetFilters.addEventListener("click", () => {
     state.filters = {
       date_preset: "60d",
       product: "All",
       department: "All",
       issue: "All",
-      version: "All",
-      include_hero: false,
-      include_dirty: false,
-      history_mode: false,
     };
     state.issueView = "biggest_burden";
     syncControls();
@@ -161,7 +136,7 @@ function renderLoading() {
     els.channelMix,
     els.botOutcomes,
     els.qualityCards,
-    els.versionRisks,
+    els.sourceNotes,
     els.pipelineHealth,
   ].forEach((el) => { el.innerHTML = loading; });
 }
@@ -198,7 +173,7 @@ function renderDashboard(payload) {
   renderMetricList(els.channelMix, payload.service_ops?.channel_mix || []);
   renderMetricList(els.botOutcomes, payload.service_ops?.bot_outcomes || []);
   renderQuality(clean);
-  renderVersionRisks(payload.version_risks || []);
+  renderSourceNotes(clean, payload.meta || {});
   renderPipelineHealth(pipeline, payload.meta || {});
 }
 
@@ -367,7 +342,7 @@ function renderIssueBoard(issueViews) {
     <article class="issue-card" data-issue-id="${issue.issue_id}">
       <div>
         <div class="issue-title">${issue.fault_code_level_2}</div>
-        <div class="issue-subtitle">${issue.product_family} - ${issue.fault_code}</div>
+        <div class="issue-subtitle">${issue.product_family} - ${issue.fault_code} / ${issue.fault_code_level_1}</div>
       </div>
       <div class="chip-row">
         <span class="chip">${formatNumber(issue.volume)} recent</span>
@@ -496,9 +471,10 @@ function renderMetricList(container, items) {
 function renderQuality(clean) {
   els.qualityCards.innerHTML = [
     ["Issue coverage", formatPercent(clean.actionable_issue_rate || 0), `${formatNumber(clean.actionable_issue_tickets || 0)} tickets are fully classifiable for issue analysis.`],
+    ["Blank FC level 1", formatNumber(clean.blank_fault_code_l1_tickets || 0), "Tickets where the middle issue level is still missing."],
     ["Missing FC outside bot", formatNumber(clean.missing_issue_outside_bot_tickets || 0), "Non-chat journeys without issue coding."],
     ["Blank chat sessions", formatNumber(clean.dropped_in_bot_tickets || 0), "Tracked in the bot section as abandonment."],
-    ["Email channel reassigned", formatNumber(clean.email_department_reassigned_tickets || 0), "Email has been moved into channel logic."],
+    ["Email department remapped", formatNumber(clean.email_department_reassigned_tickets || 0), "Email department rows are counted under Call Center and Email channel."],
   ].map(([label, value, detail]) => `
     <article class="quality-card">
       <h4>${label}</h4>
@@ -508,15 +484,29 @@ function renderQuality(clean) {
   `).join("");
 }
 
-function renderVersionRisks(rows) {
-  if (!rows.length) {
-    els.versionRisks.innerHTML = emptyState("Version coverage is limited in the current source.");
-    return;
-  }
-  els.versionRisks.innerHTML = rows.map((row) => `
+function renderSourceNotes(clean, meta) {
+  const cards = [
+    {
+      title: "Department remap",
+      detail: "Hero Electronix and Email department rows are rolled into Call Center before analytics are computed.",
+    },
+    {
+      title: "Channel cleanup",
+      detail: "Chat, WhatsApp, Whats App, and Bot are folded into Chat. Web and all unexpected channels are grouped into Others.",
+    },
+    {
+      title: "Fault-code hierarchy",
+      detail: `${formatNumber(clean.blank_fault_code_tickets || 0)} rows miss level 0, ${formatNumber(clean.blank_fault_code_l1_tickets || 0)} miss level 1, and ${formatNumber(clean.blank_fault_code_l2_tickets || 0)} miss level 2 in the current filtered view.`,
+    },
+    {
+      title: "Firmware source gap",
+      detail: "Software version is not available in the current source table, so version-specific analytics are intentionally suppressed in the UI.",
+    },
+  ];
+  els.sourceNotes.innerHTML = cards.map((card) => `
     <article class="version-card">
-      <div class="watch-title">${escapeHtml(row.product_family)} - ${escapeHtml(row.version)}</div>
-      <p class="subtle">${escapeHtml(row.top_issue)} - repair ${formatPercent(row.repair_field_visit_rate)} - repeat ${formatPercent(row.repeat_rate)}</p>
+      <div class="watch-title">${escapeHtml(card.title)}</div>
+      <p class="subtle">${escapeHtml(card.detail)}</p>
     </article>
   `).join("");
 }
@@ -525,7 +515,7 @@ function renderPipelineHealth(pipeline, meta) {
   els.pipelineHealth.innerHTML = `
     <div class="pipeline-summary">
       <div class="watch-title">${escapeHtml(pipeline.status || "Unknown")}</div>
-      <p class="subtle">Latest aggregate warehouse refresh on the backend analytics database.</p>
+      <p class="subtle">Latest analytics refresh for the ClickHouse-backed dashboard dataset.</p>
       <div class="chip-row">
         <span class="chip">Last run ${escapeHtml(pipeline.last_run_at || "Unknown")}</span>
         <span class="chip">${escapeHtml(String(pipeline.duration_minutes || 0))} min</span>
@@ -615,7 +605,7 @@ function renderDrawer(payload) {
     <section class="panel" style="padding:18px">
       <div class="eyebrow">Issue evidence</div>
       <h3>${escapeHtml(issue.fault_code_level_2)}</h3>
-      <p class="subtle">${escapeHtml(issue.product_family)} - ${escapeHtml(issue.fault_code)}</p>
+      <p class="subtle">${escapeHtml(issue.product_family)} - ${escapeHtml(issue.fault_code)} / ${escapeHtml(issue.fault_code_level_1 || "Unclassified")}</p>
       <div class="chip-row">
         <span class="chip bad">Repair ${formatPercent(issue.repair_field_visit_rate)}</span>
         <span class="chip warn">Repeat ${formatPercent(issue.repeat_rate)}</span>
@@ -635,6 +625,7 @@ function renderDrawer(payload) {
               <th>Product</th>
               <th>Department</th>
               <th>Channel</th>
+              <th>Status</th>
               <th>Resolution</th>
               <th>Evidence</th>
             </tr>
@@ -647,8 +638,10 @@ function renderDrawer(payload) {
                 <td>${escapeHtml(ticket.product || ticket.product_family || "Unknown")}</td>
                 <td>${escapeHtml(ticket.department || "Unknown")}</td>
                 <td>${escapeHtml(ticket.channel || "Unknown")}</td>
+                <td>${escapeHtml(ticket.status || "Unknown")}</td>
                 <td>${escapeHtml(ticket.resolution || "Unknown")}</td>
                 <td>
+                  <div><strong>FC L1:</strong> ${escapeHtml(ticket.fault_code_level_1 || "Unknown")}</div>
                   <div><strong>Symptom:</strong> ${escapeHtml(ticket.symptom || "Unknown")}</div>
                   <div><strong>Defect:</strong> ${escapeHtml(ticket.defect || "Unknown")}</div>
                   <div><strong>Repair:</strong> ${escapeHtml(ticket.repair || "Unknown")}</div>
@@ -676,7 +669,6 @@ function hydrateFilters(options) {
   setOptions(els.productFilter, ["All", ...(options.products || [])], state.filters.product);
   setOptions(els.departmentFilter, ["All", ...(options.departments || [])], state.filters.department);
   setOptions(els.issueFilter, ["All", ...(options.issues || [])], state.filters.issue);
-  setOptions(els.versionFilter, ["All", ...(options.versions || [])], state.filters.version);
   syncControls();
 }
 
@@ -685,10 +677,6 @@ function syncControls() {
   els.productFilter.value = state.filters.product;
   els.departmentFilter.value = state.filters.department;
   els.issueFilter.value = state.filters.issue;
-  els.versionFilter.value = state.filters.version;
-  els.includeHero.checked = state.filters.include_hero;
-  els.includeDirty.checked = state.filters.include_dirty;
-  els.historyMode.checked = state.filters.history_mode;
   els.issueTabs.querySelectorAll(".tab-btn").forEach((button) => button.classList.toggle("active", button.dataset.issueView === state.issueView));
 }
 
@@ -704,7 +692,7 @@ function renderError(error) {
   els.summary.textContent = "The API returned an error before the dashboard could render.";
   els.sourceBadge.textContent = "Load failed";
   els.lastUpdated.textContent = message;
-  [els.kpiGrid, els.timelineChart, els.watchlist, els.productMatrix, els.issueBoard, els.actionQueue, els.botKpis, els.botProductMatrix, els.botBestIssues, els.botLeakyIssues, els.fieldSplit, els.departmentMix, els.channelMix, els.botOutcomes, els.qualityCards, els.versionRisks, els.pipelineHealth].forEach((el) => { el.innerHTML = errorState(message); });
+  [els.kpiGrid, els.timelineChart, els.watchlist, els.productMatrix, els.issueBoard, els.actionQueue, els.botKpis, els.botProductMatrix, els.botBestIssues, els.botLeakyIssues, els.fieldSplit, els.departmentMix, els.channelMix, els.botOutcomes, els.qualityCards, els.sourceNotes, els.pipelineHealth].forEach((el) => { el.innerHTML = errorState(message); });
   els.fieldVisitSummary.innerHTML = errorState(message);
 }
 

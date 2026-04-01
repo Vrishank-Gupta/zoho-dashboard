@@ -152,8 +152,11 @@ def health() -> dict:
     repo_status = repository.get_connection_status()
     return {
         "status": "ok",
-        "data_source": "sample" if settings.use_sample_data or not settings.has_zoho_database else "mysql",
+        "data_source": "sample" if settings.use_sample_data else settings.analytics_backend,
+        "analytics_backend": settings.analytics_backend,
         "zoho_db_configured": repo_status["zoho_configured"],
+        "clickhouse_configured": settings.has_clickhouse,
+        "clickhouse_database": settings.clickhouse.database,
         "agg_db_configured": repo_status["agg_configured"],
         "serve_frontend": settings.serve_frontend,
         "cors_allowed_origins": settings.cors_allowed_origins,

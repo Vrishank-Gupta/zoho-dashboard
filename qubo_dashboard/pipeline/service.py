@@ -5,6 +5,8 @@ from datetime import datetime
 from threading import Lock, Thread
 from typing import Any
 
+from ..clickhouse_analytics import ClickHouseETLJob
+from ..config import settings
 from .run import run_pipeline
 
 
@@ -59,7 +61,11 @@ class PipelineManager:
         status = "Success"
         message = "Pipeline completed"
         try:
-            run_pipeline()
+            if settings.analytics_backend == "clickhouse" and settings.has_clickhouse:
+                result = ClickHouseETLJob().run()
+                message = result.message
+            else:
+                run_pipeline()
         except Exception as exc:
             status = "Failed"
             message = str(exc)

@@ -9,6 +9,7 @@ from .cleaning import (
     canonical_product,
     evaluate_quality,
     is_installation_ticket,
+    normalize_bot_action,
     normalize_channel,
     normalize_department,
     normalize_fault_code,
@@ -31,10 +32,12 @@ class TicketRecord:
     product: str | None
     device_model: str | None
     fault_code: str | None
+    fault_code_level_1: str | None
     fault_code_level_2: str | None
     resolution_code_level_1: str | None
     bot_action: str | None
     software_version: str | None
+    status: str | None
     device_serial_number: str | None
     number_of_reopen: str | None
     symptom: str | None
@@ -64,6 +67,10 @@ class TicketRecord:
         return normalize_fault_code(self.fault_code)
 
     @property
+    def normalized_fault_code_l1(self) -> str:
+        return normalize_fault_code(self.fault_code_level_1)
+
+    @property
     def normalized_fault_code_l2(self) -> str:
         return normalize_fault_code(self.fault_code_level_2)
 
@@ -76,8 +83,12 @@ class TicketRecord:
         return normalize_resolution(self.resolution_code_level_1)
 
     @property
+    def normalized_bot_action(self) -> str:
+        return normalize_bot_action(self.bot_action)
+
+    @property
     def is_internal_hero(self) -> bool:
-        return self.normalized_department == "Hero Electronix"
+        return (self.department_name or "").strip() == "Hero Electronix"
 
     @property
     def is_product_health_eligible(self) -> bool:
@@ -93,22 +104,25 @@ class TicketRecord:
 
     @property
     def is_bot_resolved(self) -> bool:
-        return (self.bot_action or "").strip() == "Bot resolved ticket"
+        return self.normalized_bot_action == "Bot resolved"
 
     @property
     def is_bot_transferred(self) -> bool:
-        return (self.bot_action or "").strip() == "Bot transferred to agent"
+        return self.normalized_bot_action == "Bot transferred to agent"
 
     @property
     def is_blank_chat(self) -> bool:
-        return "blank chat" in (self.bot_action or "").lower()
+        return self.normalized_bot_action == "Blank chat"
 
     @property
     def quality(self):
         return evaluate_quality(
+            raw_channel=self.channel,
+            raw_department=self.department_name,
             channel=self.normalized_channel,
             department=self.normalized_department,
             fault_code=self.normalized_fault_code,
+            fault_code_l1=self.normalized_fault_code_l1,
             fault_code_l2=self.normalized_fault_code_l2,
             bot_action=self.bot_action,
         )
@@ -124,18 +138,23 @@ class TicketRecord:
     @property
     def has_repeat_key(self) -> bool:
         value = (self.device_serial_number or "").strip()
-        return bool(value and value not in {"0", "-", ""})
+        return bool(value and value.lower() not in {"0", "-", "", "null", "none", "nan"})
 
     @property
     def customer_key(self) -> str | None:
         for value in (self.mobile, self.phone, self.email, self.device_serial_number, self.name):
-            if value and value.strip() not in {"", "-", "0"}:
+            if value and value.strip().lower() not in {"", "-", "0", "null", "none", "nan"}:
                 return value.strip()
         return None
 
     @property
-    def issue_key(self) -> tuple[str, str, str]:
-        return (self.canonical_product, self.normalized_fault_code, self.normalized_fault_code_l2)
+    def issue_key(self) -> tuple[str, str, str, str]:
+        return (
+            self.canonical_product,
+            self.normalized_fault_code,
+            self.normalized_fault_code_l1,
+            self.normalized_fault_code_l2,
+        )
 
     @property
     def field_visit_type(self) -> str | None:
