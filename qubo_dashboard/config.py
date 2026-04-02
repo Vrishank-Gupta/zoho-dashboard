@@ -12,6 +12,10 @@ except ImportError:
 
 load_dotenv()
 
+TIMEZONE_ALIASES = {
+    "Asia/Calcutta": "Asia/Kolkata",
+}
+
 @dataclass(slots=True)
 class DatabaseConfig:
     host: str | None
@@ -54,6 +58,7 @@ class Settings:
     zoho_created_column: str = os.getenv("QUBO_ZOHO_CREATED_COLUMN", "Created_Time")
     zoho_modified_column: str = os.getenv("QUBO_ZOHO_MODIFIED_COLUMN", "Modified_Time")
     source_start_date: str = os.getenv("QUBO_SOURCE_START_DATE", "2026-02-01")
+    mapping_workbook_path: str | None = os.getenv("QUBO_MAPPING_WORKBOOK")
     clickhouse_fact_table: str = os.getenv("QUBO_CLICKHOUSE_FACT_TABLE", "tickets_fact_recent")
     clickhouse_daily_summary_table: str = os.getenv("QUBO_CLICKHOUSE_DAILY_SUMMARY_TABLE", "tickets_daily_summary")
     clickhouse_issues_summary_table: str = os.getenv("QUBO_CLICKHOUSE_ISSUES_SUMMARY_TABLE", "issues_daily_summary")
@@ -130,6 +135,10 @@ class Settings:
         if raw == "*":
             return ["*"]
         return [item.strip() for item in raw.split(",") if item.strip()]
+
+    @property
+    def normalized_etl_timezone(self) -> str:
+        return TIMEZONE_ALIASES.get(self.etl_timezone, self.etl_timezone)
 
 
 settings = Settings()

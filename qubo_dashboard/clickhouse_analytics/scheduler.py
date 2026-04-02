@@ -20,10 +20,10 @@ def run_job() -> None:
 
 
 def main() -> None:
-    scheduler = BlockingScheduler(timezone=settings.etl_timezone)
+    scheduler = BlockingScheduler(timezone=settings.normalized_etl_timezone)
     scheduler.add_job(
         run_job,
-        CronTrigger.from_crontab(settings.etl_schedule, timezone=settings.etl_timezone),
+        CronTrigger.from_crontab(settings.etl_schedule, timezone=settings.normalized_etl_timezone),
         id=settings.etl_job_name,
         name=settings.etl_job_name,
         replace_existing=True,
@@ -34,7 +34,7 @@ def main() -> None:
         "Scheduler active for %s with cron '%s' in timezone '%s'",
         settings.etl_job_name,
         settings.etl_schedule,
-        settings.etl_timezone,
+        settings.normalized_etl_timezone,
     )
     scheduler.start()
 

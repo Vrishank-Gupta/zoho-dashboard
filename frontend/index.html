@@ -3,254 +3,211 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Qubo Support Health Command Center</title>
+  <title>Qubo Support Executive Board</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <div class="app-shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-kicker">Qubo Support Ops</div>
-        <h1>Qubo Support Health</h1>
-        <p>Leadership view of customer pain, service cost, and bot performance from the ClickHouse analytics layer.</p>
+  <main class="page-shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow">Qubo Support Executive Board</div>
+        <h1 id="headline">Loading board</h1>
+        <p id="summary">Preparing the latest support snapshot.</p>
+      </div>
+      <div class="hero-meta">
+        <div class="status-pill" id="sourceBadge">Loading</div>
+        <div class="status-sub" id="lastUpdated">Checking latest refresh</div>
+      </div>
+    </header>
+
+    <section class="focus-banner" id="sidebarNote"></section>
+
+    <section class="filters-card">
+      <div class="filters-header">
+        <div class="eyebrow">Filters</div>
+        <div class="filter-actions">
+          <button id="openFocusModal" class="secondary-btn" type="button">Focus rules</button>
+          <button id="resetFilters" class="secondary-btn" type="button">Reset all</button>
+        </div>
       </div>
 
-      <nav class="side-nav">
-        <button class="nav-item active" data-target="overview">Overview</button>
-        <button class="nav-item" data-target="products">Products</button>
-        <button class="nav-item" data-target="issues">Issues</button>
-        <button class="nav-item" data-target="bot">Bot</button>
-        <button class="nav-item" data-target="quality">Quality</button>
-      </nav>
+      <div class="filters-grid">
+        <label><span>Date range</span><select id="datePreset"><option value="60d">Last 60 days</option><option value="30d">Last 30 days</option><option value="14d">Last 14 days</option><option value="history">Full history</option></select></label>
+        <label><span>Category</span><select id="categoryFilter"></select></label>
+        <label><span>Product family</span><select id="productFilter"></select></label>
+        <label><span>EFC</span><select id="efcFilter"></select></label>
+        <label><span>Support team</span><select id="departmentFilter"></select></label>
+        <label><span>Channel</span><select id="channelFilter"></select></label>
+        <label><span>Status</span><select id="statusFilter"></select></label>
+      </div>
 
-      <section class="sidebar-note" id="sidebarNote">
-        <div class="eyebrow">Weekly readout</div>
-        <h3>Repair burden is the operating risk signal.</h3>
-        <p>Installation demand matters, but repair demand is what converts into service cost and product concern.</p>
-      </section>
-    </aside>
+      <div class="quick-filters">
+        <span class="quick-filters-label">Quick</span>
+        <button class="quick-pill" id="qfExcludeInstallation" type="button">Excl. Installation</button>
+      </div>
 
-    <main class="main-panel">
-      <header class="hero" id="overview">
-        <div>
-          <div class="page-kicker">Support Health Command Center</div>
-          <h2 id="headline">Loading the warehouse view</h2>
-          <p id="summary">Preparing the current operating view across products, issues, field service, and bot performance.</p>
-        </div>
-        <div class="hero-status">
-          <div class="status-pill" id="sourceBadge">Loading source</div>
-          <div class="status-sub" id="lastUpdated">Checking pipeline freshness</div>
-          <div class="hero-actions">
-            <button id="runPipelineBtn" class="primary-btn" type="button">Run pipeline</button>
-            <button id="refreshPipelineBtn" class="secondary-btn" type="button">Refresh status</button>
-          </div>
-        </div>
-      </header>
+      <div class="active-rules" id="activeRules"></div>
+    </section>
 
-      <section class="filters-card">
-        <div class="filters-grid">
-          <label><span>Date window</span><select id="datePreset"><option value="60d">Last 60 days</option><option value="30d">Last 30 days</option><option value="14d">Last 14 days</option><option value="history">Full history</option></select></label>
-          <label><span>Product family</span><select id="productFilter"></select></label>
-          <label><span>Department</span><select id="departmentFilter"></select></label>
-          <label><span>Issue family</span><select id="issueFilter"></select></label>
-        </div>
-        <div class="filter-toggles">
-          <button id="resetFilters" class="secondary-btn">Reset filters</button>
-        </div>
-      </section>
+    <section class="kpi-grid" id="kpiGrid"></section>
 
-      <section class="kpi-grid" id="kpiGrid"></section>
-
-      <section class="overview-grid">
-        <article class="panel panel-large">
-          <div class="panel-head">
-            <div>
-              <div class="eyebrow">Executive trend</div>
-              <div class="title-row">
-                <h3>Ticket load, repair load, and automation capture</h3>
-                <button class="info-dot" type="button" data-tip="Tracks the shape of demand over time. Repair visits show service-cost pressure, while bot resolved indicates low-cost containment.">i</button>
-              </div>
-            </div>
-          </div>
-          <div id="timelineChart" class="timeline-chart"></div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="eyebrow">Watchlist</div>
-              <div class="title-row">
-                <h3>Signals that warrant attention</h3>
-                <button class="info-dot" type="button" data-tip="A compact leadership readout of the most important movements across product burden, repair pressure, issue acceleration, and bot abandonment.">i</button>
-              </div>
-            </div>
-          </div>
-          <div id="watchlist" class="stack-list"></div>
-        </article>
-      </section>
-
-      <section class="field-grid">
-        <article class="panel" id="fieldVisits">
-          <div class="panel-head">
-            <div>
-              <div class="eyebrow">Field visits</div>
-              <div class="title-row">
-                <h3>Installation load vs repair load</h3>
-                <button class="info-dot" type="button" data-tip="Shows how much of field workload is installation-driven versus repair-driven. Repair visits are the cost and product-health pressure signal.">i</button>
-              </div>
-            </div>
-          </div>
-          <div id="fieldVisitSummary" class="field-summary"></div>
-        </article>
-      </section>
-
-      <section class="panel" id="products">
+    <section class="board-grid board-grid-hero">
+      <article class="panel panel-large">
         <div class="panel-head">
           <div>
-            <div class="eyebrow">Product burden</div>
-            <div class="title-row">
-              <h3>Support load by product family</h3>
-              <button class="info-dot" type="button" data-tip="Variants are rolled up into canonical families so leadership can compare service burden at the portfolio level instead of SKU noise.">i</button>
-            </div>
+            <div class="eyebrow">Trend</div>
+            <h2>Tickets, installation tickets, bot resolved, and repeat tickets</h2>
           </div>
-          <div class="panel-note">Product variants are rolled up into canonical families.</div>
+        </div>
+        <div id="timelineChart" class="timeline-chart"></div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">Highlights</div>
+            <h2>What needs attention</h2>
+          </div>
+        </div>
+        <div id="spotlightCards" class="stack-list"></div>
+      </article>
+    </section>
+
+    <section class="board-grid">
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">Category View</div>
+            <h2>Category performance</h2>
+          </div>
+        </div>
+        <div id="categoryMatrix" class="matrix"></div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">Product View</div>
+            <h2>Product family performance</h2>
+          </div>
         </div>
         <div id="productMatrix" class="matrix"></div>
-      </section>
+      </article>
+    </section>
 
-      <section class="issue-section" id="issues">
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Issue Board</div>
+          <h2>EFC and FC2 concentration</h2>
+        </div>
+      </div>
+      <div class="tab-strip" id="issueTabs">
+        <button class="tab-btn active" data-issue-view="highest_volume">Highest volume</button>
+        <button class="tab-btn" data-issue-view="installation_tickets">Installation tickets</button>
+        <button class="tab-btn" data-issue-view="repeat_heavy">Repeat-heavy</button>
+        <button class="tab-btn" data-issue-view="bot_leakage">High transfer</button>
+      </div>
+      <div id="issueBoard" class="issue-board"></div>
+    </section>
+
+    <section class="board-grid">
+      <article class="panel">
         <div class="panel-head">
           <div>
-            <div class="eyebrow">Issue intelligence</div>
-            <div class="title-row">
-              <h3>Issue movement by operating question</h3>
-              <button class="info-dot" type="button" data-tip="The same issue can be important for different reasons. Switch the lens to rank by volume, growth, repair conversion, repeat burden, or bot leakage.">i</button>
-            </div>
+            <div class="eyebrow">Bot</div>
+            <h2>Bot resolved, transfer, and blank chat</h2>
           </div>
-          <div class="panel-note">Switch the lens to see burden, acceleration, repair intensity, repeat load, or bot leakage.</div>
         </div>
-        <div class="tab-strip" id="issueTabs">
-          <button class="tab-btn active" data-issue-view="biggest_burden">Biggest burden</button>
-          <button class="tab-btn" data-issue-view="rising">Rising</button>
-          <button class="tab-btn" data-issue-view="repair_heavy">Repair-heavy</button>
-          <button class="tab-btn" data-issue-view="repeat_heavy">Repeat-heavy</button>
-          <button class="tab-btn" data-issue-view="agent_leakage">Bot leakage</button>
-          <button class="tab-btn" data-issue-view="bot_friendly">Bot-friendly</button>
-        </div>
-        <div class="issue-grid">
-          <article class="panel">
-            <div id="issueBoard" class="issue-board"></div>
-          </article>
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <div class="eyebrow">Action queue</div>
-                <div class="title-row">
-                  <h3>Priority actions</h3>
-                  <button class="info-dot" type="button" data-tip="Shortlist of the most operationally relevant moves suggested by the current issue mix. Each card opens ticket-level evidence.">i</button>
-                </div>
-              </div>
-            </div>
-            <div id="actionQueue" class="stack-list"></div>
-          </article>
-        </div>
-      </section>
-
-      <section class="bot-grid" id="bot">
-        <article class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="eyebrow">Bot command center</div>
-              <div class="title-row">
-                <h3>Completion, drop-off, return, and leakage</h3>
-                <button class="info-dot" type="button" data-tip="Measures where the bot contains demand, where it pushes users to agents, and what happens after customers abandon a bot session.">i</button>
-              </div>
-            </div>
+        <div id="botKpis" class="bot-kpis"></div>
+        <div class="section-stack">
+          <div>
+            <h3 class="subsection-title">Bot by product</h3>
+            <div id="botProductMatrix" class="matrix"></div>
           </div>
-          <div id="botKpis" class="bot-kpis"></div>
-          <div class="bot-subgrid">
+          <div class="board-grid board-grid-tight">
             <div>
-              <div class="title-row compact">
-                <h4>Bot by product</h4>
-                <button class="info-dot" type="button" data-tip="Compares bot behavior across product families using chat volume, bot resolution, transfer rate, blank chat rate, and return after abandonment.">i</button>
-              </div>
-              <div id="botProductMatrix" class="matrix"></div>
-            </div>
-            <div>
-              <div class="title-row compact">
-                <h4>Best handled in bot</h4>
-                <button class="info-dot" type="button" data-tip="Issues with meaningful ticket volume and strong bot resolution, useful for expanding automation and reinforcing successful journeys.">i</button>
-              </div>
+              <h3 class="subsection-title">High bot resolved issues</h3>
               <div id="botBestIssues" class="stack-list"></div>
-              <div class="title-row compact top-gap">
-                <h4>Leaking to agent</h4>
-                <button class="info-dot" type="button" data-tip="Issues where bot interactions frequently escalate into live-agent handling, signaling poor containment or confusing flows.">i</button>
-              </div>
+            </div>
+            <div>
+              <h3 class="subsection-title">High transfer issues</h3>
               <div id="botLeakyIssues" class="stack-list"></div>
             </div>
           </div>
-        </article>
+        </div>
+      </article>
 
-        <article class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="eyebrow">Service operations</div>
-              <div class="title-row">
-                <h3>Channel, department, and field mix</h3>
-                <button class="info-dot" type="button" data-tip="Shows where workload sits operationally: which channels customers use, which teams absorb the load, and how much field demand is repair versus installation.">i</button>
-              </div>
-            </div>
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">Operations</div>
+            <h2>Support mix and ticket posture</h2>
           </div>
-          <div class="mini-grid">
-            <div><div class="title-row compact"><h4>Field service split</h4><button class="info-dot" type="button" data-tip="Separates installation visits from repair visits so service cost and product-health pressure are not conflated.">i</button></div><div id="fieldSplit" class="metric-list"></div></div>
-            <div><div class="title-row compact"><h4>Department mix</h4><button class="info-dot" type="button" data-tip="Share of support load handled by Call Center, Field Service, and Logistics after legacy department remapping.">i</button></div><div id="departmentMix" class="metric-list"></div></div>
-            <div><div class="title-row compact"><h4>Channel mix</h4><button class="info-dot" type="button" data-tip="Distribution of inbound demand across Chat, Phone, Email, and Others after cleanup. Web is folded into Others.">i</button></div><div id="channelMix" class="metric-list"></div></div>
-            <div><div class="title-row compact"><h4>Bot outcomes</h4><button class="info-dot" type="button" data-tip="Breakdown of chat sessions into bot resolved, transferred to agent, and blank chat abandonment.">i</button></div><div id="botOutcomes" class="metric-list"></div></div>
-          </div>
-        </article>
-      </section>
+        </div>
+        <div class="board-grid board-grid-tight">
+          <div><h3 class="subsection-title">Installation split</h3><div id="installationMix" class="metric-list"></div></div>
+          <div><h3 class="subsection-title">Support team mix</h3><div id="departmentMix" class="metric-list"></div></div>
+          <div><h3 class="subsection-title">Channel mix</h3><div id="channelMix" class="metric-list"></div></div>
+          <div><h3 class="subsection-title">Status mix</h3><div id="statusMix" class="metric-list"></div></div>
+        </div>
+      </article>
+    </section>
 
-      <section class="quality-grid" id="quality">
-        <article class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="eyebrow">Data integrity</div>
-              <div class="title-row">
-                <h3>Coverage and classification</h3>
-                <button class="info-dot" type="button" data-tip="Keeps reliability visible without dominating the page. These cards show how much of the source is fully classifiable for issue analysis.">i</button>
-              </div>
-            </div>
+    <section class="board-grid">
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">Coding Coverage</div>
+            <h2>How complete the input is</h2>
           </div>
-          <div id="qualityCards" class="quality-cards"></div>
-        </article>
+        </div>
+        <div id="qualityCards" class="quality-cards"></div>
+      </article>
 
-        <article class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="eyebrow">Source contract</div>
-              <div class="title-row">
-                <h3>Pipeline status and source notes</h3>
-                <button class="info-dot" type="button" data-tip="Shows pipeline freshness plus key source-model assumptions now enforced in the analytics layer: department remapping, channel cleanup, and retained fault-code hierarchy.">i</button>
-              </div>
-            </div>
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">Refresh Status</div>
+            <h2>Latest pipeline snapshot</h2>
           </div>
-          <div id="sourceNotes" class="stack-list"></div>
-          <div id="pipelineHealth" class="pipeline-box" style="margin-top:16px"></div>
-        </article>
-      </section>
-    </main>
-  </div>
+        </div>
+        <div id="pipelineHealth" class="pipeline-box"></div>
+      </article>
+    </section>
 
-  <div class="drawer hidden" id="issueDrawer">
-    <div class="drawer-backdrop" id="drawerBackdrop"></div>
-    <aside class="drawer-panel">
-      <button class="drawer-close" id="closeDrawer" aria-label="Close issue details">Close</button>
-      <div id="drawerContent" class="drawer-content"></div>
-    </aside>
-  </div>
+    <div class="modal-shell hidden" id="focusModal">
+      <div class="modal-backdrop" id="closeFocusModal"></div>
+      <div class="modal-panel">
+        <div class="modal-head">
+          <div>
+            <div class="eyebrow">Focus Builder</div>
+            <h2>Include and exclude issue groups</h2>
+            <p class="subtle">Use this only when you want to isolate a narrow issue slice. Include and exclude stay mutually exclusive.</p>
+          </div>
+          <button id="dismissFocusModal" class="secondary-btn" type="button">Close</button>
+        </div>
+        <div class="tab-strip" id="focusTabs">
+          <button class="tab-btn active" data-focus-tab="fc1">FC1</button>
+          <button class="tab-btn" data-focus-tab="fc2">FC2</button>
+          <button class="tab-btn" data-focus-tab="bot_action">Bot action</button>
+        </div>
+        <div class="focus-grid focus-grid-modal">
+          <div class="focus-column">
+            <div class="focus-column-title">Include only</div>
+            <div id="focusIncludePane"></div>
+          </div>
+          <div class="focus-column">
+            <div class="focus-column-title">Exclude from view</div>
+            <div id="focusExcludePane"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
 
   <script src="./config.js"></script>
   <script src="./app.js"></script>

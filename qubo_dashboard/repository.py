@@ -256,7 +256,7 @@ def parse_datetime(value: object) -> datetime | None:
     if isinstance(value, datetime):
         return value
     text = str(value).strip()
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%d-%m-%Y %H:%M:%S", "%d-%m-%Y"):
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%d-%m-%Y %H:%M:%S", "%d-%m-%Y"):
         try:
             return datetime.strptime(text, fmt)
         except ValueError:

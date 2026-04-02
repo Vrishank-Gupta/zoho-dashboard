@@ -16,6 +16,7 @@ from .cleaning import (
     normalize_resolution,
     normalize_version,
 )
+from .mapping import map_executive_fault_code, map_product_category
 
 
 @dataclass(slots=True)
@@ -55,6 +56,10 @@ class TicketRecord:
         return self.canonical_product in CORE_PRODUCT_FAMILIES
 
     @property
+    def product_category(self) -> str:
+        return map_product_category(self.product, self.canonical_product)
+
+    @property
     def normalized_channel(self) -> str:
         return normalize_channel(self.channel, self.department_name)
 
@@ -85,6 +90,10 @@ class TicketRecord:
     @property
     def normalized_bot_action(self) -> str:
         return normalize_bot_action(self.bot_action)
+
+    @property
+    def executive_fault_code(self) -> str:
+        return map_executive_fault_code(self.fault_code_level_1, self.fault_code_level_2)
 
     @property
     def is_internal_hero(self) -> bool:
@@ -157,10 +166,14 @@ class TicketRecord:
         )
 
     @property
+    def is_installation_ticket(self) -> bool:
+        return is_installation_ticket(self.normalized_fault_code_l1, self.normalized_fault_code_l2)
+
+    @property
     def field_visit_type(self) -> str | None:
         if not self.is_field_service:
             return None
-        return "Installation" if is_installation_ticket(self.normalized_fault_code, self.normalized_fault_code_l2, self.normalized_resolution, self.repair) else "Repair"
+        return "Installation" if self.is_installation_ticket else "Repair"
 
     @property
     def handle_time_minutes(self) -> float | None:
@@ -181,10 +194,16 @@ class TicketRecord:
 @dataclass(slots=True)
 class DashboardFilters:
     date_preset: str = "60d"
+    category: str = "All"
     product: str = "All"
     department: str = "All"
-    issue: str = "All"
-    version: str = "All"
-    include_hero: bool = False
-    include_dirty: bool = False
-    history_mode: bool = False
+    channel: str = "All"
+    efc: str = "All"
+    issue_detail: str = "All"
+    status: str = "All"
+    include_fc1: list[str] = field(default_factory=list)
+    exclude_fc1: list[str] = field(default_factory=list)
+    include_fc2: list[str] = field(default_factory=list)
+    exclude_fc2: list[str] = field(default_factory=list)
+    include_bot_action: list[str] = field(default_factory=list)
+    exclude_bot_action: list[str] = field(default_factory=list)

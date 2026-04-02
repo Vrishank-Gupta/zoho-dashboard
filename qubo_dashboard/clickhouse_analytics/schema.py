@@ -26,15 +26,18 @@ def bootstrap_statements() -> list[str]:
             product Nullable(String),
             device_model Nullable(String),
             canonical_product LowCardinality(String),
+            product_category LowCardinality(String),
             fault_code Nullable(String),
             normalized_fault_code LowCardinality(String),
             fault_code_level_1 Nullable(String),
             normalized_fault_code_l1 LowCardinality(String),
             fault_code_level_2 Nullable(String),
             normalized_fault_code_l2 LowCardinality(String),
+            executive_fault_code LowCardinality(String),
             resolution_code_level_1 Nullable(String),
             normalized_resolution LowCardinality(String),
             bot_action Nullable(String),
+            normalized_bot_action LowCardinality(String),
             bot_outcome LowCardinality(String),
             status Nullable(String),
             device_serial_number Nullable(String),
@@ -74,13 +77,17 @@ def bootstrap_statements() -> list[str]:
         f"""
         CREATE TABLE IF NOT EXISTS {settings.clickhouse.database}.{settings.clickhouse_daily_summary_table} (
             metric_date Date,
+            product_category LowCardinality(String),
             product_family LowCardinality(String),
+            executive_fault_code LowCardinality(String),
             fault_code LowCardinality(String),
             fault_code_level_1 LowCardinality(String),
             fault_code_level_2 LowCardinality(String),
             department_name LowCardinality(String),
             channel LowCardinality(String),
+            normalized_bot_action LowCardinality(String),
             bot_outcome LowCardinality(String),
+            status LowCardinality(String),
             tickets UInt64,
             field_visit_tickets UInt64,
             repair_field_tickets UInt64,
@@ -104,17 +111,20 @@ def bootstrap_statements() -> list[str]:
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(metric_date)
-        ORDER BY (metric_date, product_family, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, bot_outcome)
+        ORDER BY (metric_date, product_category, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status)
         """.strip(),
         f"""
         CREATE TABLE IF NOT EXISTS {settings.clickhouse.database}.{settings.clickhouse_issues_summary_table} (
             metric_date Date,
+            product_category LowCardinality(String),
             product_family LowCardinality(String),
+            executive_fault_code LowCardinality(String),
             fault_code LowCardinality(String),
             fault_code_level_1 LowCardinality(String),
             fault_code_level_2 LowCardinality(String),
             department_name LowCardinality(String),
             channel LowCardinality(String),
+            normalized_bot_action LowCardinality(String),
             tickets UInt64,
             repair_field_tickets UInt64,
             installation_field_tickets UInt64,
@@ -130,7 +140,7 @@ def bootstrap_statements() -> list[str]:
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(metric_date)
-        ORDER BY (metric_date, product_family, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel)
+        ORDER BY (metric_date, product_category, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action)
         """.strip(),
         f"""
         CREATE TABLE IF NOT EXISTS {settings.clickhouse.database}.{settings.clickhouse_sync_state_table} (

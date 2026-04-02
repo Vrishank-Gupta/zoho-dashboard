@@ -148,9 +148,8 @@ def normalize_bot_action(value: str | None) -> str:
     return "Other bot/system action"
 
 
-def is_installation_ticket(fault_code: str, fault_code_l2: str, resolution: str, repair: str | None) -> bool:
-    haystack = " ".join([fault_code.lower(), fault_code_l2.lower(), resolution.lower(), (repair or "").lower()])
-    return "install" in haystack
+def is_installation_ticket(fault_code_l1: str, fault_code_l2: str) -> bool:
+    return "instal" in fault_code_l1.lower() or "instal" in fault_code_l2.lower()
 
 
 def is_actionable_issue(fault_code: str, fault_code_l2: str) -> bool:
@@ -195,7 +194,7 @@ def evaluate_quality(
         or fault_code_l2 == "Unclassified"
     )
     usable_issue = not missing_issue and not dropped_in_bot
-    actionable_issue = usable_issue and is_actionable_issue(fault_code, fault_code_l2) and not is_installation_ticket(fault_code, fault_code_l2, "", None)
+    actionable_issue = usable_issue and is_actionable_issue(fault_code, fault_code_l2) and not is_installation_ticket(fault_code_l1, fault_code_l2)
     return TicketQuality(
         usable_issue=usable_issue,
         actionable_issue=actionable_issue,

@@ -1,0 +1,65 @@
+services:
+  qubo-clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: qubo-clickhouse
+    environment:
+      CLICKHOUSE_DB: ${QUBO_CLICKHOUSE_DATABASE:-qubo_analytics}
+      CLICKHOUSE_USER: ${QUBO_CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${QUBO_CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - qubo_clickhouse_data:/var/lib/clickhouse
+      - qubo_clickhouse_logs:/var/log/clickhouse-server
+    restart: unless-stopped
+
+  qubo-dashboard-api:
+    build: .
+    container_name: qubo-dashboard-api
+    env_file:
+      - .env.production
+    environment:
+      QUBO_APP_HOST: 0.0.0.0
+      QUBO_APP_PORT: 8000
+      QUBO_APP_RELOAD: "false"
+      QUBO_SERVE_FRONTEND: "false"
+    depends_on:
+      - qubo-clickhouse
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8020:8000"
+    restart: unless-stopped
+
+  qubo-frontend:
+    build: .
+    container_name: qubo-frontend-final
+    env_file:
+      - .env.production
+    environment:
+      QUBO_APP_HOST: 0.0.0.0
+      QUBO_APP_PORT: 8000
+      QUBO_APP_RELOAD: "false"
+      QUBO_SERVE_FRONTEND: "true"
+      QUBO_USE_SAMPLE_DATA: "false"
+    depends_on:
+      - qubo-dashboard-api
+    ports:
+      - "81:8000"
+    restart: unless-stopped
+
+  qubo-clickhouse-etl:
+    build:
+      context: .
+      dockerfile: Dockerfile.etl
+    container_name: qubo-clickhouse-etl
+    env_file:
+      - .env.production
+    depends_on:
+      - qubo-clickhouse
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  qubo_clickhouse_data:
+  qubo_clickhouse_logs:

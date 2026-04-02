@@ -1,12 +1,80 @@
+const DEFAULT_FILTERS = {
+  date_preset: "60d",
+  category: "All",
+  product: "All",
+  department: "All",
+  channel: "All",
+  efc: "All",
+  status: "All",
+  include_fc1: [],
+  exclude_fc1: [],
+  include_fc2: [],
+  exclude_fc2: [],
+  include_bot_action: [],
+  exclude_bot_action: [],
+};
+
+const KPI_CONFIG = [
+  {
+    key: "tickets",
+    label: "Tickets",
+    format: "count",
+    help: "Total tickets in the selected view.",
+  },
+  {
+    key: "installation_tickets",
+    label: "Installation Tickets",
+    format: "count",
+    help: "Tickets where FC1 or FC2 contains the substring 'instal'.",
+  },
+  {
+    key: "bot_resolved",
+    label: "Bot Resolved",
+    format: "count",
+    help: "Tickets closed by bot without transfer to a human agent.",
+  },
+  {
+    key: "repeat_tickets",
+    label: "Repeat Tickets",
+    format: "count",
+    help: "Same serial number and same fault code seen again within 30 days.",
+  },
+  {
+    key: "open_tickets",
+    label: "Open Tickets",
+    format: "count",
+    help: "Tickets whose status looks open, escalated, pending, or in progress.",
+  },
+  {
+    key: "no_reopen_rate",
+    label: "No-reopen rate",
+    format: "percent",
+    help: "Share of Call Center tickets where reopen count is zero.",
+  },
+];
+
+const ISSUE_TAB_TITLES = {
+  highest_volume: "Highest volume",
+  installation_tickets: "Installation tickets",
+  repeat_heavy: "Repeat-heavy",
+  bot_leakage: "High transfer",
+};
+
 const state = {
   apiBaseUrl: (window.QUBO_APP_CONFIG?.apiBaseUrl || window.location.origin || "").replace(/\/$/, ""),
-  filters: {
-    date_preset: "60d",
-    product: "All",
-    department: "All",
-    issue: "All",
+  filters: { ...DEFAULT_FILTERS },
+  issueView: "highest_volume",
+  payload: null,
+  options: {},
+  focusActiveTab: "fc1",
+  ruleSearch: {
+    include_fc1: "",
+    exclude_fc1: "",
+    include_fc2: "",
+    exclude_fc2: "",
+    include_bot_action: "",
+    exclude_bot_action: "",
   },
-  issueView: "biggest_burden",
 };
 
 const els = {
@@ -14,37 +82,34 @@ const els = {
   summary: document.getElementById("summary"),
   sourceBadge: document.getElementById("sourceBadge"),
   lastUpdated: document.getElementById("lastUpdated"),
-  runPipelineBtn: document.getElementById("runPipelineBtn"),
-  refreshPipelineBtn: document.getElementById("refreshPipelineBtn"),
   sidebarNote: document.getElementById("sidebarNote"),
+  activeRules: document.getElementById("activeRules"),
   kpiGrid: document.getElementById("kpiGrid"),
   timelineChart: document.getElementById("timelineChart"),
-  watchlist: document.getElementById("watchlist"),
-  fieldVisitSummary: document.getElementById("fieldVisitSummary"),
+  spotlightCards: document.getElementById("spotlightCards"),
+  categoryMatrix: document.getElementById("categoryMatrix"),
   productMatrix: document.getElementById("productMatrix"),
   issueBoard: document.getElementById("issueBoard"),
-  actionQueue: document.getElementById("actionQueue"),
   botKpis: document.getElementById("botKpis"),
   botProductMatrix: document.getElementById("botProductMatrix"),
   botBestIssues: document.getElementById("botBestIssues"),
   botLeakyIssues: document.getElementById("botLeakyIssues"),
-  fieldSplit: document.getElementById("fieldSplit"),
+  installationMix: document.getElementById("installationMix"),
   departmentMix: document.getElementById("departmentMix"),
   channelMix: document.getElementById("channelMix"),
-  botOutcomes: document.getElementById("botOutcomes"),
+  statusMix: document.getElementById("statusMix"),
   qualityCards: document.getElementById("qualityCards"),
-  sourceNotes: document.getElementById("sourceNotes"),
   pipelineHealth: document.getElementById("pipelineHealth"),
-  issueTabs: document.getElementById("issueTabs"),
-  drawer: document.getElementById("issueDrawer"),
-  drawerBackdrop: document.getElementById("drawerBackdrop"),
-  drawerContent: document.getElementById("drawerContent"),
-  closeDrawer: document.getElementById("closeDrawer"),
   datePreset: document.getElementById("datePreset"),
+  categoryFilter: document.getElementById("categoryFilter"),
   productFilter: document.getElementById("productFilter"),
   departmentFilter: document.getElementById("departmentFilter"),
-  issueFilter: document.getElementById("issueFilter"),
+  channelFilter: document.getElementById("channelFilter"),
+  efcFilter: document.getElementById("efcFilter"),
+  statusFilter: document.getElementById("statusFilter"),
   resetFilters: document.getElementById("resetFilters"),
+  issueTabs: document.getElementById("issueTabs"),
+  qfExcludeInstallation: document.getElementById("qfExcludeInstallation"),
 };
 
 bindEvents();
@@ -53,9 +118,12 @@ loadDashboard();
 function bindEvents() {
   [
     [els.datePreset, "date_preset"],
+    [els.categoryFilter, "category"],
     [els.productFilter, "product"],
     [els.departmentFilter, "department"],
-    [els.issueFilter, "issue"],
+    [els.channelFilter, "channel"],
+    [els.efcFilter, "efc"],
+    [els.statusFilter, "status"],
   ].forEach(([element, key]) => {
     element.addEventListener("change", () => {
       state.filters[key] = element.value;
@@ -64,136 +132,134 @@ function bindEvents() {
   });
 
   els.resetFilters.addEventListener("click", () => {
-    state.filters = {
-      date_preset: "60d",
-      product: "All",
-      department: "All",
-      issue: "All",
-    };
-    state.issueView = "biggest_burden";
+    state.filters = structuredClone(DEFAULT_FILTERS);
+    Object.keys(state.ruleSearch).forEach((key) => {
+      state.ruleSearch[key] = "";
+    });
+    state.issueView = "highest_volume";
     syncControls();
+    renderAdvancedFilters();
+    renderActiveRules();
     loadDashboard();
   });
-  els.runPipelineBtn.addEventListener("click", triggerPipeline);
-  els.refreshPipelineBtn.addEventListener("click", () => refreshPipelineStatus());
+
+  els.qfExcludeInstallation.addEventListener("click", () => {
+    toggleExcludeInstallation();
+  });
+
+  document.getElementById("focusTabs").addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-focus-tab]");
+    if (!btn) return;
+    state.focusActiveTab = btn.dataset.focusTab;
+    document.querySelectorAll("[data-focus-tab]").forEach((b) => {
+      b.classList.toggle("active", b.dataset.focusTab === state.focusActiveTab);
+    });
+    renderAdvancedFilters();
+  });
 
   els.issueTabs.addEventListener("click", (event) => {
     const button = event.target.closest("[data-issue-view]");
     if (!button) return;
     state.issueView = button.dataset.issueView;
-    els.issueTabs.querySelectorAll(".tab-btn").forEach((item) => item.classList.toggle("active", item === button));
-    if (state.payload) {
-      renderIssueBoard(state.payload.issue_views || {});
-    }
+    syncControls();
+    renderIssueBoard(state.payload?.issue_views || {});
   });
-
-  document.querySelectorAll(".nav-item").forEach((button) => {
-    button.addEventListener("click", () => {
-      document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
-      document.getElementById(button.dataset.target)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  });
-
-  els.drawerBackdrop.addEventListener("click", closeDrawer);
-  els.closeDrawer.addEventListener("click", closeDrawer);
 }
 
 async function loadDashboard() {
   renderLoading();
-  const params = new URLSearchParams({
-    ...Object.fromEntries(Object.entries(state.filters).map(([key, value]) => [key, String(value)])),
-  });
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(state.filters)) {
+    if (Array.isArray(value)) {
+      value.forEach((item) => params.append(key, item));
+    } else {
+      params.set(key, String(value));
+    }
+  }
+
   try {
     const response = await fetch(`${apiUrl("/api/dashboard")}?${params.toString()}`);
-    if (!response.ok) throw new Error(`Dashboard API returned ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`Dashboard API returned ${response.status}`);
+    }
     const payload = await response.json();
     state.payload = payload;
-    hydrateFilters(payload.filter_options || {});
+    state.options = payload.filter_options || {};
+    hydrateQuickFilters(state.options);
+    renderAdvancedFilters();
+    renderActiveRules();
     renderDashboard(payload);
-    refreshPipelineStatus({ silent: true });
   } catch (error) {
     renderError(error);
   }
 }
 
 function renderLoading() {
-  const loading = placeholder("Loading dashboard");
+  const loading = placeholder("Loading board");
   [
     els.kpiGrid,
     els.timelineChart,
-    els.watchlist,
-    els.fieldVisitSummary,
+    els.spotlightCards,
+    els.categoryMatrix,
     els.productMatrix,
     els.issueBoard,
-    els.actionQueue,
     els.botKpis,
     els.botProductMatrix,
     els.botBestIssues,
     els.botLeakyIssues,
-    els.fieldSplit,
+    els.installationMix,
     els.departmentMix,
     els.channelMix,
-    els.botOutcomes,
+    els.statusMix,
     els.qualityCards,
-    els.sourceNotes,
     els.pipelineHealth,
-  ].forEach((el) => { el.innerHTML = loading; });
+  ].forEach((element) => {
+    element.innerHTML = loading;
+  });
 }
 
 function renderDashboard(payload) {
-  const summary = payload.executive_summary || {};
-  const clean = payload.cleaning_summary || {};
+  const meta = payload.meta || {};
   const pipeline = payload.pipeline_health || {};
-  const bot = payload.bot_summary || {};
-  const topProduct = (payload.product_health || [])[0];
-  const topRepair = (payload.issue_views?.repair_heavy || [])[0];
-  const topLeak = (payload.issue_views?.agent_leakage || [])[0];
+  const categoryRows = payload.category_health || [];
+  const issueRows = payload.issue_views?.highest_volume || [];
+  const topCategory = categoryRows[0];
+  const topIssue = issueRows[0];
 
-  els.headline.textContent = summary.headline || "Support health";
-  els.summary.textContent = summary.summary || "";
-  els.sourceBadge.textContent = payload.meta?.warehouse_mode ? "Warehouse live" : "Sample mode";
-  els.lastUpdated.textContent = `Last pipeline run: ${pipeline.last_run_at || "Unknown"}`;
+  els.headline.textContent = meta.title || "Qubo Support Executive Board";
+  els.summary.textContent = meta.subtitle || "Executive view of support volume, issue mix, and bot outcomes.";
+  els.sourceBadge.textContent = meta.source_mode === "clickhouse" ? "Live data" : "No data loaded";
+  els.lastUpdated.textContent = `Last refresh: ${formatDateTime(pipeline.last_run_at || meta.window_end || "")}`;
   els.sidebarNote.innerHTML = `
-    <div class="eyebrow">Weekly readout</div>
-    <h3>${topProduct ? topProduct.product_family : "Support"} is carrying the largest support burden.</h3>
-    <p>${topRepair ? `${topRepair.fault_code_level_2} is the main repair pressure point.` : "Repair visits remain the main severity signal."}${topLeak ? ` ${topLeak.fault_code_level_2} is leaking heavily from bot to agent.` : ""}</p>
+    <div class="eyebrow">Current Focus</div>
+    <h3>${escapeHtml(topCategory ? `${topCategory.product_category} is leading the current ticket mix.` : "The board will highlight the strongest driver once data is available.")}</h3>
+    <p>${escapeHtml(topIssue ? `${topIssue.fault_code_level_2} is the biggest FC2 theme in the current slice.` : "Use the focus rules above to narrow the board by FC1, FC2, or bot action.")}</p>
   `;
 
   renderKpis(payload.kpis || {});
   renderTimeline(payload.timeline || []);
-  renderWatchlist(payload);
-  renderFieldVisits(payload);
-  renderProductMatrix(payload.product_health || []);
+  renderSpotlight(payload.spotlight || []);
+  renderHealthMatrix(els.categoryMatrix, payload.category_health || [], "product_category", false);
+  renderHealthMatrix(els.productMatrix, payload.product_health || [], "product_family", true);
   renderIssueBoard(payload.issue_views || {});
-  renderActionQueue(payload.action_queue || []);
-  renderBotSection(bot);
-  renderMetricList(els.fieldSplit, payload.service_ops?.field_service_split || []);
+  renderBotSummary(payload.bot_summary || {});
+  renderMetricList(els.installationMix, payload.service_ops?.installation_mix || []);
   renderMetricList(els.departmentMix, payload.service_ops?.department_mix || []);
   renderMetricList(els.channelMix, payload.service_ops?.channel_mix || []);
-  renderMetricList(els.botOutcomes, payload.service_ops?.bot_outcomes || []);
-  renderQuality(clean);
-  renderSourceNotes(clean, payload.meta || {});
-  renderPipelineHealth(pipeline, payload.meta || {});
+  renderMetricList(els.statusMix, payload.service_ops?.status_mix || []);
+  renderQuality(payload.data_quality || {});
+  renderPipelineHealth(payload.pipeline_health || {});
 }
 
 function renderKpis(kpis) {
-  const cards = [
-    ["total_tickets", "Ticket volume", "count", false, "Total ticket load in the selected window after the active filter set is applied."],
-    ["repair_field_visit_rate", "Repair visit rate", "percent", true, "Share of tickets that convert into Field Service for repair work. This is the main cost and severity signal."],
-    ["installation_field_visit_rate", "Installation visit rate", "percent", false, "Share of tickets that convert into Field Service for installation support. Operationally relevant, but not a product-failure signal."],
-    ["bot_deflection_rate", "Bot resolved", "percent", false, "Share of tickets closed by the bot without a handoff to human support."],
-    ["fcr", "FCR", "percent", false, "First contact resolution for Call Center tickets where reopen count is reliably zero."],
-    ["repeat_rate", "Repeat rate", "percent", true, "Share of tickets that recur on the same device and issue pattern within 30 days."],
-  ];
-  els.kpiGrid.innerHTML = cards.map(([key, label, type, badWhenUp, tip]) => {
-    const metric = kpis[key] || { value: 0, change: 0 };
-    const improving = badWhenUp ? metric.change < 0 : metric.change >= 0;
+  els.kpiGrid.innerHTML = KPI_CONFIG.map((item) => {
+    const metric = kpis[item.key] || { value: 0, change: 0 };
     return `
       <article class="kpi-card">
-        <div class="title-row compact"><div class="kpi-label">${label}</div>${infoDot(tip)}</div>
-        <div class="kpi-value">${type === "count" ? formatNumber(metric.value) : formatPercent(metric.value)}</div>
-        <div class="delta ${improving ? "good" : "bad"}">${formatDelta(metric.change)}</div>
+        <div class="kpi-label">${escapeHtml(item.label)}</div>
+        <div class="kpi-value">${item.format === "percent" ? formatPercent(metric.value) : formatNumber(metric.value)}</div>
+        <div class="kpi-help">${escapeHtml(item.help)}</div>
+        <div class="delta ${metric.change >= 0 ? "good" : "bad"}">${formatDelta(metric.change)}</div>
         <div class="subtle">vs prior period</div>
       </article>
     `;
@@ -202,130 +268,109 @@ function renderKpis(kpis) {
 
 function renderTimeline(points) {
   if (!points.length) {
-    els.timelineChart.innerHTML = emptyState("No timeline data.");
+    els.timelineChart.innerHTML = emptyState("No timeline data for the selected filters.");
     return;
   }
-  const width = 880;
-  const height = 240;
-  const pad = 18;
-  const lines = [
-    ["tickets", "#2167e8"],
-    ["repair_field", "#d94a3b"],
-    ["bot_resolved", "#189467"],
+
+  const width = 920;
+  const height = 250;
+  const padX = 24;
+  const padY = 18;
+  const series = [
+    { key: "tickets", label: "Tickets", color: "#2563eb" },
+    { key: "installation_tickets", label: "Installation Tickets", color: "#d68a1b" },
+    { key: "bot_resolved_tickets", label: "Bot Resolved", color: "#198754" },
+    { key: "repeat_tickets", label: "Repeat Tickets", color: "#6e59cf" },
   ];
-  const max = Math.max(...points.flatMap((point) => lines.map(([key]) => Number(point[key] || 0))), 1);
-  const step = (width - pad * 2) / Math.max(points.length - 1, 1);
-  const toY = (value) => height - pad - (value / max) * (height - pad * 2);
-  const paths = lines.map(([key, color]) => {
-    const d = points.map((point, index) => `${index === 0 ? "M" : "L"} ${pad + step * index} ${toY(Number(point[key] || 0))}`).join(" ");
-    return `<path d="${d}" fill="none" stroke="${color}" stroke-width="3.2" stroke-linecap="round"></path>`;
+
+  const maxValue = Math.max(
+    ...points.flatMap((point) => series.map((line) => Number(point[line.key] || 0))),
+    1,
+  );
+  const step = (width - padX * 2) / Math.max(points.length - 1, 1);
+  const toY = (value) => height - padY - (value / maxValue) * (height - padY * 2);
+
+  const gridLines = [0.25, 0.5, 0.75].map((ratio) => {
+    const y = padY + ratio * (height - padY * 2);
+    return `<line x1="${padX}" y1="${y}" x2="${width - padX}" y2="${y}" stroke="#dde5ef" stroke-width="1" />`;
   }).join("");
+
+  const paths = series.map((line) => {
+    const d = points.map((point, index) => {
+      const x = padX + step * index;
+      const y = toY(Number(point[line.key] || 0));
+      return `${index === 0 ? "M" : "L"} ${x} ${y}`;
+    }).join(" ");
+    return `<path d="${d}" fill="none" stroke="${line.color}" stroke-width="3" stroke-linecap="round" />`;
+  }).join("");
+
+  const labels = points.map((point, index) => {
+    if (points.length > 7 && index % Math.ceil(points.length / 6) !== 0 && index !== points.length - 1) {
+      return "";
+    }
+    const x = padX + step * index;
+    return `<text x="${x}" y="${height - 2}" text-anchor="middle" font-size="11" fill="#6d7b8f">${escapeHtml(shortDate(point.date))}</text>`;
+  }).join("");
+
   els.timelineChart.innerHTML = `
-    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:260px">${paths}</svg>
-    <div class="chip-row">
-      <span class="chip">Tickets</span>
-      <span class="chip bad">Repair visits</span>
-      <span class="chip good">Bot resolved</span>
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:260px">
+      ${gridLines}
+      ${paths}
+      ${labels}
+    </svg>
+    <div class="timeline-legend">
+      <div class="chip-row">
+        ${series.map((line) => `<span class="chip" style="background:${hexToSoft(line.color)};color:${line.color}">${escapeHtml(line.label)}</span>`).join("")}
+      </div>
     </div>
   `;
 }
 
-function renderWatchlist(payload) {
-  const topProduct = (payload.product_health || [])[0];
-  const repairIssue = (payload.issue_views?.repair_heavy || [])[0];
-  const risingIssue = (payload.issue_views?.rising || [])[0];
-  const bot = payload.bot_summary?.overview || {};
-  const cards = [
-    topProduct ? {
-      title: "Largest product burden",
-      detail: `${topProduct.product_family} has ${formatNumber(topProduct.ticket_volume)} tickets. ${formatPercent(topProduct.repair_field_visit_rate)} of this product's tickets convert into repair visits.`,
-    } : null,
-    repairIssue ? {
-      title: "Highest repair-weighted issue",
-      detail: `${repairIssue.product_family} - ${repairIssue.fault_code_level_2}. ${formatPercent(repairIssue.repair_field_visit_rate)} of tickets for this issue convert into repair visits.`,
-      issueId: repairIssue.issue_id,
-    } : null,
-    risingIssue ? {
-      title: "Fastest rising material issue",
-      detail: `${risingIssue.product_family} - ${risingIssue.fault_code_level_2} is up from ${formatNumber(risingIssue.previous_volume)} to ${formatNumber(risingIssue.volume)}.`,
-      issueId: risingIssue.issue_id,
-    } : null,
-    {
-      title: "Bot abandonment",
-      detail: `${formatPercent(bot.blank_chat_rate || 0)} of chat sessions end as blank chat. ${formatPercent(bot.blank_chat_return_rate || 0)} of abandoned users return within 7 days.`,
-    },
-  ].filter(Boolean);
+function renderSpotlight(items) {
+  if (!items.length) {
+    els.spotlightCards.innerHTML = emptyState("No highlights in the current view.");
+    return;
+  }
 
-  els.watchlist.innerHTML = cards.map((card) => `
-    <article class="watch-card ${card.issueId ? "js-issue" : ""}" ${card.issueId ? `data-issue-id="${card.issueId}"` : ""}>
-      <div>
-        <div class="watch-title">${card.title}</div>
-        <p class="subtle">${card.detail}</p>
-      </div>
+  els.spotlightCards.innerHTML = items.map((item) => `
+    <article class="watch-card">
+      <div class="watch-title">${escapeHtml(item.title)}</div>
+      <p class="subtle">${escapeHtml(item.detail)}</p>
     </article>
   `).join("");
-  bindIssueClicks(els.watchlist);
 }
 
-function renderFieldVisits(payload) {
-  const totalTickets = Number(payload.kpis?.total_tickets?.value || 0);
-  const repairRate = Number(payload.kpis?.repair_field_visit_rate?.value || 0);
-  const installRate = Number(payload.kpis?.installation_field_visit_rate?.value || 0);
-  const totalFieldRate = repairRate + installRate;
-  const split = payload.service_ops?.field_service_split || [];
-  const repairSplit = split.find((item) => (item.label || "").toLowerCase().includes("repair")) || { count: 0, share: 0 };
-  const installSplit = split.find((item) => (item.label || "").toLowerCase().includes("installation")) || { count: 0, share: 0 };
-  const totalFieldCount = Number(repairSplit.count || 0) + Number(installSplit.count || 0);
-
-  els.fieldVisitSummary.innerHTML = `
-    <article class="field-card">
-      <div class="label">Total field load</div>
-      <div class="value">${formatPercent(totalFieldRate)}</div>
-      <div class="detail">${formatNumber(totalFieldCount)} field visits in the selected view. This is the share of total tickets that move to Field Service.</div>
-    </article>
-    <article class="field-card">
-      <div class="label">Repair visits</div>
-      <div class="value">${formatPercent(repairRate)}</div>
-      <div class="detail">${formatNumber(repairSplit.count || 0)} repair visits. ${formatPercent(repairSplit.share || 0)} of all field visits, and ${formatPercent(repairRate)} of total tickets.</div>
-    </article>
-    <article class="field-card">
-      <div class="label">Installation visits</div>
-      <div class="value">${formatPercent(installRate)}</div>
-      <div class="detail">${formatNumber(installSplit.count || 0)} installation visits. ${formatPercent(installSplit.share || 0)} of all field visits, and ${formatPercent(installRate)} of total tickets.</div>
-    </article>
-  `;
-}
-
-function renderProductMatrix(products) {
-  if (!products.length) {
-    els.productMatrix.innerHTML = emptyState("No product data.");
+function renderHealthMatrix(container, rows, titleKey, showCategory) {
+  if (!rows.length) {
+    container.innerHTML = emptyState("No data for the selected filters.");
     return;
   }
-  const maxVolume = Math.max(...products.map((item) => item.ticket_volume), 1);
-  els.productMatrix.innerHTML = `
+
+  const maxTickets = Math.max(...rows.map((row) => Number(row.tickets || 0)), 1);
+  container.innerHTML = `
     <div class="matrix-header">
-      <div class="matrix-main">Product family</div>
+      <div class="matrix-main">${showCategory ? "Product family" : "Category"}</div>
       <div class="matrix-metrics">
-        <div>Volume</div>
-        <div>Repair rate</div>
+        <div>Tickets</div>
+        <div>Installation</div>
         <div>Repeat</div>
-        <div>Bot resolved</div>
-        <div>Top issue</div>
+        <div>Bot Resolved</div>
+        <div>Top EFC</div>
       </div>
     </div>
-    ${products.map((item) => `
+    ${rows.map((row) => `
       <div class="matrix-row">
         <div class="matrix-main">
-          <div class="watch-title">${item.product_family}</div>
-        <div class="subtle">Service burden ${formatNumber(item.service_burden)}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${(item.ticket_volume / maxVolume) * 100}%"></div></div>
+          <div class="watch-title">${escapeHtml(row[titleKey] || "Other")}</div>
+          ${showCategory ? `<div class="subtle">${escapeHtml(row.product_category || "Other")}</div>` : ""}
+          <div class="bar-track"><div class="bar-fill" style="width:${((Number(row.tickets || 0) / maxTickets) * 100).toFixed(1)}%"></div></div>
         </div>
         <div class="matrix-metrics">
-          <div class="matrix-metric"><div class="label">Tickets</div><div class="value">${formatNumber(item.ticket_volume)}</div></div>
-          <div class="matrix-metric"><div class="label">Repair</div><div class="value ${item.repair_field_visit_rate >= 0.12 ? "bad" : ""}">${formatPercent(item.repair_field_visit_rate)}</div></div>
-          <div class="matrix-metric"><div class="label">Repeat</div><div class="value ${item.repeat_rate >= 0.2 ? "warn" : ""}">${formatPercent(item.repeat_rate)}</div></div>
-          <div class="matrix-metric"><div class="label">Bot</div><div class="value">${formatPercent(item.bot_deflection_rate)}</div></div>
-          <div class="matrix-metric"><div class="label">Top issue</div><div class="value">${escapeHtml(item.top_issue)}</div></div>
+          <div class="matrix-metric"><div class="label">Tickets</div><div class="value">${formatNumber(row.tickets)}</div></div>
+          <div class="matrix-metric"><div class="label">Installation</div><div class="value">${formatPercent(row.installation_rate)}</div></div>
+          <div class="matrix-metric"><div class="label">Repeat</div><div class="value">${formatPercent(row.repeat_rate)}</div></div>
+          <div class="matrix-metric"><div class="label">Bot Resolved</div><div class="value">${formatPercent(row.bot_resolved_rate)}</div></div>
+          <div class="matrix-metric"><div class="label">Top EFC</div><div class="value">${escapeHtml(row.top_efc || "Blank")}</div></div>
         </div>
       </div>
     `).join("")}
@@ -335,97 +380,77 @@ function renderProductMatrix(products) {
 function renderIssueBoard(issueViews) {
   const issues = issueViews[state.issueView] || [];
   if (!issues.length) {
-    els.issueBoard.innerHTML = emptyState("No issues for this view.");
+    els.issueBoard.innerHTML = emptyState("No issues found for this view.");
     return;
   }
+
   els.issueBoard.innerHTML = issues.map((issue) => `
-    <article class="issue-card" data-issue-id="${issue.issue_id}">
-      <div>
-        <div class="issue-title">${issue.fault_code_level_2}</div>
-        <div class="issue-subtitle">${issue.product_family} - ${issue.fault_code} / ${issue.fault_code_level_1}</div>
-      </div>
+    <article class="issue-card">
+      <div class="issue-title">${escapeHtml(issue.fault_code_level_2 || "Unclassified")}</div>
+      <div class="issue-subtitle">${escapeHtml(issue.product_category || "Other")} / ${escapeHtml(issue.product_family || "Other")} / ${escapeHtml(issue.executive_fault_code || "Blank")}</div>
       <div class="chip-row">
-        <span class="chip">${formatNumber(issue.volume)} recent</span>
-        <span class="chip bad">Repair ${formatPercent(issue.repair_field_visit_rate)}</span>
-        <span class="chip warn">Repeat ${formatPercent(issue.repeat_rate)}</span>
-        ${issue.bot_transfer_rate ? `<span class="chip warn">Transfer ${formatPercent(issue.bot_transfer_rate)}</span>` : ""}
+        <span class="chip">${formatNumber(issue.volume)} tickets</span>
+        <span class="chip warn">Installation ${formatPercent(issue.installation_rate)}</span>
+        <span class="chip">Repeat ${formatPercent(issue.repeat_rate)}</span>
+        <span class="chip ${Number(issue.bot_transfer_rate || 0) >= 0.20 ? "bad" : ""}">Transfer ${formatPercent(issue.bot_transfer_rate)}</span>
+        <span class="chip good">Bot Resolved ${formatPercent(issue.bot_resolved_rate)}</span>
       </div>
-      <p class="subtle">${issue.insight}</p>
-      <div class="issue-foot">
-        <span>Prior period ${formatNumber(issue.previous_volume)}</span>
-        <span>Ticket evidence</span>
-      </div>
+      <p class="subtle">${escapeHtml(issue.insight || "")}</p>
     </article>
   `).join("");
-  bindIssueClicks(els.issueBoard);
 }
 
-function renderActionQueue(actions) {
-  if (!actions.length) {
-    els.actionQueue.innerHTML = emptyState("No actions.");
-    return;
-  }
-  els.actionQueue.innerHTML = actions.map((item) => `
-    <article class="watch-card js-issue" data-issue-id="${item.issue_id}">
-      <div>
-        <div class="watch-title">${item.title}</div>
-        <p class="subtle">${item.detail}</p>
-      </div>
-    </article>
-  `).join("");
-  bindIssueClicks(els.actionQueue);
-}
-
-function renderBotSection(bot) {
-  const overview = bot.overview || {};
+function renderBotSummary(botSummary) {
+  const overview = botSummary.overview || {};
   els.botKpis.innerHTML = [
-    ["Bot resolved", formatPercent(overview.bot_resolved_rate || 0), `${formatNumber(overview.bot_resolved_tickets || 0)} sessions`, "Sessions fully handled by the bot without human intervention."],
-    ["Agent transfer", formatPercent(overview.bot_transferred_rate || 0), `${formatNumber(overview.bot_transferred_tickets || 0)} sessions`, "Sessions that start in bot but move to an agent, indicating automation leakage."],
-    ["Blank chat", formatPercent(overview.blank_chat_rate || 0), `${formatNumber(overview.blank_chat_tickets || 0)} sessions`, "Sessions abandoned after starting the bot journey."],
-    ["Return after blank", formatPercent(overview.blank_chat_return_rate || 0), `${formatNumber(overview.blank_chat_returned_7d || 0)} returns`, "Share of abandoned bot users who return within 7 days on any tracked support journey."],
-    ["Recovered in bot", formatPercent(overview.blank_chat_recovery_rate || 0), `${formatNumber(overview.blank_chat_resolved_7d || 0)} recoveries`, "Share of abandoned bot users who later return and end up bot-resolved within 7 days."],
-  ].map(([label, value, detail, tip]) => `
+    ["Chat journeys", formatNumber(overview.chat_tickets || 0)],
+    ["Bot Resolved", formatNumber(overview.bot_resolved_tickets || 0)],
+    ["Transferred", formatNumber(overview.bot_transferred_tickets || 0)],
+    ["Blank chat", formatNumber(overview.blank_chat_tickets || 0)],
+    ["Return in 7d", formatNumber(overview.blank_chat_returned_7d || 0)],
+  ].map(([label, value]) => `
     <article class="bot-kpi">
-      <div class="title-row compact"><div class="kpi-label">${label}</div>${infoDot(tip)}</div>
+      <div class="kpi-label">${escapeHtml(label)}</div>
       <div class="value">${value}</div>
-      <div class="subtle">${detail}</div>
     </article>
   `).join("");
 
-  renderBotProductMatrix(bot.by_product || []);
-  renderIssueList(els.botBestIssues, bot.best_issues || [], "No strong bot-win issues.");
-  renderIssueList(els.botLeakyIssues, bot.leaky_issues || [], "No bot leakage issues.");
+  renderBotProductMatrix(botSummary.by_product || []);
+  renderIssueList(els.botBestIssues, botSummary.best_issues || [], "No high bot-resolved issues.");
+  renderIssueList(els.botLeakyIssues, botSummary.leaky_issues || [], "No high-transfer issues.");
 }
 
 function renderBotProductMatrix(rows) {
   if (!rows.length) {
-    els.botProductMatrix.innerHTML = emptyState("No bot product data.");
+    els.botProductMatrix.innerHTML = emptyState("No bot rows in the selected slice.");
     return;
   }
-  const maxVolume = Math.max(...rows.map((item) => item.chat_tickets), 1);
+
+  const maxTickets = Math.max(...rows.map((row) => Number(row.chat_tickets || 0)), 1);
   els.botProductMatrix.innerHTML = `
     <div class="matrix-header">
       <div class="matrix-main">Product</div>
       <div class="matrix-metrics">
         <div>Chat</div>
-        <div>Resolved</div>
+        <div>Bot Resolved</div>
         <div>Transferred</div>
-        <div>Blank</div>
-        <div>Blank return</div>
+        <div>Blank chat</div>
+        <div>Return</div>
       </div>
     </div>
-    ${rows.map((item) => `
+    ${rows.map((row) => `
       <div class="matrix-row">
         <div class="matrix-main">
-          <div class="watch-title">${item.product_family}</div>
-          <div class="bar-track"><div class="bar-fill" style="width:${(item.chat_tickets / maxVolume) * 100}%"></div></div>
+          <div class="watch-title">${escapeHtml(row.product_family || "Other")}</div>
+          <div class="subtle">${escapeHtml(row.product_category || "Other")}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${((Number(row.chat_tickets || 0) / maxTickets) * 100).toFixed(1)}%"></div></div>
         </div>
         <div class="matrix-metrics">
-          <div class="matrix-metric"><div class="label">Chat</div><div class="value">${formatNumber(item.chat_tickets)}</div></div>
-          <div class="matrix-metric"><div class="label">Resolved</div><div class="value good">${formatPercent(item.bot_resolved_rate)}</div></div>
-          <div class="matrix-metric"><div class="label">Transferred</div><div class="value ${item.bot_transferred_rate >= 0.45 ? "bad" : ""}">${formatPercent(item.bot_transferred_rate)}</div></div>
-          <div class="matrix-metric"><div class="label">Blank</div><div class="value ${item.blank_chat_rate >= 0.2 ? "warn" : ""}">${formatPercent(item.blank_chat_rate)}</div></div>
-          <div class="matrix-metric"><div class="label">Return</div><div class="value">${formatPercent(item.blank_chat_return_rate)}</div></div>
+          <div class="matrix-metric"><div class="label">Chat</div><div class="value">${formatNumber(row.chat_tickets)}</div></div>
+          <div class="matrix-metric"><div class="label">Bot Resolved</div><div class="value">${formatPercent(row.bot_resolved_rate)}</div></div>
+          <div class="matrix-metric"><div class="label">Transferred</div><div class="value">${formatPercent(row.bot_transferred_rate)}</div></div>
+          <div class="matrix-metric"><div class="label">Blank</div><div class="value">${formatPercent(row.blank_chat_rate)}</div></div>
+          <div class="matrix-metric"><div class="label">Return</div><div class="value">${formatPercent(row.blank_chat_return_rate)}</div></div>
         </div>
       </div>
     `).join("")}
@@ -438,29 +463,26 @@ function renderIssueList(container, issues, emptyLabel) {
     return;
   }
   container.innerHTML = issues.slice(0, 5).map((issue) => `
-    <article class="watch-card js-issue" data-issue-id="${issue.issue_id}">
-      <div>
-        <div class="watch-title">${issue.product_family} - ${issue.fault_code_level_2}</div>
-        <p class="subtle">Bot resolved ${formatPercent(issue.bot_deflection_rate)} - transferred ${formatPercent(issue.bot_transfer_rate || 0)}</p>
-      </div>
+    <article class="watch-card">
+      <div class="watch-title">${escapeHtml(issue.product_family || "Other")} - ${escapeHtml(issue.fault_code_level_2 || "Unclassified")}</div>
+      <p class="subtle">${escapeHtml(issue.executive_fault_code || "Blank")} | Bot Resolved ${formatPercent(issue.bot_resolved_rate)} | Transfer ${formatPercent(issue.bot_transfer_rate)}</p>
     </article>
   `).join("");
-  bindIssueClicks(container);
 }
 
 function renderMetricList(container, items) {
   if (!items.length) {
-    container.innerHTML = emptyState("No data.");
+    container.innerHTML = emptyState("No rows in this view.");
     return;
   }
-  const max = Math.max(...items.map((item) => Number(item.count || 0)), 1);
+  const maxCount = Math.max(...items.map((item) => Number(item.count || 0)), 1);
   container.innerHTML = items.map((item) => `
     <div class="metric-row">
-      <div style="flex:1">
-        <div class="issue-subtitle">${escapeHtml(item.label)}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${(Number(item.count || 0) / max) * 100}%"></div></div>
+      <div>
+        <div class="issue-subtitle">${escapeHtml(item.label || "Unknown")}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${((Number(item.count || 0) / maxCount) * 100).toFixed(1)}%"></div></div>
       </div>
-      <div style="min-width:90px;text-align:right">
+      <div style="min-width:84px;text-align:right">
         <div class="watch-title">${formatNumber(item.count || 0)}</div>
         <div class="subtle">${formatPercent(item.share || 0)}</div>
       </div>
@@ -468,232 +490,276 @@ function renderMetricList(container, items) {
   `).join("");
 }
 
-function renderQuality(clean) {
-  els.qualityCards.innerHTML = [
-    ["Issue coverage", formatPercent(clean.actionable_issue_rate || 0), `${formatNumber(clean.actionable_issue_tickets || 0)} tickets are fully classifiable for issue analysis.`],
-    ["Blank FC level 1", formatNumber(clean.blank_fault_code_l1_tickets || 0), "Tickets where the middle issue level is still missing."],
-    ["Missing FC outside bot", formatNumber(clean.missing_issue_outside_bot_tickets || 0), "Non-chat journeys without issue coding."],
-    ["Blank chat sessions", formatNumber(clean.dropped_in_bot_tickets || 0), "Tracked in the bot section as abandonment."],
-    ["Email department remapped", formatNumber(clean.email_department_reassigned_tickets || 0), "Email department rows are counted under Call Center and Email channel."],
-  ].map(([label, value, detail]) => `
-    <article class="quality-card">
-      <h4>${label}</h4>
-      <div class="big">${value}</div>
-      <p class="subtle">${detail}</p>
-    </article>
-  `).join("");
-}
-
-function renderSourceNotes(clean, meta) {
+function renderQuality(data) {
   const cards = [
     {
-      title: "Department remap",
-      detail: "Hero Electronix and Email department rows are rolled into Call Center before analytics are computed.",
+      label: "Actionable issue coverage",
+      value: formatPercent(data.actionable_issue_rate || 0),
+      detail: `${formatNumber(data.actionable_issue_tickets || 0)} tickets remain in issue analysis after coding and installation logic.`,
     },
     {
-      title: "Channel cleanup",
-      detail: "Chat, WhatsApp, Whats App, and Bot are folded into Chat. Web and all unexpected channels are grouped into Others.",
+      label: "Usable issue coverage",
+      value: formatPercent(data.usable_issue_rate || 0),
+      detail: `${formatNumber(data.usable_issue_tickets || 0)} tickets have enough coding to stay in issue views.`,
     },
     {
-      title: "Fault-code hierarchy",
-      detail: `${formatNumber(clean.blank_fault_code_tickets || 0)} rows miss level 0, ${formatNumber(clean.blank_fault_code_l1_tickets || 0)} miss level 1, and ${formatNumber(clean.blank_fault_code_l2_tickets || 0)} miss level 2 in the current filtered view.`,
+      label: "Blank FC1",
+      value: formatNumber(data.blank_fault_code_l1_tickets || 0),
+      detail: "Tickets with no FC1 coding.",
     },
     {
-      title: "Firmware source gap",
-      detail: "Software version is not available in the current source table, so version-specific analytics are intentionally suppressed in the UI.",
+      label: "Blank FC2",
+      value: formatNumber(data.blank_fault_code_l2_tickets || 0),
+      detail: "Tickets with no FC2 coding.",
+    },
+    {
+      label: "Missing issue outside chat",
+      value: formatNumber(data.missing_issue_outside_bot_tickets || 0),
+      detail: "Non-chat tickets missing issue coding.",
+    },
+    {
+      label: "Email remapped",
+      value: formatNumber(data.email_department_reassigned_tickets || 0),
+      detail: "Rows moved from Email department into Call Center and Email channel.",
     },
   ];
-  els.sourceNotes.innerHTML = cards.map((card) => `
-    <article class="version-card">
-      <div class="watch-title">${escapeHtml(card.title)}</div>
+
+  els.qualityCards.innerHTML = cards.map((card) => `
+    <article class="quality-card">
+      <h4>${escapeHtml(card.label)}</h4>
+      <div class="big">${escapeHtml(card.value)}</div>
       <p class="subtle">${escapeHtml(card.detail)}</p>
     </article>
   `).join("");
 }
 
-function renderPipelineHealth(pipeline, meta) {
+function renderPipelineHealth(pipeline) {
+  const recentRuns = pipeline.recent_runs || [];
   els.pipelineHealth.innerHTML = `
     <div class="pipeline-summary">
       <div class="watch-title">${escapeHtml(pipeline.status || "Unknown")}</div>
-      <p class="subtle">Latest analytics refresh for the ClickHouse-backed dashboard dataset.</p>
+      <p class="subtle">Latest analytics refresh status.</p>
       <div class="chip-row">
-        <span class="chip">Last run ${escapeHtml(pipeline.last_run_at || "Unknown")}</span>
-        <span class="chip">${escapeHtml(String(pipeline.duration_minutes || 0))} min</span>
-        <span class="chip">${escapeHtml(state.apiBaseUrl)}</span>
+        <span class="chip">Last run ${escapeHtml(formatDateTime(pipeline.last_run_at || ""))}</span>
+        <span class="chip">${formatNumber(pipeline.rows_inserted || 0)} rows inserted</span>
+        <span class="chip">${formatNumber(pipeline.duration_minutes || 0)} min</span>
       </div>
     </div>
-    ${(pipeline.tables || []).map((table) => `
+    ${recentRuns.map((run) => `
       <div class="pipeline-row">
-        <div class="watch-title">${escapeHtml(table.table)}</div>
-        <div class="subtle">${escapeHtml(table.status)}</div>
+        <div>
+          <div class="watch-title">${escapeHtml(run.status || "Unknown")}</div>
+          <div class="subtle">${escapeHtml(formatDateTime(run.finished_at || run.started_at || ""))}</div>
+        </div>
+        <div class="subtle">${formatNumber(run.rows_inserted || 0)} inserted</div>
       </div>
     `).join("")}
   `;
 }
 
-async function refreshPipelineStatus(options = {}) {
-  try {
-    const response = await fetch(apiUrl("/api/pipeline/status"));
-    if (!response.ok) throw new Error(`Pipeline status returned ${response.status}`);
-    const payload = await response.json();
-    renderPipelineStatus(payload);
-  } catch (error) {
-    if (!options.silent) {
-      els.lastUpdated.textContent = `Pipeline status unavailable: ${error.message}`;
-    }
-  }
-}
-
-function renderPipelineStatus(status) {
-  if (status.running) {
-    els.sourceBadge.textContent = "Pipeline running";
-    els.runPipelineBtn.disabled = true;
-    els.runPipelineBtn.textContent = "Pipeline running";
-    els.lastUpdated.textContent = `Started ${status.last_started_at || "Unknown"} by ${status.requested_by || "Unknown"}`;
-    return;
-  }
-
-  els.runPipelineBtn.disabled = false;
-  els.runPipelineBtn.textContent = "Run pipeline";
-
-  if (status.last_status === "Failed") {
-    els.sourceBadge.textContent = "Pipeline failed";
-    els.lastUpdated.textContent = status.last_message || "Pipeline failed";
-  }
-}
-
-async function triggerPipeline() {
-  els.runPipelineBtn.disabled = true;
-  els.runPipelineBtn.textContent = "Starting...";
-  try {
-    const response = await fetch(apiUrl("/api/pipeline/run"), { method: "POST" });
-    if (!response.ok) throw new Error(`Pipeline trigger returned ${response.status}`);
-    const payload = await response.json();
-    renderPipelineStatus(payload.status || {});
-    window.setTimeout(() => refreshPipelineStatus({ silent: true }), 1500);
-  } catch (error) {
-    els.runPipelineBtn.disabled = false;
-    els.runPipelineBtn.textContent = "Run pipeline";
-    els.lastUpdated.textContent = error.message;
-  }
-}
-
-async function openIssue(issueId) {
-  els.drawer.classList.remove("hidden");
-  els.drawerContent.innerHTML = placeholder("Loading ticket evidence");
-  const params = new URLSearchParams({
-    ...Object.fromEntries(Object.entries(state.filters).map(([key, value]) => [key, String(value)])),
-  });
-  try {
-    const response = await fetch(`${apiUrl(`/api/issues/${encodeURIComponent(issueId)}`)}?${params.toString()}`);
-    if (!response.ok) throw new Error(`Issue API returned ${response.status}`);
-    const payload = await response.json();
-    renderDrawer(payload);
-  } catch (error) {
-    els.drawerContent.innerHTML = errorState(error.message);
-  }
-}
-
-function renderDrawer(payload) {
-  if (!payload.issue) {
-    els.drawerContent.innerHTML = emptyState("No ticket evidence found under the current filter state.");
-    return;
-  }
-  const issue = payload.issue;
-  const tickets = payload.tickets || [];
-  els.drawerContent.innerHTML = `
-    <section class="panel" style="padding:18px">
-      <div class="eyebrow">Issue evidence</div>
-      <h3>${escapeHtml(issue.fault_code_level_2)}</h3>
-      <p class="subtle">${escapeHtml(issue.product_family)} - ${escapeHtml(issue.fault_code)} / ${escapeHtml(issue.fault_code_level_1 || "Unclassified")}</p>
-      <div class="chip-row">
-        <span class="chip bad">Repair ${formatPercent(issue.repair_field_visit_rate)}</span>
-        <span class="chip warn">Repeat ${formatPercent(issue.repeat_rate)}</span>
-        <span class="chip">Bot resolved ${formatPercent(issue.bot_deflection_rate)}</span>
-        <span class="chip warn">Transferred ${formatPercent(issue.bot_transfer_rate || 0)}</span>
-      </div>
-      <p class="subtle">${escapeHtml(issue.insight)}</p>
-    </section>
-    <section class="panel" style="padding:18px">
-      <div class="eyebrow">Recent tickets</div>
-      ${tickets.length ? `
-        <table class="ticket-table">
-          <thead>
-            <tr>
-              <th>Ticket</th>
-              <th>Created</th>
-              <th>Product</th>
-              <th>Department</th>
-              <th>Channel</th>
-              <th>Status</th>
-              <th>Resolution</th>
-              <th>Evidence</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tickets.map((ticket) => `
-              <tr>
-                <td>${escapeHtml(ticket.ticket_id)}</td>
-                <td>${escapeHtml(String(ticket.created_at || "").slice(0, 10))}</td>
-                <td>${escapeHtml(ticket.product || ticket.product_family || "Unknown")}</td>
-                <td>${escapeHtml(ticket.department || "Unknown")}</td>
-                <td>${escapeHtml(ticket.channel || "Unknown")}</td>
-                <td>${escapeHtml(ticket.status || "Unknown")}</td>
-                <td>${escapeHtml(ticket.resolution || "Unknown")}</td>
-                <td>
-                  <div><strong>FC L1:</strong> ${escapeHtml(ticket.fault_code_level_1 || "Unknown")}</div>
-                  <div><strong>Symptom:</strong> ${escapeHtml(ticket.symptom || "Unknown")}</div>
-                  <div><strong>Defect:</strong> ${escapeHtml(ticket.defect || "Unknown")}</div>
-                  <div><strong>Repair:</strong> ${escapeHtml(ticket.repair || "Unknown")}</div>
-                </td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
-      ` : emptyState("No ticket evidence returned.")}
-    </section>
-  `;
-}
-
-function bindIssueClicks(container) {
-  container.querySelectorAll("[data-issue-id]").forEach((node) => {
-    node.addEventListener("click", () => openIssue(node.dataset.issueId));
-  });
-}
-
-function closeDrawer() {
-  els.drawer.classList.add("hidden");
-}
-
-function hydrateFilters(options) {
-  setOptions(els.productFilter, ["All", ...(options.products || [])], state.filters.product);
-  setOptions(els.departmentFilter, ["All", ...(options.departments || [])], state.filters.department);
-  setOptions(els.issueFilter, ["All", ...(options.issues || [])], state.filters.issue);
+function hydrateQuickFilters(options) {
+  setSelectOptions(els.categoryFilter, ["All", ...(options.categories || [])], state.filters.category);
+  setSelectOptions(els.productFilter, ["All", ...(options.products || [])], state.filters.product);
+  setSelectOptions(els.departmentFilter, ["All", ...(options.departments || [])], state.filters.department);
+  setSelectOptions(els.channelFilter, ["All", ...(options.channels || [])], state.filters.channel);
+  setSelectOptions(els.efcFilter, ["All", ...(options.efcs || [])], state.filters.efc);
+  setSelectOptions(els.statusFilter, ["All", ...(options.statuses || [])], state.filters.status);
   syncControls();
+}
+
+function renderAdvancedFilters() {
+  const TAB_CONFIG = {
+    fc1: { title: "FC1", include_key: "include_fc1", exclude_key: "exclude_fc1", options: state.options.fc1 || [] },
+    fc2: { title: "FC2", include_key: "include_fc2", exclude_key: "exclude_fc2", options: state.options.fc2 || [] },
+    bot_action: { title: "Bot action", include_key: "include_bot_action", exclude_key: "exclude_bot_action", options: state.options.bot_actions || [] },
+  };
+  const cfg = TAB_CONFIG[state.focusActiveTab] || TAB_CONFIG.fc1;
+  const includePane = document.getElementById("focusIncludePane");
+  const excludePane = document.getElementById("focusExcludePane");
+  if (!includePane || !excludePane) return;
+  renderRuleCard(includePane, { title: cfg.title, key: cfg.include_key, opposite: cfg.exclude_key, mode: "include", options: cfg.options });
+  renderRuleCard(excludePane, { title: cfg.title, key: cfg.exclude_key, opposite: cfg.include_key, mode: "exclude", options: cfg.options });
+}
+
+function renderRuleCard(container, config) {
+  const selected = state.filters[config.key];
+  const blocked = new Set(state.filters[config.opposite]);
+  const search = (state.ruleSearch[config.key] || "").trim().toLowerCase();
+  const available = config.options.filter((item) => {
+    if (blocked.has(item)) return false;
+    if (!search) return true;
+    return item.toLowerCase().includes(search);
+  });
+
+  container.innerHTML = `
+    <div class="rule-card">
+      <div class="rule-card-head">
+        <div class="rule-title">${escapeHtml(config.title)}</div>
+        <button class="rule-clear" type="button" data-clear="${config.key}">Clear</button>
+      </div>
+      <div class="rule-selection">
+        ${selected.length
+          ? selected.map((value) => `<span class="rule-chip ${config.mode}">${escapeHtml(value)}</span>`).join("")
+          : '<span class="subtle">No selection</span>'}
+      </div>
+      <input class="rule-search" type="search" placeholder="Search ${escapeHtml(config.title)}" data-rule-search="${config.key}" value="${escapeHtml(state.ruleSearch[config.key] || "")}">
+      <div class="rule-option-list">
+        ${available.map((value) => `
+          <label class="rule-option ${selected.includes(value) ? `active-${config.mode}` : ""}">
+            <input type="checkbox" data-rule-key="${config.key}" value="${escapeHtml(value)}" ${selected.includes(value) ? "checked" : ""}>
+            <span>${escapeHtml(value)}</span>
+          </label>
+        `).join("")}
+      </div>
+    </div>
+  `;
+
+  const searchBox = container.querySelector("[data-rule-search]");
+  searchBox?.addEventListener("input", () => {
+    state.ruleSearch[config.key] = searchBox.value;
+    renderAdvancedFilters();
+  });
+
+  container.querySelectorAll("[data-rule-key]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const key = input.dataset.ruleKey;
+      const values = new Set(state.filters[key]);
+      if (input.checked) {
+        values.add(input.value);
+      } else {
+        values.delete(input.value);
+      }
+      state.filters[key] = [...values];
+      renderAdvancedFilters();
+      renderActiveRules();
+      loadDashboard();
+    });
+  });
+
+  const clearButton = container.querySelector("[data-clear]");
+  clearButton?.addEventListener("click", () => {
+    state.filters[config.key] = [];
+    renderAdvancedFilters();
+    renderActiveRules();
+    loadDashboard();
+  });
+}
+
+function isExcludeInstallationActive() {
+  return (
+    state.filters.exclude_fc1.some((v) => /instal/i.test(v)) ||
+    state.filters.exclude_fc2.some((v) => /instal/i.test(v))
+  );
+}
+
+function toggleExcludeInstallation() {
+  if (isExcludeInstallationActive()) {
+    state.filters.exclude_fc1 = state.filters.exclude_fc1.filter((v) => !/instal/i.test(v));
+    state.filters.exclude_fc2 = state.filters.exclude_fc2.filter((v) => !/instal/i.test(v));
+  } else {
+    const instalFc1 = (state.options.fc1 || []).filter((v) => /instal/i.test(v));
+    const instalFc2 = (state.options.fc2 || []).filter((v) => /instal/i.test(v));
+    state.filters.include_fc1 = state.filters.include_fc1.filter((v) => !/instal/i.test(v));
+    state.filters.include_fc2 = state.filters.include_fc2.filter((v) => !/instal/i.test(v));
+    state.filters.exclude_fc1 = [...new Set([...state.filters.exclude_fc1, ...instalFc1])];
+    state.filters.exclude_fc2 = [...new Set([...state.filters.exclude_fc2, ...instalFc2])];
+  }
+  syncQuickPills();
+  renderAdvancedFilters();
+  renderActiveRules();
+  loadDashboard();
+}
+
+function syncQuickPills() {
+  els.qfExcludeInstallation.classList.toggle("active", isExcludeInstallationActive());
+}
+
+function renderActiveRules() {
+  const chips = [];
+  const singles = [
+    ["date_preset", state.filters.date_preset !== "60d" ? datePresetLabel(state.filters.date_preset) : ""],
+    ["category", state.filters.category !== "All" ? `Category: ${state.filters.category}` : ""],
+    ["product", state.filters.product !== "All" ? `Product: ${state.filters.product}` : ""],
+    ["efc", state.filters.efc !== "All" ? `EFC: ${state.filters.efc}` : ""],
+    ["department", state.filters.department !== "All" ? `Team: ${state.filters.department}` : ""],
+    ["channel", state.filters.channel !== "All" ? `Channel: ${state.filters.channel}` : ""],
+    ["status", state.filters.status !== "All" ? `Status: ${state.filters.status}` : ""],
+  ];
+
+  singles.forEach(([, label]) => {
+    if (label) chips.push(`<span class="rule-chip">${escapeHtml(label)}</span>`);
+  });
+
+  if (isExcludeInstallationActive()) {
+    chips.push(`<span class="rule-chip exclude">Excl. Installation</span>`);
+  }
+  const nonInstallExcludeFc1 = state.filters.exclude_fc1.filter((v) => !/instal/i.test(v));
+  const nonInstallExcludeFc2 = state.filters.exclude_fc2.filter((v) => !/instal/i.test(v));
+
+  appendRuleChips(chips, "Include FC1", state.filters.include_fc1, "include");
+  appendRuleChips(chips, "Exclude FC1", nonInstallExcludeFc1, "exclude");
+  appendRuleChips(chips, "Include FC2", state.filters.include_fc2, "include");
+  appendRuleChips(chips, "Exclude FC2", nonInstallExcludeFc2, "exclude");
+  appendRuleChips(chips, "Include bot", state.filters.include_bot_action, "include");
+  appendRuleChips(chips, "Exclude bot", state.filters.exclude_bot_action, "exclude");
+
+  els.activeRules.innerHTML = chips.length ? chips.join("") : '<span class="subtle">No extra focus rules applied.</span>';
+}
+
+function appendRuleChips(target, prefix, values, mode) {
+  values.forEach((value) => {
+    target.push(`<span class="rule-chip ${mode}">${escapeHtml(`${prefix}: ${value}`)}</span>`);
+  });
 }
 
 function syncControls() {
   els.datePreset.value = state.filters.date_preset;
+  els.categoryFilter.value = state.filters.category;
   els.productFilter.value = state.filters.product;
   els.departmentFilter.value = state.filters.department;
-  els.issueFilter.value = state.filters.issue;
-  els.issueTabs.querySelectorAll(".tab-btn").forEach((button) => button.classList.toggle("active", button.dataset.issueView === state.issueView));
+  els.channelFilter.value = state.filters.channel;
+  els.efcFilter.value = state.filters.efc;
+  els.statusFilter.value = state.filters.status;
+  els.issueTabs.querySelectorAll(".tab-btn").forEach((button) => {
+    button.classList.toggle("active", button.dataset.issueView === state.issueView);
+  });
+  syncQuickPills();
 }
 
-function setOptions(select, values, current) {
-  select.innerHTML = values.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("");
-  if (!values.includes(current)) current = "All";
-  select.value = current;
+function setSelectOptions(select, options, selectedValue) {
+  select.innerHTML = options.map((value) => `
+    <option value="${escapeHtml(value)}">${escapeHtml(value)}</option>
+  `).join("");
+  select.value = options.includes(selectedValue) ? selectedValue : "All";
 }
 
 function renderError(error) {
-  const message = error?.message || "Dashboard failed to load.";
-  els.headline.textContent = "Dashboard unavailable";
-  els.summary.textContent = "The API returned an error before the dashboard could render.";
+  const message = error?.message || "Board failed to load.";
+  els.headline.textContent = "Board unavailable";
+  els.summary.textContent = "The API returned an error before the board could render.";
   els.sourceBadge.textContent = "Load failed";
   els.lastUpdated.textContent = message;
-  [els.kpiGrid, els.timelineChart, els.watchlist, els.productMatrix, els.issueBoard, els.actionQueue, els.botKpis, els.botProductMatrix, els.botBestIssues, els.botLeakyIssues, els.fieldSplit, els.departmentMix, els.channelMix, els.botOutcomes, els.qualityCards, els.sourceNotes, els.pipelineHealth].forEach((el) => { el.innerHTML = errorState(message); });
-  els.fieldVisitSummary.innerHTML = errorState(message);
+  els.sidebarNote.innerHTML = errorState(message);
+  [
+    els.kpiGrid,
+    els.timelineChart,
+    els.spotlightCards,
+    els.categoryMatrix,
+    els.productMatrix,
+    els.issueBoard,
+    els.botKpis,
+    els.botProductMatrix,
+    els.botBestIssues,
+    els.botLeakyIssues,
+    els.installationMix,
+    els.departmentMix,
+    els.channelMix,
+    els.statusMix,
+    els.qualityCards,
+    els.pipelineHealth,
+  ].forEach((element) => {
+    element.innerHTML = errorState(message);
+  });
 }
 
 function apiUrl(path) {
@@ -712,6 +778,33 @@ function errorState(text) {
   return `<div class="error-state">${escapeHtml(text)}</div>`;
 }
 
+function datePresetLabel(value) {
+  if (value === "14d") return "Last 14 days";
+  if (value === "30d") return "Last 30 days";
+  if (value === "history") return "Full history";
+  return "Last 60 days";
+}
+
+function shortDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
+function formatDateTime(value) {
+  if (!value || value === "Unknown") return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function formatNumber(value) {
   return new Intl.NumberFormat("en-IN").format(Number(value || 0));
 }
@@ -726,8 +819,13 @@ function formatDelta(value) {
   return `${sign}${numeric.toFixed(1)}%`;
 }
 
-function infoDot(text) {
-  return `<button class="info-dot" type="button" data-tip="${escapeHtml(text)}">i</button>`;
+function hexToSoft(hex) {
+  const clean = hex.replace("#", "");
+  const bigint = parseInt(clean, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `rgba(${r}, ${g}, ${b}, 0.12)`;
 }
 
 function escapeHtml(value) {

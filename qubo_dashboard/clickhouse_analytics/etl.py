@@ -74,7 +74,7 @@ class ETLResult:
 class ClickHouseETLJob:
     def __init__(self) -> None:
         self._available_columns_cache: set[str] | None = None
-        self._local_tz = ZoneInfo(settings.etl_timezone)
+        self._local_tz = ZoneInfo(settings.normalized_etl_timezone)
 
     def run(self) -> ETLResult:
         self.ensure_bootstrap()
@@ -179,7 +179,7 @@ class ClickHouseETLJob:
         return start, end
 
     def clear_dates(self, target_dates: list[date]) -> None:
-        dates_sql = ", ".join(f"toDate({self._quote(day.isoformat())})" for day in target_dates)
+        dates_sql = ", ".join(self._quote(day.isoformat()) for day in target_dates)
         with closing(self._clickhouse_client()) as client:
             client.command(
                 f"ALTER TABLE {settings.clickhouse_fact_table} DELETE WHERE created_date IN ({dates_sql})",
@@ -299,9 +299,11 @@ class ClickHouseETLJob:
             "ticket_id", "source_updated_at", "ingest_version", "ingested_at", "created_at", "created_date",
             "closed_at", "department_name", "normalized_department", "channel", "normalized_channel",
             "customer_name", "email", "mobile", "phone", "product", "device_model", "canonical_product",
+            "product_category",
             "fault_code", "normalized_fault_code", "fault_code_level_1", "normalized_fault_code_l1",
-            "fault_code_level_2", "normalized_fault_code_l2", "resolution_code_level_1", "normalized_resolution",
-            "bot_action", "bot_outcome", "status", "device_serial_number", "number_of_reopen",
+            "fault_code_level_2", "normalized_fault_code_l2", "executive_fault_code",
+            "resolution_code_level_1", "normalized_resolution",
+            "bot_action", "normalized_bot_action", "bot_outcome", "status", "device_serial_number", "number_of_reopen",
             "symptom", "defect", "repair", "first_commissioning_date", "customer_key", "field_visit_type",
             "handle_time_minutes", "device_age_days", "is_core_product", "is_internal_hero", "is_field_service",
             "is_logistics", "is_bot_resolved", "is_bot_transferred", "is_blank_chat", "is_fcr_success",
@@ -333,15 +335,18 @@ class ClickHouseETLJob:
                     ticket.product,
                     ticket.device_model,
                     ticket.canonical_product,
+                    ticket.product_category,
                     ticket.fault_code,
                     ticket.normalized_fault_code,
                     ticket.fault_code_level_1,
                     ticket.normalized_fault_code_l1,
                     ticket.fault_code_level_2,
                     ticket.normalized_fault_code_l2,
+                    ticket.executive_fault_code,
                     ticket.resolution_code_level_1,
                     ticket.normalized_resolution,
                     ticket.bot_action,
+                    ticket.normalized_bot_action,
                     item.bot_outcome,
                     ticket.status,
                     ticket.device_serial_number,
@@ -379,24 +384,28 @@ class ClickHouseETLJob:
             client.insert(settings.clickhouse_fact_table, rows, column_names=columns)
 
     def rebuild_summaries(self, affected_dates: list[str]) -> None:
-        dates_sql = ", ".join(f"toDate({self._quote(day)})" for day in affected_dates)
+        dates_sql = ", ".join(self._quote(day) for day in affected_dates)
         with closing(self._clickhouse_client()) as client:
             client.command(
                 f"""
                 INSERT INTO {settings.clickhouse_daily_summary_table}
                 SELECT
                     created_date AS metric_date,
+                    product_category,
                     canonical_product AS product_family,
+                    executive_fault_code,
                     normalized_fault_code AS fault_code,
                     normalized_fault_code_l1 AS fault_code_level_1,
                     normalized_fault_code_l2 AS fault_code_level_2,
                     normalized_department AS department_name,
                     normalized_channel AS channel,
+                    normalized_bot_action,
                     bot_outcome,
+                    ifNull(status, 'Unknown') AS status,
                     count() AS tickets,
                     countIf(is_field_service = 1) AS field_visit_tickets,
                     countIf(field_visit_type = 'Repair') AS repair_field_tickets,
-                    countIf(field_visit_type = 'Installation') AS installation_field_tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_field_tickets,
                     countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
                     countIf(is_bot_transferred = 1) AS bot_transferred_tickets,
                     countIf(dropped_in_bot = 1) AS blank_chat_tickets,
@@ -415,7 +424,7 @@ class ClickHouseETLJob:
                     countIf(handle_time_minutes IS NOT NULL) AS handle_time_ticket_count
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE created_date IN ({dates_sql})
-                GROUP BY metric_date, product_family, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, bot_outcome
+                GROUP BY metric_date, product_category, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status
                 """
             )
             client.command(
@@ -423,15 +432,18 @@ class ClickHouseETLJob:
                 INSERT INTO {settings.clickhouse_issues_summary_table}
                 SELECT
                     created_date AS metric_date,
+                    product_category,
                     canonical_product AS product_family,
+                    executive_fault_code,
                     normalized_fault_code AS fault_code,
                     normalized_fault_code_l1 AS fault_code_level_1,
                     normalized_fault_code_l2 AS fault_code_level_2,
                     normalized_department AS department_name,
                     normalized_channel AS channel,
+                    normalized_bot_action,
                     count() AS tickets,
                     countIf(field_visit_type = 'Repair') AS repair_field_tickets,
-                    countIf(field_visit_type = 'Installation') AS installation_field_tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_field_tickets,
                     countIf(repeat_flag = 1) AS repeat_tickets,
                     countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
                     countIf(is_bot_transferred = 1) AS bot_transferred_tickets,
@@ -442,8 +454,8 @@ class ClickHouseETLJob:
                     topK(1)(ifNull(defect, 'Unknown'))[1] AS top_defect,
                     topK(1)(ifNull(repair, 'Unknown'))[1] AS top_repair
                 FROM {settings.clickhouse_fact_table} FINAL
-                WHERE created_date IN ({dates_sql}) AND actionable_issue = 1
-                GROUP BY metric_date, product_family, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel
+                WHERE created_date IN ({dates_sql}) AND usable_issue = 1
+                GROUP BY metric_date, product_category, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action
                 """
             )
 

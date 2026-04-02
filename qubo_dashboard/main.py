@@ -20,7 +20,7 @@ repository = TicketRepository()
 service = AnalyticsService(repository)
 pipeline_manager = PipelineManager()
 
-app = FastAPI(title="Qubo Support Health Command Center")
+app = FastAPI(title="Qubo Support Executive Board")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allowed_origins,
@@ -32,23 +32,35 @@ app.add_middleware(
 @app.get("/api/dashboard")
 def dashboard(
     date_preset: str = Query(default="60d"),
+    category: str = Query(default="All"),
     product: str = Query(default="All"),
     department: str = Query(default="All"),
-    issue: str = Query(default="All"),
-    version: str = Query(default="All"),
-    include_hero: bool = Query(default=False),
-    include_dirty: bool = Query(default=False),
-    history_mode: bool = Query(default=False),
+    channel: str = Query(default="All"),
+    efc: str = Query(default="All"),
+    issue_detail: str = Query(default="All"),
+    status: str = Query(default="All"),
+    include_fc1: list[str] = Query(default=[]),
+    exclude_fc1: list[str] = Query(default=[]),
+    include_fc2: list[str] = Query(default=[]),
+    exclude_fc2: list[str] = Query(default=[]),
+    include_bot_action: list[str] = Query(default=[]),
+    exclude_bot_action: list[str] = Query(default=[]),
 ) -> dict:
     filters = DashboardFilters(
         date_preset=date_preset,
+        category=category,
         product=product,
         department=department,
-        issue=issue,
-        version=version,
-        include_hero=include_hero,
-        include_dirty=include_dirty,
-        history_mode=history_mode,
+        channel=channel,
+        efc=efc,
+        issue_detail=issue_detail,
+        status=status,
+        include_fc1=include_fc1,
+        exclude_fc1=exclude_fc1,
+        include_fc2=include_fc2,
+        exclude_fc2=exclude_fc2,
+        include_bot_action=include_bot_action,
+        exclude_bot_action=exclude_bot_action,
     )
     return service.build_dashboard(filters)
 
@@ -57,23 +69,35 @@ def dashboard(
 def issue_details(
     issue_id: str,
     date_preset: str = Query(default="60d"),
+    category: str = Query(default="All"),
     product: str = Query(default="All"),
     department: str = Query(default="All"),
-    issue: str = Query(default="All"),
-    version: str = Query(default="All"),
-    include_hero: bool = Query(default=False),
-    include_dirty: bool = Query(default=False),
-    history_mode: bool = Query(default=False),
+    channel: str = Query(default="All"),
+    efc: str = Query(default="All"),
+    issue_detail: str = Query(default="All"),
+    status: str = Query(default="All"),
+    include_fc1: list[str] = Query(default=[]),
+    exclude_fc1: list[str] = Query(default=[]),
+    include_fc2: list[str] = Query(default=[]),
+    exclude_fc2: list[str] = Query(default=[]),
+    include_bot_action: list[str] = Query(default=[]),
+    exclude_bot_action: list[str] = Query(default=[]),
 ) -> dict:
     filters = DashboardFilters(
         date_preset=date_preset,
+        category=category,
         product=product,
         department=department,
-        issue=issue,
-        version=version,
-        include_hero=include_hero,
-        include_dirty=include_dirty,
-        history_mode=history_mode,
+        channel=channel,
+        efc=efc,
+        issue_detail=issue_detail,
+        status=status,
+        include_fc1=include_fc1,
+        exclude_fc1=exclude_fc1,
+        include_fc2=include_fc2,
+        exclude_fc2=exclude_fc2,
+        include_bot_action=include_bot_action,
+        exclude_bot_action=exclude_bot_action,
     )
     return service.get_issue_tickets(filters, issue_id)
 
@@ -82,23 +106,35 @@ def issue_details(
 def tickets(
     query: str = Query(default=""),
     date_preset: str = Query(default="60d"),
+    category: str = Query(default="All"),
     product: str = Query(default="All"),
     department: str = Query(default="All"),
-    issue: str = Query(default="All"),
-    version: str = Query(default="All"),
-    include_hero: bool = Query(default=False),
-    include_dirty: bool = Query(default=False),
-    history_mode: bool = Query(default=False),
+    channel: str = Query(default="All"),
+    efc: str = Query(default="All"),
+    issue_detail: str = Query(default="All"),
+    status: str = Query(default="All"),
+    include_fc1: list[str] = Query(default=[]),
+    exclude_fc1: list[str] = Query(default=[]),
+    include_fc2: list[str] = Query(default=[]),
+    exclude_fc2: list[str] = Query(default=[]),
+    include_bot_action: list[str] = Query(default=[]),
+    exclude_bot_action: list[str] = Query(default=[]),
 ) -> dict:
     filters = DashboardFilters(
         date_preset=date_preset,
+        category=category,
         product=product,
         department=department,
-        issue=issue,
-        version=version,
-        include_hero=include_hero,
-        include_dirty=include_dirty,
-        history_mode=history_mode,
+        channel=channel,
+        efc=efc,
+        issue_detail=issue_detail,
+        status=status,
+        include_fc1=include_fc1,
+        exclude_fc1=exclude_fc1,
+        include_fc2=include_fc2,
+        exclude_fc2=exclude_fc2,
+        include_bot_action=include_bot_action,
+        exclude_bot_action=exclude_bot_action,
     )
     return {"tickets": service.search_tickets(filters, query)}
 
