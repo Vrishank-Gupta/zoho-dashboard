@@ -24,6 +24,7 @@ def bootstrap_statements() -> list[str]:
             mobile Nullable(String),
             phone Nullable(String),
             product Nullable(String),
+            product_name LowCardinality(String),
             device_model Nullable(String),
             canonical_product LowCardinality(String),
             product_category LowCardinality(String),
@@ -78,6 +79,7 @@ def bootstrap_statements() -> list[str]:
         CREATE TABLE IF NOT EXISTS {settings.clickhouse.database}.{settings.clickhouse_daily_summary_table} (
             metric_date Date,
             product_category LowCardinality(String),
+            product_name LowCardinality(String),
             product_family LowCardinality(String),
             executive_fault_code LowCardinality(String),
             fault_code LowCardinality(String),
@@ -111,12 +113,13 @@ def bootstrap_statements() -> list[str]:
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(metric_date)
-        ORDER BY (metric_date, product_category, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status)
+        ORDER BY (metric_date, product_category, product_name, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status)
         """.strip(),
         f"""
         CREATE TABLE IF NOT EXISTS {settings.clickhouse.database}.{settings.clickhouse_issues_summary_table} (
             metric_date Date,
             product_category LowCardinality(String),
+            product_name LowCardinality(String),
             product_family LowCardinality(String),
             executive_fault_code LowCardinality(String),
             fault_code LowCardinality(String),
@@ -140,7 +143,7 @@ def bootstrap_statements() -> list[str]:
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(metric_date)
-        ORDER BY (metric_date, product_category, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action)
+        ORDER BY (metric_date, product_category, product_name, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action)
         """.strip(),
         f"""
         CREATE TABLE IF NOT EXISTS {settings.clickhouse.database}.{settings.clickhouse_sync_state_table} (

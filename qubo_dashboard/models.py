@@ -16,7 +16,7 @@ from .cleaning import (
     normalize_resolution,
     normalize_version,
 )
-from .mapping import map_executive_fault_code, map_product_category
+from .mapping import map_executive_fault_code, map_product_category, normalize_product_name
 
 
 @dataclass(slots=True)
@@ -58,6 +58,10 @@ class TicketRecord:
     @property
     def product_category(self) -> str:
         return map_product_category(self.product, self.canonical_product)
+
+    @property
+    def product_name(self) -> str:
+        return normalize_product_name(self.product, self.canonical_product)
 
     @property
     def normalized_channel(self) -> str:
@@ -193,14 +197,16 @@ class TicketRecord:
 
 @dataclass(slots=True)
 class DashboardFilters:
-    date_preset: str = "60d"
-    category: str = "All"
-    product: str = "All"
-    department: str = "All"
-    channel: str = "All"
-    efc: str = "All"
-    issue_detail: str = "All"
-    status: str = "All"
+    date_start: str | None = None
+    date_end: str | None = None
+    categories: list[str] = field(default_factory=list)
+    products: list[str] = field(default_factory=list)
+    departments: list[str] = field(default_factory=list)
+    channels: list[str] = field(default_factory=list)
+    efcs: list[str] = field(default_factory=list)
+    issue_details: list[str] = field(default_factory=list)
+    statuses: list[str] = field(default_factory=list)
+    bot_actions: list[str] = field(default_factory=list)
     include_fc1: list[str] = field(default_factory=list)
     exclude_fc1: list[str] = field(default_factory=list)
     include_fc2: list[str] = field(default_factory=list)

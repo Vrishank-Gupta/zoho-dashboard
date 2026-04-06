@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import closing
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from ..config import settings
 from ..models import DashboardFilters
@@ -38,11 +38,19 @@ class ClickHouseAnalyticsRepository:
         value = rows[0]["max_date"] if rows else None
         return value or None
 
+    def fetch_min_metric_date(self) -> date | None:
+        rows = self._query(
+            f"SELECT nullIf(min(metric_date), toDate('1970-01-01')) AS min_date FROM {settings.clickhouse_daily_summary_table}"
+        )
+        value = rows[0]["min_date"] if rows else None
+        return value or None
+
     def fetch_daily_rows(self, start_date: date, end_date: date, filters: DashboardFilters) -> list[dict]:
         sql = f"""
         SELECT
             metric_date,
             product_category,
+            product_name,
             product_family,
             executive_fault_code,
             fault_code,
@@ -78,6 +86,7 @@ class ClickHouseAnalyticsRepository:
         GROUP BY
             metric_date,
             product_category,
+            product_name,
             product_family,
             executive_fault_code,
             fault_code,
@@ -97,6 +106,7 @@ class ClickHouseAnalyticsRepository:
         SELECT
             metric_date,
             product_category,
+            product_name,
             product_family,
             executive_fault_code,
             fault_code,
@@ -122,6 +132,7 @@ class ClickHouseAnalyticsRepository:
         GROUP BY
             metric_date,
             product_category,
+            product_name,
             product_family,
             executive_fault_code,
             fault_code,
@@ -138,6 +149,7 @@ class ClickHouseAnalyticsRepository:
         sql = f"""
         SELECT
             product_category,
+            product_name,
             canonical_product AS product_family,
             count() AS chat_tickets,
             countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
@@ -149,10 +161,146 @@ class ClickHouseAnalyticsRepository:
             countIf(blank_chat_blank_again_7d = 1 AND dropped_in_bot = 1) AS blank_chat_blank_again_7d
         FROM {settings.clickhouse_fact_table} FINAL
         WHERE {self._fact_filters(filters, start_date, end_date)} AND normalized_channel = 'Chat'
-        GROUP BY product_category, product_family
+        GROUP BY product_category, product_name, product_family
         ORDER BY chat_tickets DESC
         """
         return self._query(sql)
+
+    def fetch_product_drilldown(self, filters: DashboardFilters, category: str, product_name: str) -> dict[str, list[dict]]:
+        clauses = [
+            self._fact_filters(filters, None, None),
+            f"product_category = {self._quote(category)}",
+            f"product_name = {self._quote(product_name)}",
+        ]
+        where_sql = " AND ".join([clause for clause in clauses if clause])
+        return {
+            "timeline": self._query(
+                f"""
+                SELECT
+                    created_date AS metric_date,
+                    count() AS tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(is_bot_transferred = 1) AS bot_transferred_tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY metric_date
+                ORDER BY metric_date
+                """
+            ),
+            "bot_actions": self._query(
+                f"""
+                SELECT normalized_bot_action AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+            "resolutions": self._query(
+                f"""
+                SELECT normalized_resolution AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                LIMIT 12
+                """
+            ),
+            "statuses": self._query(
+                f"""
+                SELECT ifNull(status, 'Unknown') AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+            "efcs": self._query(
+                f"""
+                SELECT executive_fault_code AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                LIMIT 12
+                """
+            ),
+            "fc2": self._query(
+                f"""
+                SELECT normalized_fault_code_l2 AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                LIMIT 12
+                """
+            ),
+        }
+
+    def fetch_issue_drilldown(self, filters: DashboardFilters, issue_id: str) -> dict[str, list[dict]]:
+        category, product_name, efc, issue_detail = self._parse_issue_id(issue_id)
+        clauses = [
+            self._fact_filters(filters, None, None),
+            f"product_category = {self._quote(category)}",
+            f"product_name = {self._quote(product_name)}",
+            f"executive_fault_code = {self._quote(efc)}",
+            f"normalized_fault_code_l2 = {self._quote(issue_detail)}",
+        ]
+        where_sql = " AND ".join([clause for clause in clauses if clause])
+        return {
+            "timeline": self._query(
+                f"""
+                SELECT
+                    created_date AS metric_date,
+                    count() AS tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(is_bot_transferred = 1) AS bot_transferred_tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY metric_date
+                ORDER BY metric_date
+                """
+            ),
+            "bot_actions": self._query(
+                f"""
+                SELECT normalized_bot_action AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+            "resolutions": self._query(
+                f"""
+                SELECT normalized_resolution AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                LIMIT 12
+                """
+            ),
+            "statuses": self._query(
+                f"""
+                SELECT ifNull(status, 'Unknown') AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+            "departments": self._query(
+                f"""
+                SELECT normalized_department AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+        }
 
     def fetch_data_quality_row(self, start_date: date, end_date: date, filters: DashboardFilters) -> list[dict]:
         sql = f"""
@@ -197,7 +345,7 @@ class ClickHouseAnalyticsRepository:
         clauses = [
             self._fact_filters(filters, None, None),
             f"product_category = {self._quote(category)}",
-            f"canonical_product = {self._quote(product)}",
+            f"product_name = {self._quote(product)}",
             f"executive_fault_code = {self._quote(efc)}",
             f"normalized_fault_code_l2 = {self._quote(issue_detail)}",
         ]
@@ -206,6 +354,7 @@ class ClickHouseAnalyticsRepository:
             ticket_id,
             created_at,
             product_category,
+            product_name,
             canonical_product AS product_family,
             product,
             normalized_department AS department,
@@ -268,22 +417,16 @@ class ClickHouseAnalyticsRepository:
 
     def _summary_filters(self, filters: DashboardFilters, start_date: date | None, end_date: date | None) -> str:
         clauses: list[str] = []
-        if start_date and end_date:
-            clauses.append(f"metric_date BETWEEN toDate({self._quote_date(start_date)}) AND toDate({self._quote_date(end_date)})")
-        if filters.category != "All":
-            clauses.append(f"product_category = {self._quote(filters.category)}")
-        if filters.product != "All":
-            clauses.append(f"product_family = {self._quote(filters.product)}")
-        if filters.department != "All":
-            clauses.append(f"department_name = {self._quote(filters.department)}")
-        if filters.channel != "All":
-            clauses.append(f"channel = {self._quote(filters.channel)}")
-        if filters.efc != "All":
-            clauses.append(f"executive_fault_code = {self._quote(filters.efc)}")
-        if filters.issue_detail != "All":
-            clauses.append(f"fault_code_level_2 = {self._quote(filters.issue_detail)}")
-        if filters.status != "All":
-            clauses.append(f"status = {self._quote(filters.status)}")
+        date_start, date_end = (start_date, end_date) if start_date and end_date else self._resolve_date_range(filters)
+        clauses.append(f"metric_date BETWEEN toDate({self._quote_date(date_start)}) AND toDate({self._quote_date(date_end)})")
+        clauses.extend(self._in_filter("product_category", filters.categories))
+        clauses.extend(self._in_filter("product_name", filters.products))
+        clauses.extend(self._in_filter("department_name", filters.departments))
+        clauses.extend(self._in_filter("channel", filters.channels))
+        clauses.extend(self._in_filter("executive_fault_code", filters.efcs))
+        clauses.extend(self._in_filter("fault_code_level_2", filters.issue_details))
+        clauses.extend(self._in_filter("status", filters.statuses))
+        clauses.extend(self._in_filter("normalized_bot_action", filters.bot_actions))
         clauses.extend(self._multi_filters(
             "fault_code_level_1",
             filters.include_fc1,
@@ -301,27 +444,21 @@ class ClickHouseAnalyticsRepository:
         ))
         return " AND ".join(clauses) if clauses else "1 = 1"
 
-    def _issue_filters(self, filters: DashboardFilters, start_date: date, end_date: date) -> str:
+    def _issue_filters(self, filters: DashboardFilters, start_date: date | None, end_date: date | None) -> str:
         return self._summary_filters(filters, start_date, end_date)
 
     def _fact_filters(self, filters: DashboardFilters, start_date: date | None, end_date: date | None) -> str:
         clauses: list[str] = []
-        if start_date and end_date:
-            clauses.append(f"created_date BETWEEN toDate({self._quote_date(start_date)}) AND toDate({self._quote_date(end_date)})")
-        if filters.category != "All":
-            clauses.append(f"product_category = {self._quote(filters.category)}")
-        if filters.product != "All":
-            clauses.append(f"canonical_product = {self._quote(filters.product)}")
-        if filters.department != "All":
-            clauses.append(f"normalized_department = {self._quote(filters.department)}")
-        if filters.channel != "All":
-            clauses.append(f"normalized_channel = {self._quote(filters.channel)}")
-        if filters.efc != "All":
-            clauses.append(f"executive_fault_code = {self._quote(filters.efc)}")
-        if filters.issue_detail != "All":
-            clauses.append(f"normalized_fault_code_l2 = {self._quote(filters.issue_detail)}")
-        if filters.status != "All":
-            clauses.append(f"ifNull(status, 'Unknown') = {self._quote(filters.status)}")
+        date_start, date_end = (start_date, end_date) if start_date and end_date else self._resolve_date_range(filters)
+        clauses.append(f"created_date BETWEEN toDate({self._quote_date(date_start)}) AND toDate({self._quote_date(date_end)})")
+        clauses.extend(self._in_filter("product_category", filters.categories))
+        clauses.extend(self._in_filter("product_name", filters.products))
+        clauses.extend(self._in_filter("normalized_department", filters.departments))
+        clauses.extend(self._in_filter("normalized_channel", filters.channels))
+        clauses.extend(self._in_filter("executive_fault_code", filters.efcs))
+        clauses.extend(self._in_filter("normalized_fault_code_l2", filters.issue_details))
+        clauses.extend(self._in_filter("ifNull(status, 'Unknown')", filters.statuses))
+        clauses.extend(self._in_filter("normalized_bot_action", filters.bot_actions))
         clauses.extend(self._multi_filters(
             "normalized_fault_code_l1",
             filters.include_fc1,
@@ -349,6 +486,12 @@ class ClickHouseAnalyticsRepository:
             clauses.append(f"{column} NOT IN ({self._quote_join(exclude_values)})")
         return clauses
 
+    def _in_filter(self, column: str, values: list[str]) -> list[str]:
+        filtered = [value for value in values if value]
+        if not filtered:
+            return []
+        return [f"{column} IN ({self._quote_join(filtered)})"]
+
     def _parse_issue_id(self, issue_id: str) -> tuple[str, str, str, str]:
         parts = issue_id.split("|")
         if len(parts) != 4:
@@ -364,3 +507,27 @@ class ClickHouseAnalyticsRepository:
 
     def _quote_join(self, values: list[str]) -> str:
         return ", ".join(self._quote(value) for value in values)
+
+    def _resolve_date_range(self, filters: DashboardFilters) -> tuple[date, date]:
+        max_date = self.fetch_max_metric_date()
+        min_date = self.fetch_min_metric_date()
+        if not max_date or not min_date:
+            today = datetime.utcnow().date()
+            return today - timedelta(days=59), today
+        start_date = self._parse_date(filters.date_start) or max(min_date, max_date - timedelta(days=59))
+        end_date = self._parse_date(filters.date_end) or max_date
+        if start_date < min_date:
+            start_date = min_date
+        if end_date > max_date:
+            end_date = max_date
+        if start_date > end_date:
+            start_date = end_date
+        return start_date, end_date
+
+    def _parse_date(self, value: str | None) -> date | None:
+        if not value:
+            return None
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        except ValueError:
+            return None

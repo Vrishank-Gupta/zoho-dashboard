@@ -6,7 +6,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from .cleaning import normalize_fault_code
+from .cleaning import BLANK_MARKERS, normalize_fault_code
 from .config import settings
 
 
@@ -29,6 +29,15 @@ def _key(value: str | None) -> str:
 class MappingBundle:
     product_to_category: dict[str, str]
     fc2_to_efc: dict[str, str]
+
+
+def normalize_product_name(product: str | None, canonical_product: str | None = None) -> str:
+    raw = (product or "").strip()
+    if not raw or raw.lower() in BLANK_MARKERS:
+        return "Blank Product"
+    if raw == "-" and canonical_product:
+        return canonical_product
+    return raw
 
 
 @lru_cache(maxsize=1)
@@ -65,14 +74,15 @@ def load_mappings() -> MappingBundle:
 
 def map_product_category(product: str | None, canonical_product: str | None = None) -> str:
     mappings = load_mappings()
-    direct = mappings.product_to_category.get(_key(product))
+    normalized_product = normalize_product_name(product, canonical_product)
+    direct = mappings.product_to_category.get(_key(normalized_product))
     if direct:
         return direct
     if canonical_product:
         fallback = FAMILY_TO_CATEGORY.get(canonical_product)
         if fallback:
             return fallback
-    normalized = normalize_fault_code(product)
+    normalized = normalize_fault_code(normalized_product)
     if normalized == "Unclassified":
         return "Blank Product"
     return "Other"

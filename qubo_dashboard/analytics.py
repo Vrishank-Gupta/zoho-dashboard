@@ -17,7 +17,7 @@ OPEN_STATUS_MARKERS = ("open", "escal", "pending", "progress", "wip")
 @dataclass(slots=True)
 class AggregateIssue:
     product_category: str
-    product_family: str
+    product_name: str
     executive_fault_code: str
     fault_code: str
     fault_code_level_1: str
@@ -37,7 +37,7 @@ class AggregateIssue:
 
     @property
     def issue_id(self) -> str:
-        return "|".join([self.product_category, self.product_family, self.executive_fault_code, self.fault_code_level_2])
+        return "|".join([self.product_category, self.product_name, self.executive_fault_code, self.fault_code_level_2])
 
     @property
     def delta_rate(self) -> float:
@@ -47,7 +47,7 @@ class AggregateIssue:
 
     @property
     def insight(self) -> str:
-        return f"{self.fault_code_level_2} drives {self.volume:,} tickets in {self.product_family}. Installation tickets are {self.installation_rate:.1%} and bot transfer is {self.bot_transfer_rate:.1%}."
+        return f"{self.fault_code_level_2} drives {self.volume:,} tickets in {self.product_name}. Installation tickets are {self.installation_rate:.1%} and bot transfer is {self.bot_transfer_rate:.1%}."
 
 
 class AnalyticsService:
@@ -72,6 +72,23 @@ class AnalyticsService:
             return {"issue": issue, "tickets": [self._format_clickhouse_ticket(ticket) for ticket in tickets]}
         return {"issue": issue, "tickets": []}
 
+    def get_product_drilldown(self, filters: DashboardFilters, category: str, product_name: str) -> dict[str, Any]:
+        if self._clickhouse and settings.analytics_backend == "clickhouse":
+            return {
+                "meta": {"category": category, "product_name": product_name},
+                "drilldown": self._clickhouse.fetch_product_drilldown(filters, category, product_name),
+            }
+        return {"meta": {"category": category, "product_name": product_name}, "drilldown": {}}
+
+    def get_issue_drilldown(self, filters: DashboardFilters, issue_id: str) -> dict[str, Any]:
+        issue = self._find_issue(filters, issue_id)
+        if self._clickhouse and settings.analytics_backend == "clickhouse":
+            return {
+                "issue": issue,
+                "drilldown": self._clickhouse.fetch_issue_drilldown(filters, issue_id),
+            }
+        return {"issue": issue, "drilldown": {}}
+
     def search_tickets(self, filters: DashboardFilters, query: str = "") -> list[dict[str, Any]]:
         if self._clickhouse and settings.analytics_backend == "clickhouse":
             return self._clickhouse.search_tickets(filters, query)
@@ -83,17 +100,16 @@ class AnalyticsService:
         max_date = self._clickhouse.fetch_max_metric_date()
         if not max_date:
             return self._build_seeded(filters, "ClickHouse has no loaded metrics yet.")
-
-        start_date = self._window_start(max_date, filters.date_preset)
+        min_date = self._clickhouse.fetch_min_metric_date()
+        start_date, end_date = self._resolve_window(filters, min_date, max_date)
         previous_end = start_date - timedelta(days=1)
-        previous_start = previous_end - timedelta(days=(max_date - start_date).days)
+        previous_start = previous_end - timedelta(days=(end_date - start_date).days)
 
-        current_daily_rows = self._clickhouse.fetch_daily_rows(start_date, max_date, filters)
+        current_daily_rows = self._clickhouse.fetch_daily_rows(start_date, end_date, filters)
         previous_daily_rows = self._clickhouse.fetch_daily_rows(previous_start, previous_end, filters) if previous_end >= previous_start else []
-        current_issue_rows = self._clickhouse.fetch_issue_rows(start_date, max_date, filters)
+        current_issue_rows = self._clickhouse.fetch_issue_rows(start_date, end_date, filters)
         previous_issue_rows = self._clickhouse.fetch_issue_rows(previous_start, previous_end, filters) if previous_end >= previous_start else []
-        bot_rows = self._clickhouse.fetch_bot_rows(start_date, max_date, filters)
-        data_quality_rows = self._clickhouse.fetch_data_quality_row(start_date, max_date, filters)
+        bot_rows = self._clickhouse.fetch_bot_rows(start_date, end_date, filters)
         pipeline_rows = self._clickhouse.fetch_pipeline_rows()
 
         issues = self._agg_issues(current_issue_rows, previous_issue_rows)
@@ -101,8 +117,7 @@ class AnalyticsService:
         product_health = self._agg_product_health(current_daily_rows)
         service_ops = self._agg_service_ops(current_daily_rows)
         kpis = self._agg_kpis(current_daily_rows, previous_daily_rows)
-        filter_options = self._agg_filter_options(current_daily_rows, issues)
-        data_quality = self._agg_data_quality(data_quality_rows)
+        filter_options = self._agg_filter_options(current_daily_rows, issues, min_date, max_date)
         pipeline_health = self._agg_pipeline_health(pipeline_rows)
 
         return {
@@ -112,20 +127,18 @@ class AnalyticsService:
                 "title": "Qubo Support Executive Board",
                 "subtitle": "Executive view of ticket volume, installation tickets, issue concentration, and bot outcomes.",
                 "window_start": start_date.isoformat(),
-                "window_end": max_date.isoformat(),
-                "data_confidence_note": "Board is powered by the latest loaded analytics snapshot.",
+                "window_end": end_date.isoformat(),
             },
             "filters": asdict(filters),
             "filter_options": filter_options,
             "kpis": kpis,
-            "spotlight": self._spotlight_cards(category_health, issues, bot_rows, data_quality),
+            "spotlight": self._spotlight_cards(category_health, issues, bot_rows),
             "timeline": self._agg_timeline(current_daily_rows),
             "category_health": category_health,
             "product_health": product_health,
             "issue_views": self._agg_issue_views(issues),
             "service_ops": service_ops,
             "bot_summary": self._agg_bot_summary(bot_rows, issues),
-            "data_quality": data_quality,
             "pipeline_health": pipeline_health,
         }
 
@@ -193,9 +206,9 @@ class AnalyticsService:
     def _agg_product_health(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
-            grouped[(str(row.get("product_category") or "Other"), str(row.get("product_family") or "Other"))].append(row)
+            grouped[(str(row.get("product_category") or "Other"), str(row.get("product_name") or "Other"))].append(row)
         items = []
-        for (category, product), product_rows in grouped.items():
+        for (category, product_name), product_rows in grouped.items():
             counts = self._sum_counts(product_rows)
             efc_totals: dict[str, int] = defaultdict(int)
             for row in product_rows:
@@ -208,7 +221,7 @@ class AnalyticsService:
             items.append(
                 {
                     "product_category": category,
-                    "product_family": product,
+                    "product_name": product_name,
                     "tickets": counts["tickets"],
                     "installation_tickets": counts["installation_field_tickets"],
                     "installation_rate": self._ratio(counts["installation_field_tickets"], counts["tickets"]),
@@ -235,7 +248,7 @@ class AnalyticsService:
             items.append(
                 AggregateIssue(
                     product_category=key[0],
-                    product_family=key[1],
+                    product_name=key[1],
                     executive_fault_code=key[2],
                     fault_code=key[3],
                     fault_code_level_1=key[4],
@@ -287,7 +300,7 @@ class AnalyticsService:
         for row in rows:
             item = {
                 "product_category": row.get("product_category") or "Other",
-                "product_family": row.get("product_family") or "Other",
+                "product_name": row.get("product_name") or row.get("product_family") or "Other",
                 "chat_tickets": int(row.get("chat_tickets", 0) or 0),
                 "bot_resolved_tickets": int(row.get("bot_resolved_tickets", 0) or 0),
                 "bot_transferred_tickets": int(row.get("bot_transferred_tickets", 0) or 0),
@@ -364,7 +377,7 @@ class AnalyticsService:
             ],
         }
 
-    def _agg_filter_options(self, daily_rows: list[dict[str, Any]], issues: list[AggregateIssue]) -> dict[str, list[str]]:
+    def _agg_filter_options(self, daily_rows: list[dict[str, Any]], issues: list[AggregateIssue], min_date: date | None, max_date: date | None) -> dict[str, Any]:
         def ordered_counts(rows: list[dict[str, Any]], key: str) -> list[str]:
             grouped: dict[str, int] = defaultdict(int)
             for row in rows:
@@ -376,12 +389,28 @@ class AnalyticsService:
 
         efc_counts: dict[str, int] = defaultdict(int)
         detail_counts: dict[str, int] = defaultdict(int)
+        products_by_category: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        bot_action_counts: dict[str, int] = defaultdict(int)
         for issue in issues:
             efc_counts[issue.executive_fault_code] += issue.volume
             detail_counts[issue.fault_code_level_2] += issue.volume
+        for row in daily_rows:
+            category = str(row.get("product_category") or "Other")
+            product_name = str(row.get("product_name") or row.get("product_family") or "Other")
+            tickets = int(row.get("tickets", 0) or 0)
+            products_by_category[category][product_name] += tickets
+            bot_action_counts[str(row.get("normalized_bot_action") or "No bot action")] += tickets
         return {
+            "date_bounds": {
+                "min": min_date.isoformat() if min_date else "",
+                "max": max_date.isoformat() if max_date else "",
+            },
             "categories": ordered_counts(daily_rows, "product_category"),
-            "products": ordered_counts(daily_rows, "product_family"),
+            "products": ordered_counts(daily_rows, "product_name"),
+            "products_by_category": {
+                category: [label for label, _ in sorted(items.items(), key=lambda item: item[1], reverse=True)]
+                for category, items in sorted(products_by_category.items())
+            },
             "departments": ordered_counts(daily_rows, "department_name"),
             "channels": ordered_counts(daily_rows, "channel"),
             "efcs": [label for label, _ in sorted(efc_counts.items(), key=lambda item: item[1], reverse=True)],
@@ -389,23 +418,20 @@ class AnalyticsService:
             "statuses": ordered_counts(daily_rows, "status"),
             "fc1": ordered_counts(daily_rows, "fault_code_level_1"),
             "fc2": ordered_counts(daily_rows, "fault_code_level_2"),
-            "bot_actions": ordered_counts(daily_rows, "normalized_bot_action"),
+            "bot_actions": [label for label, _ in sorted(bot_action_counts.items(), key=lambda item: item[1], reverse=True)],
         }
 
-    def _spotlight_cards(self, categories: list[dict[str, Any]], issues: list[AggregateIssue], bot_rows: list[dict[str, Any]], data_quality: dict[str, Any]) -> list[dict[str, str]]:
+    def _spotlight_cards(self, categories: list[dict[str, Any]], issues: list[AggregateIssue], bot_rows: list[dict[str, Any]]) -> list[dict[str, str]]:
         top_category = categories[0] if categories else None
         top_installation = max(issues, key=lambda item: item.volume * item.installation_rate, default=None)
         top_leak = max(issues, key=lambda item: item.volume * item.bot_transfer_rate, default=None)
-        total_chat = sum(int(row.get("chat_tickets", 0) or 0) for row in bot_rows)
-        blank_chat = sum(int(row.get("blank_chat_tickets", 0) or 0) for row in bot_rows)
         items = []
         if top_category:
             items.append({"title": "Highest-volume category", "detail": f"{top_category['product_category']} carries {top_category['tickets']:,} tickets in the selected period."})
         if top_installation:
-            items.append({"title": "Top installation issue", "detail": f"{top_installation.fault_code_level_2} in {top_installation.product_family} has the highest share of installation tickets at {top_installation.installation_rate:.1%}.", "issue_id": top_installation.issue_id})
+            items.append({"title": "Top installation issue", "detail": f"{top_installation.fault_code_level_2} in {top_installation.product_name} has the highest share of installation tickets at {top_installation.installation_rate:.1%}.", "issue_id": top_installation.issue_id})
         if top_leak:
-            items.append({"title": "Largest bot transfer issue", "detail": f"{top_leak.fault_code_level_2} in {top_leak.product_family} transfers out of bot at {top_leak.bot_transfer_rate:.1%}.", "issue_id": top_leak.issue_id})
-        items.append({"title": "Coding coverage", "detail": f"{data_quality.get('actionable_issue_rate', 0.0):.1%} of the filtered tickets are fully classifiable for issue analysis. Blank chat share in bot is {self._ratio(blank_chat, total_chat):.1%}."})
+            items.append({"title": "Largest bot transfer issue", "detail": f"{top_leak.fault_code_level_2} in {top_leak.product_name} transfers out of bot at {top_leak.bot_transfer_rate:.1%}.", "issue_id": top_leak.issue_id})
         return items
 
     def _sum_counts(self, rows: list[dict[str, Any]]) -> dict[str, int]:
@@ -421,7 +447,7 @@ class AnalyticsService:
         for row in rows:
             key = (
                 str(row.get("product_category") or "Other"),
-                str(row.get("product_family") or "Other"),
+                str(row.get("product_name") or row.get("product_family") or "Other"),
                 str(row.get("executive_fault_code") or "Blank"),
                 str(row.get("fault_code") or "Unclassified"),
                 str(row.get("fault_code_level_1") or "Unclassified"),
@@ -485,7 +511,7 @@ class AnalyticsService:
         return {
             "issue_id": issue.issue_id,
             "product_category": issue.product_category,
-            "product_family": issue.product_family,
+            "product_name": issue.product_name,
             "executive_fault_code": issue.executive_fault_code,
             "fault_code": issue.fault_code,
             "fault_code_level_1": issue.fault_code_level_1,
@@ -512,8 +538,8 @@ class AnalyticsService:
             "ticket_id": item.get("ticket_id"),
             "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
             "product_category": item.get("product_category") or "Other",
-            "product_family": item.get("product_family") or "Other",
-            "product": item.get("product") or item.get("product_family") or "Other",
+            "product_name": item.get("product_name") or item.get("product_family") or "Other",
+            "product": item.get("product") or item.get("product_name") or item.get("product_family") or "Other",
             "department": item.get("department") or "Unknown",
             "channel": item.get("channel") or "Unknown",
             "executive_fault_code": item.get("executive_fault_code") or "Blank",
@@ -550,7 +576,7 @@ class AnalyticsService:
                 "data_confidence_note": error,
             },
             "filters": asdict(filters),
-            "filter_options": {"categories": [], "products": [], "departments": [], "channels": [], "efcs": [], "issue_details": [], "statuses": [], "fc1": [], "fc2": [], "bot_actions": []},
+            "filter_options": {"date_bounds": {"min": "", "max": ""}, "categories": [], "products": [], "products_by_category": {}, "departments": [], "channels": [], "efcs": [], "issue_details": [], "statuses": [], "fc1": [], "fc2": [], "bot_actions": []},
             "kpis": {
                 "tickets": {"value": 0, "change": 0.0},
                 "installation_tickets": {"value": 0.0, "change": 0.0},
@@ -566,6 +592,29 @@ class AnalyticsService:
             "issue_views": {"highest_volume": [], "installation_tickets": [], "repeat_heavy": [], "bot_leakage": []},
             "service_ops": {"department_mix": [], "channel_mix": [], "status_mix": [], "installation_mix": []},
             "bot_summary": {"overview": {}, "by_product": [], "best_issues": [], "leaky_issues": []},
-            "data_quality": {},
             "pipeline_health": {"status": "Unavailable", "last_run_at": "Unknown", "duration_minutes": 0, "rows_fetched": 0, "rows_inserted": 0, "recent_runs": []},
         }
+
+    def _resolve_window(self, filters: DashboardFilters, min_date: date | None, max_date: date | None) -> tuple[date, date]:
+        if not max_date:
+            today = date.today()
+            return today - timedelta(days=59), today
+        if not min_date:
+            min_date = max_date
+        start_date = self._parse_date(filters.date_start) or max(min_date, max_date - timedelta(days=59))
+        end_date = self._parse_date(filters.date_end) or max_date
+        if start_date < min_date:
+            start_date = min_date
+        if end_date > max_date:
+            end_date = max_date
+        if start_date > end_date:
+            start_date = end_date
+        return start_date, end_date
+
+    def _parse_date(self, value: str | None) -> date | None:
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None

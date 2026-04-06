@@ -298,7 +298,7 @@ class ClickHouseETLJob:
         columns = [
             "ticket_id", "source_updated_at", "ingest_version", "ingested_at", "created_at", "created_date",
             "closed_at", "department_name", "normalized_department", "channel", "normalized_channel",
-            "customer_name", "email", "mobile", "phone", "product", "device_model", "canonical_product",
+            "customer_name", "email", "mobile", "phone", "product", "product_name", "device_model", "canonical_product",
             "product_category",
             "fault_code", "normalized_fault_code", "fault_code_level_1", "normalized_fault_code_l1",
             "fault_code_level_2", "normalized_fault_code_l2", "executive_fault_code",
@@ -333,6 +333,7 @@ class ClickHouseETLJob:
                     ticket.mobile,
                     ticket.phone,
                     ticket.product,
+                    ticket.product_name,
                     ticket.device_model,
                     ticket.canonical_product,
                     ticket.product_category,
@@ -392,6 +393,7 @@ class ClickHouseETLJob:
                 SELECT
                     created_date AS metric_date,
                     product_category,
+                    product_name,
                     canonical_product AS product_family,
                     executive_fault_code,
                     normalized_fault_code AS fault_code,
@@ -424,7 +426,7 @@ class ClickHouseETLJob:
                     countIf(handle_time_minutes IS NOT NULL) AS handle_time_ticket_count
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE created_date IN ({dates_sql})
-                GROUP BY metric_date, product_category, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status
+                GROUP BY metric_date, product_category, product_name, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status
                 """
             )
             client.command(
@@ -433,6 +435,7 @@ class ClickHouseETLJob:
                 SELECT
                     created_date AS metric_date,
                     product_category,
+                    product_name,
                     canonical_product AS product_family,
                     executive_fault_code,
                     normalized_fault_code AS fault_code,
@@ -455,7 +458,7 @@ class ClickHouseETLJob:
                     topK(1)(ifNull(repair, 'Unknown'))[1] AS top_repair
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE created_date IN ({dates_sql}) AND usable_issue = 1
-                GROUP BY metric_date, product_category, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action
+                GROUP BY metric_date, product_category, product_name, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action
                 """
             )
 

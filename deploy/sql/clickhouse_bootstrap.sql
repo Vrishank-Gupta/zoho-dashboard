@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS qubo_analytics.tickets_fact_recent (
     device_model Nullable(String),
     canonical_product LowCardinality(String),
     product_category LowCardinality(String),
+    product_name LowCardinality(String),
     fault_code Nullable(String),
     normalized_fault_code LowCardinality(String),
     fault_code_level_1 Nullable(String),
@@ -65,11 +66,12 @@ CREATE TABLE IF NOT EXISTS qubo_analytics.tickets_fact_recent (
 )
 ENGINE = ReplacingMergeTree(ingest_version)
 PARTITION BY toYYYYMM(created_date)
-ORDER BY (created_date, canonical_product, normalized_fault_code, ticket_id);
+ORDER BY (created_date, product_category, product_name, canonical_product, normalized_fault_code, ticket_id);
 
 CREATE TABLE IF NOT EXISTS qubo_analytics.tickets_daily_summary (
     metric_date Date,
     product_category LowCardinality(String),
+    product_name LowCardinality(String),
     product_family LowCardinality(String),
     executive_fault_code LowCardinality(String),
     fault_code LowCardinality(String),
@@ -103,11 +105,12 @@ CREATE TABLE IF NOT EXISTS qubo_analytics.tickets_daily_summary (
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(metric_date)
-ORDER BY (metric_date, product_category, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status);
+ORDER BY (metric_date, product_category, product_name, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status);
 
 CREATE TABLE IF NOT EXISTS qubo_analytics.issues_daily_summary (
     metric_date Date,
     product_category LowCardinality(String),
+    product_name LowCardinality(String),
     product_family LowCardinality(String),
     executive_fault_code LowCardinality(String),
     fault_code LowCardinality(String),
@@ -131,7 +134,7 @@ CREATE TABLE IF NOT EXISTS qubo_analytics.issues_daily_summary (
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(metric_date)
-ORDER BY (metric_date, product_category, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action);
+ORDER BY (metric_date, product_category, product_name, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action);
 
 CREATE TABLE IF NOT EXISTS qubo_analytics.etl_sync_state (
     pipeline_name LowCardinality(String),
