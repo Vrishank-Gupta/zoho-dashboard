@@ -3,211 +3,225 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Qubo Support Executive Board</title>
+  <title>Qubo Support Board</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <main class="page-shell">
-    <header class="hero">
-      <div class="hero-copy">
-        <div class="eyebrow">Qubo Support Executive Board</div>
-        <h1 id="headline">Loading board</h1>
-        <p id="summary">Preparing the latest support snapshot.</p>
+
+  <!-- ─── Sticky filter nav ─────────────────────────── -->
+  <nav class="filter-nav">
+    <div class="filter-nav-inner">
+      <div class="filter-nav-filters">
+        <label class="fn-label">
+          <span>Period</span>
+          <select id="datePreset">
+            <option value="60d">Last 60 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="14d">Last 14 days</option>
+            <option value="history">Full history</option>
+          </select>
+        </label>
+        <label class="fn-label">
+          <span>Category</span>
+          <select id="categoryFilter"></select>
+        </label>
+        <label class="fn-label">
+          <span>Product</span>
+          <select id="productFilter"></select>
+        </label>
+        <label class="fn-label">
+          <span>EFC</span>
+          <select id="efcFilter"></select>
+        </label>
+        <label class="fn-label">
+          <span>Team</span>
+          <select id="departmentFilter"></select>
+        </label>
+        <label class="fn-label">
+          <span>Channel</span>
+          <select id="channelFilter"></select>
+        </label>
+        <label class="fn-label">
+          <span>Status</span>
+          <select id="statusFilter"></select>
+        </label>
+        <button class="pill-btn" id="qfExcludeInstallation" type="button">Excl. Installation</button>
       </div>
-      <div class="hero-meta">
-        <div class="status-pill" id="sourceBadge">Loading</div>
-        <div class="status-sub" id="lastUpdated">Checking latest refresh</div>
+      <div class="filter-actions">
+        <button class="ghost-btn" id="openFocusModal" type="button">Focus rules</button>
+        <button class="ghost-btn" id="resetFilters" type="button">Reset</button>
       </div>
-    </header>
+    </div>
+    <div class="filter-chips" id="activeRules"></div>
+  </nav>
 
-    <section class="focus-banner" id="sidebarNote"></section>
+  <!-- ─── Dashboard ─────────────────────────────────── -->
+  <main class="dash">
 
-    <section class="filters-card">
-      <div class="filters-header">
-        <div class="eyebrow">Filters</div>
-        <div class="filter-actions">
-          <button id="openFocusModal" class="secondary-btn" type="button">Focus rules</button>
-          <button id="resetFilters" class="secondary-btn" type="button">Reset all</button>
-        </div>
+    <!-- Header -->
+    <div class="dash-header">
+      <div>
+        <div class="dash-title" id="headline">Loading board</div>
+        <div class="dash-sub" id="summary">Preparing the latest support snapshot.</div>
       </div>
-
-      <div class="filters-grid">
-        <label><span>Date range</span><select id="datePreset"><option value="60d">Last 60 days</option><option value="30d">Last 30 days</option><option value="14d">Last 14 days</option><option value="history">Full history</option></select></label>
-        <label><span>Category</span><select id="categoryFilter"></select></label>
-        <label><span>Product family</span><select id="productFilter"></select></label>
-        <label><span>EFC</span><select id="efcFilter"></select></label>
-        <label><span>Support team</span><select id="departmentFilter"></select></label>
-        <label><span>Channel</span><select id="channelFilter"></select></label>
-        <label><span>Status</span><select id="statusFilter"></select></label>
+      <div class="dash-meta">
+        <span class="badge" id="sourceBadge">Loading</span>
+        <span class="dash-ts" id="lastUpdated"></span>
       </div>
+    </div>
 
-      <div class="quick-filters">
-        <span class="quick-filters-label">Quick</span>
-        <button class="quick-pill" id="qfExcludeInstallation" type="button">Excl. Installation</button>
-      </div>
+    <!-- Alert / focus note -->
+    <div class="alert-bar" id="alertBar"></div>
 
-      <div class="active-rules" id="activeRules"></div>
-    </section>
+    <!-- KPI strip -->
+    <div class="kpi-strip" id="kpiStrip"></div>
 
-    <section class="kpi-grid" id="kpiGrid"></section>
-
-    <section class="board-grid board-grid-hero">
-      <article class="panel panel-large">
+    <!-- Timeline + Spotlight -->
+    <div class="layout-row layout-70-30">
+      <div class="panel">
         <div class="panel-head">
-          <div>
-            <div class="eyebrow">Trend</div>
-            <h2>Tickets, installation tickets, bot resolved, and repeat tickets</h2>
-          </div>
+          <span class="section-label">Volume trend</span>
+          <div class="chart-legend" id="timelineLegend"></div>
         </div>
-        <div id="timelineChart" class="timeline-chart"></div>
-      </article>
+        <div class="chart-area" id="timelineChart"></div>
+      </div>
 
-      <article class="panel">
+      <div class="panel">
         <div class="panel-head">
-          <div>
-            <div class="eyebrow">Highlights</div>
-            <h2>What needs attention</h2>
-          </div>
+          <span class="section-label">Needs attention</span>
         </div>
-        <div id="spotlightCards" class="stack-list"></div>
-      </article>
-    </section>
+        <div class="alert-list" id="spotlightCards"></div>
+      </div>
+    </div>
 
-    <section class="board-grid">
-      <article class="panel">
-        <div class="panel-head">
-          <div>
-            <div class="eyebrow">Category View</div>
-            <h2>Category performance</h2>
-          </div>
-        </div>
-        <div id="categoryMatrix" class="matrix"></div>
-      </article>
-
-      <article class="panel">
-        <div class="panel-head">
-          <div>
-            <div class="eyebrow">Product View</div>
-            <h2>Product family performance</h2>
-          </div>
-        </div>
-        <div id="productMatrix" class="matrix"></div>
-      </article>
-    </section>
-
-    <section class="panel">
+    <!-- Product health table -->
+    <div class="panel">
       <div class="panel-head">
+        <span class="section-label">Product health</span>
+      </div>
+      <div id="productHealthTable"></div>
+    </div>
+
+    <!-- Issue concentration -->
+    <div class="panel">
+      <div class="panel-head">
+        <span class="section-label">Issue concentration</span>
+        <div class="tab-strip" id="issueTabs">
+          <button class="tab active" data-issue-view="highest_volume">By volume</button>
+          <button class="tab" data-issue-view="bot_leakage">High transfer</button>
+          <button class="tab" data-issue-view="repeat_heavy">Repeat-heavy</button>
+          <button class="tab" data-issue-view="installation_tickets">Installation</button>
+        </div>
+      </div>
+      <div id="issueBoard"></div>
+    </div>
+
+    <!-- Bot + Operations -->
+    <div class="layout-row layout-50-50">
+
+      <!-- Bot funnel -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="section-label">Bot performance</span>
+        </div>
+        <div class="bot-layout">
+          <div>
+            <div class="sub-label">Chat funnel</div>
+            <div class="bot-funnel" id="botFunnel"></div>
+          </div>
+          <div class="bot-tables">
+            <div>
+              <div class="sub-label">High transfer issues</div>
+              <div class="issue-list" id="botLeakyIssues"></div>
+            </div>
+            <div>
+              <div class="sub-label">Well-resolved by bot</div>
+              <div class="issue-list" id="botBestIssues"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Support mix -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="section-label">Support mix</span>
+        </div>
+        <div class="mix-grid">
+          <div>
+            <div class="sub-label">Team</div>
+            <div class="mix-bar-list" id="departmentMix"></div>
+          </div>
+          <div>
+            <div class="sub-label">Channel</div>
+            <div class="mix-bar-list" id="channelMix"></div>
+          </div>
+          <div>
+            <div class="sub-label">Status</div>
+            <div class="mix-bar-list" id="statusMix"></div>
+          </div>
+          <div>
+            <div class="sub-label">Installation split</div>
+            <div class="mix-bar-list" id="installationMix"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Data quality + Pipeline -->
+    <div class="layout-row layout-50-50">
+
+      <div class="panel">
+        <div class="panel-head">
+          <span class="section-label">Data coverage</span>
+        </div>
+        <div class="quality-grid" id="qualityCards"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <span class="section-label">Pipeline status</span>
+          <button class="primary-btn" id="runPipelineBtn" type="button">Run pipeline</button>
+        </div>
+        <div id="pipelineHealth"></div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ─── Focus rules modal ──────────────────────────── -->
+  <div class="modal-shell hidden" id="focusModal">
+    <div class="modal-back" id="closeFocusModal"></div>
+    <div class="modal-box">
+      <div class="modal-head">
         <div>
-          <div class="eyebrow">Issue Board</div>
-          <h2>EFC and FC2 concentration</h2>
+          <div class="section-label">Focus Builder</div>
+          <p style="margin-top:6px;font-size:13px;color:var(--muted)">Narrow the board to a specific issue slice. Include and exclude stay mutually exclusive.</p>
         </div>
+        <button class="ghost-btn" id="dismissFocusModal" type="button">Close</button>
       </div>
-      <div class="tab-strip" id="issueTabs">
-        <button class="tab-btn active" data-issue-view="highest_volume">Highest volume</button>
-        <button class="tab-btn" data-issue-view="installation_tickets">Installation tickets</button>
-        <button class="tab-btn" data-issue-view="repeat_heavy">Repeat-heavy</button>
-        <button class="tab-btn" data-issue-view="bot_leakage">High transfer</button>
+      <div class="tab-strip" id="focusTabs" style="margin-bottom:14px">
+        <button class="tab active" data-focus-tab="fc1">FC1</button>
+        <button class="tab" data-focus-tab="fc2">FC2</button>
+        <button class="tab" data-focus-tab="bot_action">Bot action</button>
       </div>
-      <div id="issueBoard" class="issue-board"></div>
-    </section>
-
-    <section class="board-grid">
-      <article class="panel">
-        <div class="panel-head">
-          <div>
-            <div class="eyebrow">Bot</div>
-            <h2>Bot resolved, transfer, and blank chat</h2>
-          </div>
+      <div class="rule-columns">
+        <div>
+          <div class="column-title">Include only</div>
+          <div id="focusIncludePane"></div>
         </div>
-        <div id="botKpis" class="bot-kpis"></div>
-        <div class="section-stack">
-          <div>
-            <h3 class="subsection-title">Bot by product</h3>
-            <div id="botProductMatrix" class="matrix"></div>
-          </div>
-          <div class="board-grid board-grid-tight">
-            <div>
-              <h3 class="subsection-title">High bot resolved issues</h3>
-              <div id="botBestIssues" class="stack-list"></div>
-            </div>
-            <div>
-              <h3 class="subsection-title">High transfer issues</h3>
-              <div id="botLeakyIssues" class="stack-list"></div>
-            </div>
-          </div>
-        </div>
-      </article>
-
-      <article class="panel">
-        <div class="panel-head">
-          <div>
-            <div class="eyebrow">Operations</div>
-            <h2>Support mix and ticket posture</h2>
-          </div>
-        </div>
-        <div class="board-grid board-grid-tight">
-          <div><h3 class="subsection-title">Installation split</h3><div id="installationMix" class="metric-list"></div></div>
-          <div><h3 class="subsection-title">Support team mix</h3><div id="departmentMix" class="metric-list"></div></div>
-          <div><h3 class="subsection-title">Channel mix</h3><div id="channelMix" class="metric-list"></div></div>
-          <div><h3 class="subsection-title">Status mix</h3><div id="statusMix" class="metric-list"></div></div>
-        </div>
-      </article>
-    </section>
-
-    <section class="board-grid">
-      <article class="panel">
-        <div class="panel-head">
-          <div>
-            <div class="eyebrow">Coding Coverage</div>
-            <h2>How complete the input is</h2>
-          </div>
-        </div>
-        <div id="qualityCards" class="quality-cards"></div>
-      </article>
-
-      <article class="panel">
-        <div class="panel-head">
-          <div>
-            <div class="eyebrow">Refresh Status</div>
-            <h2>Latest pipeline snapshot</h2>
-          </div>
-        </div>
-        <div id="pipelineHealth" class="pipeline-box"></div>
-      </article>
-    </section>
-
-    <div class="modal-shell hidden" id="focusModal">
-      <div class="modal-backdrop" id="closeFocusModal"></div>
-      <div class="modal-panel">
-        <div class="modal-head">
-          <div>
-            <div class="eyebrow">Focus Builder</div>
-            <h2>Include and exclude issue groups</h2>
-            <p class="subtle">Use this only when you want to isolate a narrow issue slice. Include and exclude stay mutually exclusive.</p>
-          </div>
-          <button id="dismissFocusModal" class="secondary-btn" type="button">Close</button>
-        </div>
-        <div class="tab-strip" id="focusTabs">
-          <button class="tab-btn active" data-focus-tab="fc1">FC1</button>
-          <button class="tab-btn" data-focus-tab="fc2">FC2</button>
-          <button class="tab-btn" data-focus-tab="bot_action">Bot action</button>
-        </div>
-        <div class="focus-grid focus-grid-modal">
-          <div class="focus-column">
-            <div class="focus-column-title">Include only</div>
-            <div id="focusIncludePane"></div>
-          </div>
-          <div class="focus-column">
-            <div class="focus-column-title">Exclude from view</div>
-            <div id="focusExcludePane"></div>
-          </div>
+        <div>
+          <div class="column-title">Exclude from view</div>
+          <div id="focusExcludePane"></div>
         </div>
       </div>
     </div>
-  </main>
+  </div>
 
   <script src="./config.js"></script>
   <script src="./app.js"></script>
