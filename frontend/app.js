@@ -1141,7 +1141,9 @@ function bucketTimeline(points, mode) {
     const rawDate = toDate(point.date || point.metric_date);
     if (!rawDate) return;
     const key = bucketMode === "monthly" ? `${rawDate.getFullYear()}-${String(rawDate.getMonth() + 1).padStart(2, "0")}` : isoDate(startOfWeek(rawDate));
-    const label = bucketMode === "monthly" ? rawDate.toLocaleDateString("en-IN", { month: "short", year: "2-digit" }) : rawDate.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+    const label = bucketMode === "monthly"
+      ? rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", month: "short", year: "2-digit" })
+      : rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
     if (!grouped.has(key)) grouped.set(key, { label, tickets: 0, installation_tickets: 0, bot_resolved_tickets: 0, repeat_tickets: 0 });
     const current = grouped.get(key);
     current.tickets += Number(point.tickets || 0);
@@ -1221,18 +1223,20 @@ function fmtDateTime(value) {
   const date = toDate(value);
   if (!date) return "—";
   return date.toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: true,
   });
 }
 
 function shortDate(value) {
   const date = toDate(value);
   if (!date) return "";
-  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return date.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" });
 }
 
 function shiftIsoDate(value, days) {
@@ -1267,7 +1271,10 @@ function isoDate(value) {
 
 function toDate(value) {
   if (!value) return null;
-  const date = new Date(value);
+  const normalized = typeof value === "string" && value.includes("T") && !/[zZ]|[+\-]\d{2}:\d{2}$/.test(value)
+    ? `${value}Z`
+    : value;
+  const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -1289,7 +1296,7 @@ function formatBotActionLabel(value) {
 function prettyIsoDate(value) {
   const date = toDate(value);
   if (!date) return value || "";
-  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return date.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" });
 }
 
 function formatOptionLabel(control, value) {

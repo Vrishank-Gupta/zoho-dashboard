@@ -3,9 +3,39 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from .config import settings
+from .config import DatabaseConfig, settings
 from .models import TicketRecord
 from .sample_data import generate_sample_tickets
+
+
+def connect_mysql(database: DatabaseConfig):
+    import mysql.connector
+
+    hosts = [database.host]
+    if database.host == "host.docker.internal":
+        hosts.append("172.17.0.1")
+
+    last_error: Exception | None = None
+    for index, host in enumerate(hosts):
+        if not host:
+            continue
+        try:
+            return mysql.connector.connect(
+                host=host,
+                port=database.port,
+                user=database.user,
+                password=database.password,
+                database=database.database,
+            )
+        except Exception as exc:
+            last_error = exc
+            is_unknown_host = "Unknown MySQL server host" in str(exc)
+            if is_unknown_host and index < len(hosts) - 1:
+                continue
+            raise
+    if last_error:
+        raise last_error
+    raise RuntimeError("MySQL database is not configured.")
 
 
 class TicketRepository:
@@ -80,15 +110,7 @@ class TicketRepository:
     def fetch_source_max_created_time(self) -> datetime | None:
         if not settings.has_zoho_database:
             return None
-        import mysql.connector
-
-        connection = mysql.connector.connect(
-            host=settings.zoho_db.host,
-            port=settings.zoho_db.port,
-            user=settings.zoho_db.user,
-            password=settings.zoho_db.password,
-            database=settings.zoho_db.database,
-        )
+        connection = connect_mysql(settings.zoho_db)
         try:
             self._set_zoho_session(connection)
             cursor = connection.cursor()
@@ -100,15 +122,7 @@ class TicketRepository:
             connection.close()
 
     def _fetch_zoho_mysql(self) -> list[TicketRecord]:
-        import mysql.connector
-
-        connection = mysql.connector.connect(
-            host=settings.zoho_db.host,
-            port=settings.zoho_db.port,
-            user=settings.zoho_db.user,
-            password=settings.zoho_db.password,
-            database=settings.zoho_db.database,
-        )
+        connection = connect_mysql(settings.zoho_db)
         self._set_zoho_session(connection)
         available_columns = self._get_zoho_columns(connection)
         cursor = connection.cursor(dictionary=True)
@@ -135,15 +149,7 @@ class TicketRepository:
         fault_code_level_2: str,
         limit: int,
     ) -> list[TicketRecord]:
-        import mysql.connector
-
-        connection = mysql.connector.connect(
-            host=settings.zoho_db.host,
-            port=settings.zoho_db.port,
-            user=settings.zoho_db.user,
-            password=settings.zoho_db.password,
-            database=settings.zoho_db.database,
-        )
+        connection = connect_mysql(settings.zoho_db)
         self._set_zoho_session(connection)
         available_columns = self._get_zoho_columns(connection)
         cursor = connection.cursor(dictionary=True)
@@ -173,16 +179,7 @@ class TicketRepository:
         return tickets
 
     def open_agg_connection(self):
-        import mysql.connector
-
-        connection = mysql.connector.connect(
-            host=settings.agg_db.host,
-            port=settings.agg_db.port,
-            user=settings.agg_db.user,
-            password=settings.agg_db.password,
-            database=settings.agg_db.database,
-        )
-        return connection
+        return connect_mysql(settings.agg_db)
 
     def _set_zoho_session(self, connection) -> None:
         cursor = connection.cursor(dictionary=True)

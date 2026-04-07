@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .clickhouse_analytics import ClickHouseAnalyticsRepository
 from .config import settings
@@ -54,6 +55,7 @@ class AnalyticsService:
     def __init__(self, repository: TicketRepository) -> None:
         self._repository = repository
         self._clickhouse = ClickHouseAnalyticsRepository() if settings.has_clickhouse else None
+        self._display_tz = ZoneInfo(settings.normalized_etl_timezone)
 
     def build_dashboard(self, filters: DashboardFilters) -> dict[str, Any]:
         if self._clickhouse and settings.analytics_backend == "clickhouse":
@@ -369,14 +371,14 @@ class AnalyticsService:
         latest = rows[0] if rows else {}
         return {
             "status": latest.get("status") or "Unknown",
-            "last_run_at": latest.get("run_finished_at").isoformat() if hasattr(latest.get("run_finished_at"), "isoformat") else str(latest.get("run_finished_at") or "Unknown"),
+            "last_run_at": self._format_timestamp(latest.get("run_finished_at")) or "Unknown",
             "duration_minutes": int(latest.get("duration_minutes", 0) or 0),
             "rows_fetched": int(latest.get("source_rows", 0) or 0),
             "rows_inserted": int(latest.get("rows_inserted", 0) or 0),
             "recent_runs": [
                 {
-                    "started_at": row.get("run_started_at").isoformat() if hasattr(row.get("run_started_at"), "isoformat") else str(row.get("run_started_at") or ""),
-                    "finished_at": row.get("run_finished_at").isoformat() if hasattr(row.get("run_finished_at"), "isoformat") else str(row.get("run_finished_at") or ""),
+                    "started_at": self._format_timestamp(row.get("run_started_at")),
+                    "finished_at": self._format_timestamp(row.get("run_finished_at")),
                     "duration_minutes": int(row.get("duration_minutes", 0) or 0),
                     "status": row.get("status") or "Unknown",
                     "rows_fetched": int(row.get("source_rows", 0) or 0),
@@ -386,6 +388,16 @@ class AnalyticsService:
                 for row in rows
             ],
         }
+
+    def _format_timestamp(self, value: Any) -> str:
+        if not value:
+            return ""
+        if not hasattr(value, "tzinfo"):
+            return str(value)
+        dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        return dt.astimezone(self._display_tz).isoformat()
 
     def _agg_filter_options(self, daily_rows: list[dict[str, Any]], issues: list[AggregateIssue], min_date: date | None, max_date: date | None) -> dict[str, Any]:
         def ordered_counts(rows: list[dict[str, Any]], key: str) -> list[str]:

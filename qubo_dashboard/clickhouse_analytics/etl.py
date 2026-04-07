@@ -7,12 +7,10 @@ import traceback
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import mysql.connector
-
 from ..config import settings
 from ..models import TicketRecord
 from ..pipeline.transforms import build_ticket_facts
-from ..repository import clean_text, parse_datetime
+from ..repository import clean_text, connect_mysql, parse_datetime
 from .schema import bootstrap_statements
 
 
@@ -202,13 +200,7 @@ class ClickHouseETLJob:
         cursor_ticket_id: str,
         limit: int,
     ) -> list[dict[str, Any]]:
-        connection = mysql.connector.connect(
-            host=settings.zoho_db.host,
-            port=settings.zoho_db.port,
-            user=settings.zoho_db.user,
-            password=settings.zoho_db.password,
-            database=settings.zoho_db.database,
-        )
+        connection = connect_mysql(settings.zoho_db)
         try:
             cursor = connection.cursor(dictionary=True)
             cursor.execute("SET SESSION sql_mode = ''")
