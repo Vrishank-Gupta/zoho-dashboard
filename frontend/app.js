@@ -23,7 +23,6 @@ const KPI_CONFIG = [
   { key: "installation_tickets", label: "Installation tickets", format: "number", lowerIsBetter: false },
   { key: "bot_resolved", label: "Bot resolved", format: "number", lowerIsBetter: false },
   { key: "repeat_tickets", label: "Repeat tickets", format: "number", lowerIsBetter: true },
-  { key: "no_reopen_rate", label: "No-reopen rate", format: "percent", lowerIsBetter: false },
 ];
 
 const CONTROLS = [
