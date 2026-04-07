@@ -169,7 +169,6 @@ class ClickHouseAnalyticsRepository:
     def fetch_product_drilldown(self, filters: DashboardFilters, category: str, product_name: str) -> dict[str, list[dict]]:
         clauses = [
             self._fact_filters(filters, None, None),
-            f"product_category = {self._quote(category)}",
             f"product_name = {self._quote(product_name)}",
         ]
         where_sql = " AND ".join([clause for clause in clauses if clause])
@@ -276,10 +275,12 @@ class ClickHouseAnalyticsRepository:
             ),
         }
 
-    def fetch_category_drilldown(self, filters: DashboardFilters, category: str) -> dict[str, list[dict]]:
+    def fetch_category_drilldown(self, filters: DashboardFilters, category: str, product_names: list[str]) -> dict[str, list[dict]]:
+        if not product_names:
+            return {"summary": [], "timeline": [], "products": [], "bot_actions": [], "resolutions": [], "statuses": [], "efcs": [], "issues": [], "resolution_by_product": []}
         clauses = [
             self._fact_filters(filters, None, None),
-            f"product_category = {self._quote(category)}",
+            f"product_name IN ({self._quote_join(product_names)})",
         ]
         where_sql = " AND ".join([clause for clause in clauses if clause])
         return {
@@ -397,9 +398,7 @@ class ClickHouseAnalyticsRepository:
         category, product_name, efc, issue_detail = self._parse_issue_id(issue_id)
         clauses = [
             self._fact_filters(filters, None, None),
-            f"product_category = {self._quote(category)}",
             f"product_name = {self._quote(product_name)}",
-            f"executive_fault_code = {self._quote(efc)}",
             f"normalized_fault_code_l2 = {self._quote(issue_detail)}",
         ]
         where_sql = " AND ".join([clause for clause in clauses if clause])
@@ -499,9 +498,7 @@ class ClickHouseAnalyticsRepository:
         category, product, efc, issue_detail = self._parse_issue_id(issue_id)
         clauses = [
             self._fact_filters(filters, None, None),
-            f"product_category = {self._quote(category)}",
             f"product_name = {self._quote(product)}",
-            f"executive_fault_code = {self._quote(efc)}",
             f"normalized_fault_code_l2 = {self._quote(issue_detail)}",
         ]
         sql = f"""
@@ -574,11 +571,9 @@ class ClickHouseAnalyticsRepository:
         clauses: list[str] = []
         date_start, date_end = (start_date, end_date) if start_date and end_date else self._resolve_date_range(filters)
         clauses.append(f"metric_date BETWEEN toDate({self._quote_date(date_start)}) AND toDate({self._quote_date(date_end)})")
-        clauses.extend(self._in_filter("product_category", filters.categories))
         clauses.extend(self._in_filter("product_name", filters.products))
         clauses.extend(self._in_filter("department_name", filters.departments))
         clauses.extend(self._in_filter("channel", filters.channels))
-        clauses.extend(self._in_filter("executive_fault_code", filters.efcs))
         clauses.extend(self._in_filter("fault_code_level_2", filters.issue_details))
         clauses.extend(self._in_filter("status", filters.statuses))
         clauses.extend(self._in_filter("normalized_bot_action", filters.bot_actions))
@@ -610,11 +605,9 @@ class ClickHouseAnalyticsRepository:
         clauses: list[str] = []
         date_start, date_end = (start_date, end_date) if start_date and end_date else self._resolve_date_range(filters)
         clauses.append(f"created_date BETWEEN toDate({self._quote_date(date_start)}) AND toDate({self._quote_date(date_end)})")
-        clauses.extend(self._in_filter("product_category", filters.categories))
         clauses.extend(self._in_filter("product_name", filters.products))
         clauses.extend(self._in_filter("normalized_department", filters.departments))
         clauses.extend(self._in_filter("normalized_channel", filters.channels))
-        clauses.extend(self._in_filter("executive_fault_code", filters.efcs))
         clauses.extend(self._in_filter("normalized_fault_code_l2", filters.issue_details))
         clauses.extend(self._in_filter("ifNull(status, 'Unknown')", filters.statuses))
         clauses.extend(self._in_filter("normalized_bot_action", filters.bot_actions))

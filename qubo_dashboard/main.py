@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -40,7 +41,9 @@ def build_filters(
     exclude_fc2: list[str] | None = None,
     include_bot_action: list[str] | None = None,
     exclude_bot_action: list[str] | None = None,
+    mapping_overrides: str | None = None,
 ) -> DashboardFilters:
+    parsed_overrides = _parse_mapping_overrides(mapping_overrides)
     return DashboardFilters(
         date_start=date_start,
         date_end=date_end,
@@ -60,7 +63,29 @@ def build_filters(
         exclude_fc2=exclude_fc2 or [],
         include_bot_action=include_bot_action or [],
         exclude_bot_action=exclude_bot_action or [],
+        product_category_overrides=parsed_overrides.get("product_category_overrides", {}),
+        efc_overrides=parsed_overrides.get("efc_overrides", {}),
     )
+
+
+def _parse_mapping_overrides(raw: str | None) -> dict[str, dict[str, str]]:
+    if not raw:
+        return {"product_category_overrides": {}, "efc_overrides": {}}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"product_category_overrides": {}, "efc_overrides": {}}
+    product_overrides = {
+        str(key).strip().lower(): str(value).strip()
+        for key, value in (payload.get("product_category_overrides") or {}).items()
+        if str(key).strip() and str(value).strip()
+    }
+    efc_overrides = {
+        str(key).strip().lower(): str(value).strip()
+        for key, value in (payload.get("efc_overrides") or {}).items()
+        if str(key).strip() and str(value).strip()
+    }
+    return {"product_category_overrides": product_overrides, "efc_overrides": efc_overrides}
 
 app = FastAPI(title="Qubo Support Executive Board")
 app.add_middleware(
@@ -91,6 +116,7 @@ def dashboard(
     exclude_fc2: list[str] = Query(default=[]),
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
+    mapping_overrides: str | None = Query(default=None),
 ) -> dict:
     filters = build_filters(
         date_start=date_start,
@@ -111,6 +137,7 @@ def dashboard(
         exclude_fc2=exclude_fc2,
         include_bot_action=include_bot_action,
         exclude_bot_action=exclude_bot_action,
+        mapping_overrides=mapping_overrides,
     )
     return service.build_dashboard(filters)
 
@@ -136,6 +163,7 @@ def issue_details(
     exclude_fc2: list[str] = Query(default=[]),
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
+    mapping_overrides: str | None = Query(default=None),
 ) -> dict:
     filters = build_filters(
         date_start=date_start,
@@ -156,6 +184,7 @@ def issue_details(
         exclude_fc2=exclude_fc2,
         include_bot_action=include_bot_action,
         exclude_bot_action=exclude_bot_action,
+        mapping_overrides=mapping_overrides,
     )
     return service.get_issue_tickets(filters, issue_id)
 
@@ -182,6 +211,7 @@ def product_drilldown(
     exclude_fc2: list[str] = Query(default=[]),
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
+    mapping_overrides: str | None = Query(default=None),
 ) -> dict:
     filters = build_filters(
         date_start=date_start,
@@ -202,6 +232,7 @@ def product_drilldown(
         exclude_fc2=exclude_fc2,
         include_bot_action=include_bot_action,
         exclude_bot_action=exclude_bot_action,
+        mapping_overrides=mapping_overrides,
     )
     return service.get_product_drilldown(filters, category, product_name)
 
@@ -227,6 +258,7 @@ def category_drilldown(
     exclude_fc2: list[str] = Query(default=[]),
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
+    mapping_overrides: str | None = Query(default=None),
 ) -> dict:
     filters = build_filters(
         date_start=date_start,
@@ -247,6 +279,7 @@ def category_drilldown(
         exclude_fc2=exclude_fc2,
         include_bot_action=include_bot_action,
         exclude_bot_action=exclude_bot_action,
+        mapping_overrides=mapping_overrides,
     )
     return service.get_category_drilldown(filters, category)
 
@@ -272,6 +305,7 @@ def issue_drilldown(
     exclude_fc2: list[str] = Query(default=[]),
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
+    mapping_overrides: str | None = Query(default=None),
 ) -> dict:
     filters = build_filters(
         date_start=date_start,
@@ -292,6 +326,7 @@ def issue_drilldown(
         exclude_fc2=exclude_fc2,
         include_bot_action=include_bot_action,
         exclude_bot_action=exclude_bot_action,
+        mapping_overrides=mapping_overrides,
     )
     return service.get_issue_drilldown(filters, issue_id)
 
@@ -317,6 +352,7 @@ def tickets(
     exclude_fc2: list[str] = Query(default=[]),
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
+    mapping_overrides: str | None = Query(default=None),
 ) -> dict:
     filters = build_filters(
         date_start=date_start,
@@ -337,6 +373,7 @@ def tickets(
         exclude_fc2=exclude_fc2,
         include_bot_action=include_bot_action,
         exclude_bot_action=exclude_bot_action,
+        mapping_overrides=mapping_overrides,
     )
     return {"tickets": service.search_tickets(filters, query)}
 

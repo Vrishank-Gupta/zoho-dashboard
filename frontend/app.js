@@ -55,6 +55,11 @@ const PRODUCT_VIEWS = [
   { key: "category", label: "By category" },
 ];
 
+const VIEW_TABS = [
+  { key: "dashboard", label: "Dashboard" },
+  { key: "mapping", label: "Mapping Studio" },
+];
+
 const TIMELINE_METRICS = [
   { key: "tickets", label: "Tickets" },
   { key: "installation_tickets", label: "Installation" },
@@ -97,9 +102,14 @@ const state = {
   activePreset: "60d",
   advancedFiltersOpen: false,
   defaultSelectionsApplied: false,
+  activeView: loadSessionJson("quboActiveView", "dashboard"),
+  mappingOverrides: loadSessionJson("quboMappingOverrides", { product_category_overrides: {}, efc_overrides: {} }),
+  mappingDraft: { product_category_overrides: {}, efc_overrides: {} },
+  mappingSearches: { products: "", fc2: "" },
   issueWidgetFilters: { categories: [], products: [] },
   issueWidgetOpenFilter: null,
 };
+state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
 
 const els = {
   headline: document.getElementById("headline"),
@@ -107,6 +117,15 @@ const els = {
   sourceBadge: document.getElementById("sourceBadge"),
   lastUpdated: document.getElementById("lastUpdated"),
   freshnessNote: document.getElementById("freshnessNote"),
+  viewTabs: document.getElementById("viewTabs"),
+  mappingStudioView: document.getElementById("mappingStudioView"),
+  mappingStudioSummary: document.getElementById("mappingStudioSummary"),
+  mappingProductSearch: document.getElementById("mappingProductSearch"),
+  mappingFc2Search: document.getElementById("mappingFc2Search"),
+  mappingProductTable: document.getElementById("mappingProductTable"),
+  mappingFc2Table: document.getElementById("mappingFc2Table"),
+  applyMappingOverrides: document.getElementById("applyMappingOverrides"),
+  resetMappingOverrides: document.getElementById("resetMappingOverrides"),
   dateStart: document.getElementById("dateStart"),
   dateEnd: document.getElementById("dateEnd"),
   quickPresets: document.getElementById("quickPresets"),
@@ -147,6 +166,11 @@ boot();
 
 function boot() {
   bindEvents();
+  renderSegmented(els.viewTabs, VIEW_TABS, state.activeView, (value) => {
+    state.activeView = value;
+    saveSessionJson("quboActiveView", value);
+    renderActiveView();
+  });
   renderSegmented(els.issueTabs, ISSUE_VIEWS, state.issueView, (value) => {
     state.issueView = value;
     renderIssueBoard(state.payload?.issue_views || {});
@@ -241,6 +265,26 @@ function bindEvents() {
 
   els.runPipelineBtn.addEventListener("click", runPipeline);
   document.getElementById("closeDrilldown").addEventListener("click", closeDrilldown);
+  els.mappingProductSearch?.addEventListener("input", () => {
+    state.mappingSearches.products = els.mappingProductSearch.value;
+    renderMappingStudio(state.payload?.mapping_studio || {});
+  });
+  els.mappingFc2Search?.addEventListener("input", () => {
+    state.mappingSearches.fc2 = els.mappingFc2Search.value;
+    renderMappingStudio(state.payload?.mapping_studio || {});
+  });
+  els.applyMappingOverrides?.addEventListener("click", () => {
+    state.mappingOverrides = normalizeMappingOverrides(state.mappingDraft);
+    saveSessionJson("quboMappingOverrides", state.mappingOverrides);
+    loadDashboard();
+  });
+  els.resetMappingOverrides?.addEventListener("click", () => {
+    state.mappingOverrides = { product_category_overrides: {}, efc_overrides: {} };
+    state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
+    saveSessionJson("quboMappingOverrides", state.mappingOverrides);
+    renderMappingStudio(state.payload?.mapping_studio || {});
+    loadDashboard();
+  });
 }
 
 async function loadDashboard() {
@@ -310,6 +354,8 @@ function renderDashboard(payload) {
   renderMixList(els.departmentMix, payload.service_ops?.department_mix || []);
   renderMixList(els.installationMix, payload.service_ops?.installation_mix || []);
   renderPipeline(pipeline);
+  renderMappingStudio(payload.mapping_studio || {});
+  renderActiveView();
 }
 
 function renderDateToolbar() {
@@ -797,6 +843,103 @@ function renderPipeline(pipeline) {
     </div>`;
 }
 
+function renderActiveView() {
+  const dashboardPanels = document.querySelectorAll("[data-dashboard-panel='true']");
+  const mappingOpen = state.activeView === "mapping";
+  dashboardPanels.forEach((panel) => panel.classList.toggle("hidden", mappingOpen));
+  els.mappingStudioView?.classList.toggle("hidden", !mappingOpen);
+}
+
+function renderMappingStudio(mappingStudio) {
+  state.mappingDraft = mergeDraftWithPayload(state.mappingDraft, mappingStudio);
+  const active = mappingStudio.active_overrides || {};
+  els.mappingStudioSummary.innerHTML = `
+    <div class="mapping-note">Workbook mapping is treated as the base. Session overrides live only in this browser tab and are sent with dashboard requests.</div>
+    <div class="mapping-note"><strong>${fmtNum(active.products || 0)}</strong> product overrides active · <strong>${fmtNum(active.efcs || 0)}</strong> FC2 overrides active</div>
+  `;
+
+  const productSearch = (state.mappingSearches.products || "").toLowerCase();
+  const productRows = (mappingStudio.product_rows || []).filter((row) => row.product_name.toLowerCase().includes(productSearch));
+  const categoryOptions = mappingStudio.category_options || [];
+  els.mappingProductTable.innerHTML = renderMappingTable({
+    rows: productRows,
+    idKey: "product_name",
+    valueKey: "effective_category",
+    selectKey: "product_category_overrides",
+    labelColumns: [
+      { key: "product_name", label: "Product" },
+      { key: "base_category", label: "Workbook category" },
+    ],
+    valueLabel: "Session category",
+    options: categoryOptions,
+    countKey: "tickets",
+    countLabel: "Tickets",
+  });
+
+  const fc2Search = (state.mappingSearches.fc2 || "").toLowerCase();
+  const fc2Rows = (mappingStudio.fc2_rows || []).filter((row) => row.fault_code_level_2.toLowerCase().includes(fc2Search));
+  const efcOptions = mappingStudio.efc_options || [];
+  els.mappingFc2Table.innerHTML = renderMappingTable({
+    rows: fc2Rows,
+    idKey: "fault_code_level_2",
+    valueKey: "effective_efc",
+    selectKey: "efc_overrides",
+    labelColumns: [
+      { key: "fault_code_level_2", label: "FC2" },
+      { key: "fault_code_level_1", label: "Fallback FC1" },
+      { key: "base_efc", label: "Workbook/base EFC" },
+    ],
+    valueLabel: "Session EFC",
+    options: efcOptions,
+    countKey: "tickets",
+    countLabel: "Tickets",
+  });
+
+  document.querySelectorAll("[data-mapping-select]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const scope = input.dataset.mappingScope;
+      const key = input.dataset.mappingKey;
+      if (!scope || !key) return;
+      const nextValue = input.value;
+      if (!nextValue) delete state.mappingDraft[scope][key];
+      else state.mappingDraft[scope][key] = nextValue;
+      renderMappingStudio(mappingStudio);
+    });
+  });
+}
+
+function renderMappingTable({ rows, idKey, valueKey, selectKey, labelColumns, valueLabel, options, countKey, countLabel }) {
+  if (!rows.length) return '<div class="empty-state">No rows available for the current selection.</div>';
+  return `
+    <div class="mini-table-wrap mapping-table-wrap">
+      <table class="mini-table mapping-table">
+        <thead>
+          <tr>
+            ${labelColumns.map((column) => `<th>${escHtml(column.label)}</th>`).join("")}
+            <th>${escHtml(valueLabel)}</th>
+            <th>${escHtml(countLabel)}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => {
+            const overrideValue = state.mappingDraft[selectKey][String(row[idKey]).toLowerCase()] || "";
+            const effectiveValue = overrideValue || row[valueKey] || "";
+            return `<tr class="${row.overridden || overrideValue ? "mapping-overridden" : ""}">
+              ${labelColumns.map((column) => `<td>${escHtml(row[column.key] || "")}</td>`).join("")}
+              <td>
+                <select class="mapping-select" data-mapping-select="true" data-mapping-scope="${escHtml(selectKey)}" data-mapping-key="${escHtml(String(row[idKey]).toLowerCase())}">
+                  <option value="">Use workbook</option>
+                  ${options.map((option) => `<option value="${escHtml(option)}" ${effectiveValue === option ? "selected" : ""}>${escHtml(option)}</option>`).join("")}
+                </select>
+              </td>
+              <td class="num">${fmtNum(row[countKey] || 0)}</td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
 async function runPipeline() {
   els.runPipelineBtn.disabled = true;
   els.runPipelineBtn.textContent = "Starting...";
@@ -1072,6 +1215,10 @@ function buildQueryParams(filters) {
     if (Array.isArray(value)) value.forEach((item) => params.append(key, item));
     else if (value) params.set(key, value);
   });
+  const overrides = normalizeMappingOverrides(state.mappingOverrides);
+  if (Object.keys(overrides.product_category_overrides).length || Object.keys(overrides.efc_overrides).length) {
+    params.set("mapping_overrides", JSON.stringify(overrides));
+  }
   return params;
 }
 
@@ -1205,6 +1352,49 @@ function renderError(error) {
     els.installationMix,
     els.pipelineHealth,
   ].forEach((element) => { element.innerHTML = `<div class="error-state">${escHtml(message)}</div>`; });
+}
+
+function loadSessionJson(key, fallback) {
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveSessionJson(key, value) {
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function cloneMappingOverrides(value) {
+  return {
+    product_category_overrides: { ...(value?.product_category_overrides || {}) },
+    efc_overrides: { ...(value?.efc_overrides || {}) },
+  };
+}
+
+function normalizeMappingOverrides(value) {
+  const normalizeScope = (scope) => Object.fromEntries(
+    Object.entries(scope || {})
+      .map(([key, item]) => [String(key).trim().toLowerCase(), String(item).trim()])
+      .filter(([key, item]) => key && item)
+  );
+  return {
+    product_category_overrides: normalizeScope(value?.product_category_overrides),
+    efc_overrides: normalizeScope(value?.efc_overrides),
+  };
+}
+
+function mergeDraftWithPayload(draft, mappingStudio) {
+  const next = cloneMappingOverrides(draft);
+  const productKeys = new Set((mappingStudio.product_rows || []).map((row) => String(row.product_name).toLowerCase()));
+  const fc2Keys = new Set((mappingStudio.fc2_rows || []).map((row) => String(row.fault_code_level_2).toLowerCase()));
+  next.product_category_overrides = Object.fromEntries(Object.entries(next.product_category_overrides).filter(([key]) => productKeys.has(key)));
+  next.efc_overrides = Object.fromEntries(Object.entries(next.efc_overrides).filter(([key]) => fc2Keys.has(key)));
+  return next;
 }
 
 function apiUrl(path) {

@@ -41,6 +41,11 @@ button { border: 0; background: none; cursor: pointer; }
   gap: 18px;
 }
 
+.view-tabs {
+  display: inline-flex;
+  gap: 8px;
+}
+
 .hero {
   display: flex;
   justify-content: space-between;
@@ -765,6 +770,71 @@ button { border: 0; background: none; cursor: pointer; }
   font-size: 13px;
 }
 
+.mapping-summary {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.mapping-note {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.mapping-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.mapping-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 12px;
+}
+
+.mapping-caption {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.mapping-search,
+.mapping-select {
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.92);
+  padding: 0 12px;
+  font: inherit;
+  color: var(--text);
+}
+
+.mapping-search {
+  min-width: 220px;
+}
+
+.mapping-table-wrap {
+  max-height: 620px;
+  overflow: auto;
+}
+
+.mapping-overridden td {
+  background: rgba(30, 91, 184, 0.04);
+}
+
 .modal-shell {
   position: fixed;
   inset: 0;
@@ -868,8 +938,18 @@ button { border: 0; background: none; cursor: pointer; }
   .issue-grid,
   .two-col,
   .bot-overview,
-  .mini-summary-grid {
+  .mini-summary-grid,
+  .mapping-grid {
     grid-template-columns: 1fr;
+  }
+
+  .mapping-panel-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mapping-search {
+    min-width: 0;
   }
 }
 

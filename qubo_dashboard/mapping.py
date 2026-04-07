@@ -10,19 +10,8 @@ from .cleaning import BLANK_MARKERS, normalize_fault_code
 from .config import settings
 
 
-FAMILY_TO_CATEGORY = {
-    "Dash Cam": "Dashcam",
-    "Smart Camera": "Smart Cam",
-    "Video Doorbell": "VDB",
-    "Smart Lock": "Door Lock",
-    "GPS Tracker": "Tracker",
-    "Air Purifier": "Air Purifier",
-    "Smart Plug": "Other",
-}
-
-
 def _key(value: str | None) -> str:
-    return (value or "").strip().lower()
+    return " ".join((value or "").strip().split()).lower()
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,12 +20,15 @@ class MappingBundle:
     fc2_to_efc: dict[str, str]
 
 
+def normalize_mapping_value(value: str | None, fallback: str) -> str:
+    text = str(value or "").strip()
+    return text or fallback
+
+
 def normalize_product_name(product: str | None, canonical_product: str | None = None) -> str:
-    raw = (product or "").strip()
+    raw = str(product or "").strip()
     if not raw or raw.lower() in BLANK_MARKERS:
         return "Blank Product"
-    if raw == "-" and canonical_product:
-        return canonical_product
     return raw
 
 
@@ -72,26 +64,49 @@ def load_mappings() -> MappingBundle:
     return MappingBundle(product_to_category=product_to_category, fc2_to_efc=fc2_to_efc)
 
 
-def map_product_category(product: str | None, canonical_product: str | None = None) -> str:
+def map_product_category(
+    product: str | None,
+    canonical_product: str | None = None,
+    overrides: dict[str, str] | None = None,
+) -> str:
     mappings = load_mappings()
+    raw_product = str(product or "").strip()
     normalized_product = normalize_product_name(product, canonical_product)
-    direct = mappings.product_to_category.get(_key(normalized_product))
-    if direct:
-        return direct
-    if canonical_product:
-        fallback = FAMILY_TO_CATEGORY.get(canonical_product)
-        if fallback:
-            return fallback
-    normalized = normalize_fault_code(normalized_product)
-    if normalized == "Unclassified":
+    candidates = [
+        _key(raw_product),
+        _key(normalized_product),
+        _key(canonical_product),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        direct = (overrides or {}).get(candidate)
+        if direct:
+            return direct
+        direct = mappings.product_to_category.get(candidate)
+        if direct:
+            return direct
+    if normalized_product == "Blank Product":
         return "Blank Product"
     return "Other"
 
 
-def map_executive_fault_code(fault_code_level_1: str | None, fault_code_level_2: str | None) -> str:
+def map_executive_fault_code(
+    fault_code_level_1: str | None,
+    fault_code_level_2: str | None,
+    overrides: dict[str, str] | None = None,
+) -> str:
     mappings = load_mappings()
-    efc = mappings.fc2_to_efc.get(_key(fault_code_level_2))
-    if efc:
-        return efc
+    raw_fc2 = str(fault_code_level_2 or "").strip()
+    normalized_fc2 = normalize_fault_code(fault_code_level_2)
+    for candidate in (_key(raw_fc2), _key(normalized_fc2)):
+        if not candidate:
+            continue
+        direct = (overrides or {}).get(candidate)
+        if direct:
+            return direct
+        efc = mappings.fc2_to_efc.get(candidate)
+        if efc:
+            return efc
     fc1 = normalize_fault_code(fault_code_level_1)
     return fc1 if fc1 != "Unclassified" else "Blank"

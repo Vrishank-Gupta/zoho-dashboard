@@ -215,3 +215,5 @@ class DashboardFilters:
     exclude_fc2: list[str] = field(default_factory=list)
     include_bot_action: list[str] = field(default_factory=list)
     exclude_bot_action: list[str] = field(default_factory=list)
+    product_category_overrides: dict[str, str] = field(default_factory=dict)
+    efc_overrides: dict[str, str] = field(default_factory=dict)

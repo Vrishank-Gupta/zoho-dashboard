@@ -26,7 +26,46 @@
       </div>
     </header>
 
-    <section class="panel filters-panel">
+    <div class="view-tabs" id="viewTabs"></div>
+
+    <section class="panel hidden" id="mappingStudioView">
+      <div class="panel-top">
+        <div>
+          <div class="section-label">Mapping studio</div>
+          <h2 class="panel-title">Session-only mapping overrides</h2>
+          <p class="hero-subtitle">Use the workbook mapping as the base, then override Product -> Category and FC2 -> EFC for this browser session only.</p>
+        </div>
+        <div class="panel-actions">
+          <button class="ghost-btn" id="resetMappingOverrides" type="button">Reset session overrides</button>
+          <button class="primary-btn" id="applyMappingOverrides" type="button">Apply to session</button>
+        </div>
+      </div>
+      <div class="mapping-summary" id="mappingStudioSummary"></div>
+      <div class="mapping-grid">
+        <div class="mapping-panel">
+          <div class="mapping-panel-head">
+            <div>
+              <div class="mini-title">Product -> Category</div>
+              <div class="mapping-caption">Base category comes from `mapping.xlsx`. Override only when you want a different analytical grouping for this session.</div>
+            </div>
+            <input class="mapping-search" id="mappingProductSearch" type="search" placeholder="Search product">
+          </div>
+          <div class="mapping-table-host" id="mappingProductTable"></div>
+        </div>
+        <div class="mapping-panel">
+          <div class="mapping-panel-head">
+            <div>
+              <div class="mini-title">FC2 -> EFC</div>
+              <div class="mapping-caption">Base EFC comes from `mapping.xlsx`. If FC2 is not mapped, the board falls back to FC1.</div>
+            </div>
+            <input class="mapping-search" id="mappingFc2Search" type="search" placeholder="Search FC2">
+          </div>
+          <div class="mapping-table-host" id="mappingFc2Table"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel filters-panel" data-dashboard-panel="true">
       <div class="panel-top">
         <div>
           <div class="section-label">Filters</div>
@@ -58,9 +97,9 @@
       <div class="filter-grid filter-grid-secondary hidden" id="secondaryFilterGrid"></div>
     </section>
 
-    <section class="kpi-grid" id="kpiStrip"></section>
+    <section class="kpi-grid" id="kpiStrip" data-dashboard-panel="true"></section>
 
-    <section class="panel">
+    <section class="panel" data-dashboard-panel="true">
       <div class="panel-top">
         <div>
           <div class="section-label">Volume</div>
@@ -74,7 +113,7 @@
       <div class="chart-area" id="timelineChart"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-dashboard-panel="true">
       <div class="panel-top">
         <div>
           <div class="section-label">Products</div>
@@ -87,7 +126,7 @@
       <div id="productHealthTable"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-dashboard-panel="true">
       <div class="panel-top">
         <div>
           <div class="section-label">Issues</div>
@@ -101,7 +140,7 @@
       <div class="issue-grid" id="issueBoard"></div>
     </section>
 
-    <section class="dashboard-grid dashboard-grid-split">
+    <section class="dashboard-grid dashboard-grid-split" data-dashboard-panel="true">
       <div class="panel">
         <div class="panel-top">
           <div>
@@ -156,7 +195,7 @@
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-dashboard-panel="true">
       <div class="panel-top">
         <div>
           <div class="section-label">Pipeline</div>

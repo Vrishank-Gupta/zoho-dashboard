@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from .clickhouse_analytics import ClickHouseAnalyticsRepository
 from .config import settings
+from .mapping import load_mappings, map_executive_fault_code, map_product_category
 from .models import DashboardFilters
 from .repository import TicketRepository
 
@@ -70,8 +71,8 @@ class AnalyticsService:
         if not issue:
             return {"issue": None, "tickets": []}
         if self._clickhouse and settings.analytics_backend == "clickhouse":
-            tickets = self._clickhouse.fetch_issue_tickets(filters, issue_id, limit=24)
-            return {"issue": issue, "tickets": [self._format_clickhouse_ticket(ticket) for ticket in tickets]}
+            tickets = [self._remap_row(ticket, filters) for ticket in self._clickhouse.fetch_issue_tickets(filters, issue_id, limit=24)]
+            return {"issue": issue, "tickets": [self._format_clickhouse_ticket(ticket) for ticket in tickets if self._matches_mapping_filters(ticket, filters)]}
         return {"issue": issue, "tickets": []}
 
     def get_product_drilldown(self, filters: DashboardFilters, category: str, product_name: str) -> dict[str, Any]:
@@ -84,9 +85,19 @@ class AnalyticsService:
 
     def get_category_drilldown(self, filters: DashboardFilters, category: str) -> dict[str, Any]:
         if self._clickhouse and settings.analytics_backend == "clickhouse":
+            products = [
+                item["product_name"]
+                for item in self._agg_product_health(
+                    self._mapped_daily_rows(
+                        self._clickhouse.fetch_daily_rows(*self._resolve_window(filters, self._clickhouse.fetch_min_metric_date(), self._clickhouse.fetch_max_metric_date()), filters),
+                        filters,
+                    )
+                )
+                if item["product_category"] == category
+            ]
             return {
                 "meta": {"category": category},
-                "drilldown": self._clickhouse.fetch_category_drilldown(filters, category),
+                "drilldown": self._clickhouse.fetch_category_drilldown(filters, category, products),
             }
         return {"meta": {"category": category}, "drilldown": {}}
 
@@ -121,9 +132,14 @@ class AnalyticsService:
         previous_issue_rows = self._clickhouse.fetch_issue_rows(previous_start, previous_end, filters) if previous_end >= previous_start else []
         bot_rows = self._clickhouse.fetch_bot_rows(start_date, end_date, filters)
         pipeline_rows = self._clickhouse.fetch_pipeline_rows()
-        option_filters = DashboardFilters(date_start=start_date.isoformat(), date_end=end_date.isoformat())
-        option_daily_rows = self._clickhouse.fetch_daily_rows(start_date, end_date, option_filters)
-        option_issue_rows = self._clickhouse.fetch_issue_rows(start_date, end_date, option_filters)
+        current_daily_rows = self._mapped_daily_rows(current_daily_rows, filters)
+        previous_daily_rows = self._mapped_daily_rows(previous_daily_rows, filters)
+        current_issue_rows = self._mapped_issue_rows(current_issue_rows, filters)
+        previous_issue_rows = self._mapped_issue_rows(previous_issue_rows, filters)
+        bot_rows = self._mapped_bot_rows(bot_rows, filters)
+        option_filters = self._mapping_option_filters(filters, start_date, end_date)
+        option_daily_rows = self._mapped_daily_rows(self._clickhouse.fetch_daily_rows(start_date, end_date, option_filters), option_filters, apply_mapping_filters=False)
+        option_issue_rows = self._mapped_issue_rows(self._clickhouse.fetch_issue_rows(start_date, end_date, option_filters), option_filters, apply_mapping_filters=False)
 
         issues = self._agg_issues(current_issue_rows, previous_issue_rows)
         category_health = self._agg_category_health(current_daily_rows)
@@ -154,6 +170,7 @@ class AnalyticsService:
             "service_ops": service_ops,
             "bot_summary": self._agg_bot_summary(bot_rows, issues),
             "pipeline_health": pipeline_health,
+            "mapping_studio": self._build_mapping_studio(option_daily_rows, option_issue_rows, filters),
         }
 
     def _find_issue(self, filters: DashboardFilters, issue_id: str) -> dict[str, Any] | None:
@@ -443,6 +460,162 @@ class AnalyticsService:
             "bot_actions": [label for label, _ in sorted(bot_action_counts.items(), key=lambda item: item[1], reverse=True)],
         }
 
+    def _mapping_option_filters(self, filters: DashboardFilters, start_date: date, end_date: date) -> DashboardFilters:
+        return DashboardFilters(
+            date_start=start_date.isoformat(),
+            date_end=end_date.isoformat(),
+            exclude_installation=filters.exclude_installation,
+            exclude_blank_chat=filters.exclude_blank_chat,
+            departments=list(filters.departments),
+            channels=list(filters.channels),
+            statuses=list(filters.statuses),
+            bot_actions=list(filters.bot_actions),
+            include_fc1=list(filters.include_fc1),
+            exclude_fc1=list(filters.exclude_fc1),
+            include_fc2=list(filters.include_fc2),
+            exclude_fc2=list(filters.exclude_fc2),
+            include_bot_action=list(filters.include_bot_action),
+            exclude_bot_action=list(filters.exclude_bot_action),
+            product_category_overrides=dict(filters.product_category_overrides),
+            efc_overrides=dict(filters.efc_overrides),
+        )
+
+    def _mapped_daily_rows(self, rows: list[dict[str, Any]], filters: DashboardFilters, apply_mapping_filters: bool = True) -> list[dict[str, Any]]:
+        remapped = [self._remap_row(row, filters) for row in rows]
+        if apply_mapping_filters:
+            remapped = [row for row in remapped if self._matches_mapping_filters(row, filters)]
+        key_fields = (
+            "metric_date", "product_category", "product_name", "product_family", "executive_fault_code",
+            "fault_code", "fault_code_level_1", "fault_code_level_2", "department_name", "channel",
+            "normalized_bot_action", "bot_outcome", "status",
+        )
+        sum_fields = (
+            "tickets", "field_visit_tickets", "repair_field_tickets", "installation_field_tickets", "bot_resolved_tickets",
+            "bot_transferred_tickets", "blank_chat_tickets", "fcr_tickets", "repeat_tickets", "logistics_tickets",
+            "young_device_tickets", "usable_issue_tickets", "actionable_issue_tickets", "other_product_tickets",
+            "hero_internal_tickets", "missing_issue_outside_bot_tickets", "dirty_channel_tickets",
+            "email_department_reassigned_tickets", "total_handle_time_minutes", "handle_time_ticket_count",
+        )
+        return self._collapse_rows(remapped, key_fields, sum_fields)
+
+    def _mapped_issue_rows(self, rows: list[dict[str, Any]], filters: DashboardFilters, apply_mapping_filters: bool = True) -> list[dict[str, Any]]:
+        remapped = [self._remap_row(row, filters) for row in rows]
+        if apply_mapping_filters:
+            remapped = [row for row in remapped if self._matches_mapping_filters(row, filters)]
+        key_fields = (
+            "metric_date", "product_category", "product_name", "product_family", "executive_fault_code",
+            "fault_code", "fault_code_level_1", "fault_code_level_2", "department_name", "channel", "normalized_bot_action",
+        )
+        sum_fields = (
+            "tickets", "repair_field_tickets", "installation_field_tickets", "repeat_tickets", "bot_resolved_tickets",
+            "bot_transferred_tickets", "blank_chat_tickets", "fcr_tickets", "logistics_tickets",
+        )
+        return self._collapse_rows(remapped, key_fields, sum_fields, text_fields=("top_symptom", "top_defect", "top_repair"))
+
+    def _mapped_bot_rows(self, rows: list[dict[str, Any]], filters: DashboardFilters) -> list[dict[str, Any]]:
+        remapped = [self._remap_row(row, filters) for row in rows]
+        remapped = [row for row in remapped if self._matches_mapping_filters(row, filters)]
+        return self._collapse_rows(
+            remapped,
+            ("product_category", "product_name", "product_family"),
+            (
+                "chat_tickets", "bot_resolved_tickets", "bot_transferred_tickets", "blank_chat_tickets",
+                "blank_chat_returned_7d", "blank_chat_resolved_7d", "blank_chat_transferred_7d", "blank_chat_blank_again_7d",
+            ),
+        )
+
+    def _remap_row(self, row: dict[str, Any], filters: DashboardFilters) -> dict[str, Any]:
+        mapped = dict(row)
+        product_name = str(mapped.get("product_name") or mapped.get("product") or mapped.get("product_family") or "Blank Product")
+        product_family = str(mapped.get("product_family") or mapped.get("canonical_product") or "")
+        mapped["product_name"] = product_name
+        mapped["product_category"] = map_product_category(product_name, product_family, filters.product_category_overrides)
+        mapped["executive_fault_code"] = map_executive_fault_code(
+            mapped.get("fault_code_level_1") or mapped.get("normalized_fault_code_l1"),
+            mapped.get("fault_code_level_2") or mapped.get("normalized_fault_code_l2"),
+            filters.efc_overrides,
+        )
+        return mapped
+
+    def _matches_mapping_filters(self, row: dict[str, Any], filters: DashboardFilters) -> bool:
+        if filters.categories and str(row.get("product_category") or "Other") not in filters.categories:
+            return False
+        if filters.efcs and str(row.get("executive_fault_code") or "Blank") not in filters.efcs:
+            return False
+        return True
+
+    def _collapse_rows(
+        self,
+        rows: list[dict[str, Any]],
+        key_fields: tuple[str, ...],
+        sum_fields: tuple[str, ...],
+        text_fields: tuple[str, ...] = (),
+    ) -> list[dict[str, Any]]:
+        grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for row in rows:
+            key = tuple(row.get(field) for field in key_fields)
+            current = grouped.get(key)
+            if current is None:
+                current = {field: row.get(field) for field in key_fields}
+                for field in sum_fields:
+                    current[field] = 0
+                for field in text_fields:
+                    current[field] = "Unknown"
+                grouped[key] = current
+            for field in sum_fields:
+                current[field] += int(row.get(field, 0) or 0)
+            for field in text_fields:
+                value = str(row.get(field) or "").strip()
+                if value and current[field] == "Unknown":
+                    current[field] = value
+        return list(grouped.values())
+
+    def _build_mapping_studio(self, daily_rows: list[dict[str, Any]], issue_rows: list[dict[str, Any]], filters: DashboardFilters) -> dict[str, Any]:
+        product_counts: dict[str, int] = defaultdict(int)
+        for row in daily_rows:
+            product_counts[str(row.get("product_name") or "Blank Product")] += int(row.get("tickets", 0) or 0)
+        fc2_counts: dict[tuple[str, str], int] = defaultdict(int)
+        for row in issue_rows:
+            fc2_counts[(str(row.get("fault_code_level_2") or "Unclassified"), str(row.get("fault_code_level_1") or "Unclassified"))] += int(row.get("tickets", 0) or 0)
+
+        product_rows = []
+        for product_name, tickets in sorted(product_counts.items(), key=lambda item: (-item[1], item[0])):
+            base_category = map_product_category(product_name)
+            effective_category = map_product_category(product_name, overrides=filters.product_category_overrides)
+            product_rows.append({
+                "product_name": product_name,
+                "base_category": base_category,
+                "effective_category": effective_category,
+                "tickets": tickets,
+                "overridden": base_category != effective_category,
+            })
+
+        fc2_rows = []
+        for (fc2, fc1), tickets in sorted(fc2_counts.items(), key=lambda item: (-item[1], item[0][0])):
+            base_efc = map_executive_fault_code(fc1, fc2)
+            effective_efc = map_executive_fault_code(fc1, fc2, filters.efc_overrides)
+            fc2_rows.append({
+                "fault_code_level_2": fc2,
+                "fault_code_level_1": fc1,
+                "base_efc": base_efc,
+                "effective_efc": effective_efc,
+                "tickets": tickets,
+                "overridden": base_efc != effective_efc,
+            })
+
+        category_options = sorted({row["effective_category"] for row in product_rows} | {row["base_category"] for row in product_rows} | set(load_mappings().product_to_category.values()))
+        efc_options = sorted({row["effective_efc"] for row in fc2_rows} | {row["base_efc"] for row in fc2_rows} | set(load_mappings().fc2_to_efc.values()))
+        return {
+            "product_rows": product_rows,
+            "fc2_rows": fc2_rows,
+            "category_options": [item for item in category_options if item],
+            "efc_options": [item for item in efc_options if item],
+            "active_overrides": {
+                "products": len(filters.product_category_overrides),
+                "efcs": len(filters.efc_overrides),
+            },
+        }
+
     def _sum_counts(self, rows: list[dict[str, Any]]) -> dict[str, int]:
         keys = ("tickets", "field_visit_tickets", "repair_field_tickets", "installation_field_tickets", "bot_resolved_tickets", "bot_transferred_tickets", "blank_chat_tickets", "fcr_tickets", "repeat_tickets", "logistics_tickets")
         totals = {key: 0 for key in keys}
@@ -605,6 +778,7 @@ class AnalyticsService:
             "service_ops": {"category_mix": [], "department_mix": [], "channel_mix": [], "bot_action_mix": [], "installation_mix": []},
             "bot_summary": {"overview": {}, "by_product": [], "best_issues": [], "leaky_issues": []},
             "pipeline_health": {"status": "Unavailable", "last_run_at": "Unknown", "duration_minutes": 0, "rows_fetched": 0, "rows_inserted": 0, "recent_runs": []},
+            "mapping_studio": {"product_rows": [], "fc2_rows": [], "category_options": [], "efc_options": [], "active_overrides": {"products": 0, "efcs": 0}},
         }
 
     def _build_freshness(self, clickhouse_max_date: date | None) -> dict[str, str]:
