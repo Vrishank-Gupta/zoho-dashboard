@@ -104,6 +104,7 @@ const els = {
   summary: document.getElementById("summary"),
   sourceBadge: document.getElementById("sourceBadge"),
   lastUpdated: document.getElementById("lastUpdated"),
+  freshnessInfo: document.getElementById("freshnessInfo"),
   dateStart: document.getElementById("dateStart"),
   dateEnd: document.getElementById("dateEnd"),
   quickPresets: document.getElementById("quickPresets"),
@@ -273,13 +274,13 @@ function renderDashboard(payload) {
     ? `Source max date: ${prettyIsoDate(freshness.source_max_date)} | ClickHouse max date: ${prettyIsoDate(freshness.clickhouse_max_date)} | Status: ${freshness.status || "Unavailable"}`
     : "";
   if (freshnessText) {
-    els.lastUpdated.title = freshnessText;
-    els.lastUpdated.setAttribute("aria-label", freshnessText);
-    els.lastUpdated.dataset.syncStatus = freshness.status || "";
+    els.freshnessInfo.classList.remove("hidden");
+    els.freshnessInfo.dataset.tooltip = freshnessText;
+    els.freshnessInfo.setAttribute("aria-label", freshnessText);
   } else {
-    els.lastUpdated.title = "";
-    els.lastUpdated.removeAttribute("aria-label");
-    delete els.lastUpdated.dataset.syncStatus;
+    els.freshnessInfo.classList.add("hidden");
+    delete els.freshnessInfo.dataset.tooltip;
+    els.freshnessInfo.setAttribute("aria-label", "Data freshness details");
   }
   renderKpis(payload.kpis || {});
   renderTimeline(payload.timeline || []);
@@ -345,6 +346,9 @@ function renderReportingShortcuts() {
 }
 
 function renderFilterControls() {
+  const activeElement = document.activeElement;
+  const activeFilterKey = activeElement instanceof HTMLInputElement ? activeElement.dataset.filterSearch || "" : "";
+  const activeSelectionStart = activeElement instanceof HTMLInputElement ? activeElement.selectionStart ?? null : null;
   els.toggleAdvancedFilters.textContent = state.advancedFiltersOpen ? "Hide advanced" : "Advanced filters";
   const renderControls = (controls) => controls.map((control) => {
     const options = getControlOptions(control);
@@ -409,6 +413,16 @@ function renderFilterControls() {
       });
     });
   });
+
+  if (activeFilterKey) {
+    const nextInput = document.querySelector(`[data-filter-search="${CSS.escape(activeFilterKey)}"]`);
+    if (nextInput instanceof HTMLInputElement) {
+      nextInput.focus();
+      if (activeSelectionStart !== null) {
+        nextInput.setSelectionRange(activeSelectionStart, activeSelectionStart);
+      }
+    }
+  }
 }
 
 function renderActiveChips() {

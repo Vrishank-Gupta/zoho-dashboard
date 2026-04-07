@@ -19,7 +19,10 @@
       </div>
       <div class="hero-meta">
         <span class="status-badge" id="sourceBadge">Loading</span>
-        <span class="last-updated" id="lastUpdated"></span>
+        <span class="last-refresh-group">
+          <span class="last-updated" id="lastUpdated"></span>
+          <button class="freshness-info hidden" id="freshnessInfo" type="button" aria-label="Data freshness details">i</button>
+        </span>
       </div>
     </header>
 
@@ -27,7 +30,7 @@
       <div class="panel-top">
         <div>
           <div class="section-label">Filters</div>
-          <h2 class="panel-title">Slice the board by business lens</h2>
+          <h2 class="panel-title">Refine view</h2>
         </div>
         <div class="panel-actions">
           <button class="ghost-btn" id="toggleAdvancedFilters" type="button">Advanced filters</button>
