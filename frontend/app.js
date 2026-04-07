@@ -41,6 +41,8 @@ const CONTROLS = [
   { key: "exclude_bot_action", label: "Bot action exclude", optionsKey: "bot_actions", oppositeKey: "include_bot_action" },
 ];
 
+const PRIMARY_CONTROL_KEYS = new Set(["categories", "products", "efcs", "departments", "channels", "bot_actions"]);
+
 const ISSUE_VIEWS = [
   { key: "highest_volume", label: "By volume" },
   { key: "bot_leakage", label: "High transfer" },
@@ -94,6 +96,7 @@ const state = {
   timelineBucket: "auto",
   botBucket: "auto",
   activePreset: "60d",
+  advancedFiltersOpen: false,
 };
 
 const els = {
@@ -104,8 +107,10 @@ const els = {
   dateStart: document.getElementById("dateStart"),
   dateEnd: document.getElementById("dateEnd"),
   quickPresets: document.getElementById("quickPresets"),
-  filterGrid: document.getElementById("filterGrid"),
+  primaryFilterGrid: document.getElementById("primaryFilterGrid"),
+  secondaryFilterGrid: document.getElementById("secondaryFilterGrid"),
   activeChips: document.getElementById("activeChips"),
+  toggleAdvancedFilters: document.getElementById("toggleAdvancedFilters"),
   resetFilters: document.getElementById("resetFilters"),
   kpiStrip: document.getElementById("kpiStrip"),
   timelineChart: document.getElementById("timelineChart"),
@@ -116,9 +121,11 @@ const els = {
   botTrendChart: document.getElementById("botTrendChart"),
   botLeakyIssues: document.getElementById("botLeakyIssues"),
   botBestIssues: document.getElementById("botBestIssues"),
+  categoryDonut: document.getElementById("categoryDonut"),
+  channelDonut: document.getElementById("channelDonut"),
+  botActionDonut: document.getElementById("botActionDonut"),
+  statusDonut: document.getElementById("statusDonut"),
   departmentMix: document.getElementById("departmentMix"),
-  channelMix: document.getElementById("channelMix"),
-  statusMix: document.getElementById("statusMix"),
   installationMix: document.getElementById("installationMix"),
   pipelineHealth: document.getElementById("pipelineHealth"),
   runPipelineBtn: document.getElementById("runPipelineBtn"),
@@ -167,10 +174,16 @@ function boot() {
 }
 
 function bindEvents() {
+  els.toggleAdvancedFilters.addEventListener("click", () => {
+    state.advancedFiltersOpen = !state.advancedFiltersOpen;
+    renderFilterControls();
+  });
+
   els.resetFilters.addEventListener("click", () => {
     state.filters = structuredClone(DEFAULT_FILTERS);
     state.searches = {};
     state.activePreset = "60d";
+    state.advancedFiltersOpen = false;
     renderDateToolbar();
     renderFilterControls();
     renderActiveChips();
@@ -262,9 +275,11 @@ function renderDashboard(payload) {
   renderProductHealth();
   renderIssueBoard(payload.issue_views || {});
   renderBotSummary(payload.bot_summary || {});
+  renderDonut(els.categoryDonut, payload.service_ops?.category_mix || [], "Category");
+  renderDonut(els.channelDonut, payload.service_ops?.channel_mix || [], "Channel");
+  renderDonut(els.botActionDonut, payload.service_ops?.bot_action_mix || [], "Bot action");
+  renderDonut(els.statusDonut, payload.service_ops?.status_mix || [], "Status");
   renderMixList(els.departmentMix, payload.service_ops?.department_mix || []);
-  renderMixList(els.channelMix, payload.service_ops?.channel_mix || []);
-  renderMixList(els.statusMix, payload.service_ops?.status_mix || []);
   renderMixList(els.installationMix, payload.service_ops?.installation_mix || []);
   renderPipeline(pipeline);
 }
@@ -302,7 +317,8 @@ function renderDateToolbar() {
 }
 
 function renderFilterControls() {
-  els.filterGrid.innerHTML = CONTROLS.map((control) => {
+  els.toggleAdvancedFilters.textContent = state.advancedFiltersOpen ? "Hide advanced" : "Advanced filters";
+  const renderControls = (controls) => controls.map((control) => {
     const options = getControlOptions(control);
     const selected = state.filters[control.key] || [];
     const summary = summarizeSelection(options, selected);
@@ -336,27 +352,33 @@ function renderFilterControls() {
       </div>`;
   }).join("");
 
-  els.filterGrid.querySelectorAll("[data-filter-search]").forEach((input) => {
-    input.addEventListener("input", () => {
-      state.searches[input.dataset.filterSearch] = input.value;
-      renderFilterControls();
+  els.primaryFilterGrid.innerHTML = renderControls(CONTROLS.filter((control) => PRIMARY_CONTROL_KEYS.has(control.key)));
+  els.secondaryFilterGrid.innerHTML = renderControls(CONTROLS.filter((control) => !PRIMARY_CONTROL_KEYS.has(control.key)));
+  els.secondaryFilterGrid.classList.toggle("hidden", !state.advancedFiltersOpen);
+
+  [els.primaryFilterGrid, els.secondaryFilterGrid].forEach((grid) => {
+    grid.querySelectorAll("[data-filter-search]").forEach((input) => {
+      input.addEventListener("input", () => {
+        state.searches[input.dataset.filterSearch] = input.value;
+        renderFilterControls();
+      });
     });
-  });
-  els.filterGrid.querySelectorAll("[data-filter-clear]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const key = button.dataset.filterClear;
-      state.filters[key] = [];
-      renderFilterControls();
-      renderActiveChips();
-      loadDashboard();
+    grid.querySelectorAll("[data-filter-clear]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.dataset.filterClear;
+        state.filters[key] = [];
+        renderFilterControls();
+        renderActiveChips();
+        loadDashboard();
+      });
     });
-  });
-  els.filterGrid.querySelectorAll("[data-filter-option]").forEach((input) => {
-    input.addEventListener("change", () => {
-      toggleFilterValue(input.dataset.filterOption, input.value, input.checked);
-      renderFilterControls();
-      renderActiveChips();
-      loadDashboard();
+    grid.querySelectorAll("[data-filter-option]").forEach((input) => {
+      input.addEventListener("change", () => {
+        toggleFilterValue(input.dataset.filterOption, input.value, input.checked);
+        renderFilterControls();
+        renderActiveChips();
+        loadDashboard();
+      });
     });
   });
 }
@@ -426,7 +448,7 @@ function renderProductHealth() {
       <td>
         <div class="name-stack">
           <div class="name-main">${escHtml(state.productView === "category" ? row.product_category : row.product_name || "Other")}</div>
-          <div class="name-sub">${escHtml(state.productView === "category" ? row.top_issue_detail || "No issue detail" : row.product_category || "Other")}</div>
+          <div class="name-sub">${escHtml(state.productView === "category" ? `Top issue: ${row.top_issue_detail || "No issue detail"}` : `Category: ${row.product_category || "Other"}`)}</div>
         </div>
       </td>
       <td class="num">${fmtNum(row.tickets)}</td>
@@ -474,7 +496,7 @@ function renderIssueBoard(issueViews) {
     <button class="issue-card" type="button" data-issue-id="${escHtml(issue.issue_id)}">
       <div class="issue-head">
         <div class="issue-title">${escHtml(issue.fault_code_level_2 || "Unclassified")}</div>
-        <div class="issue-subtitle">${escHtml(issue.product_name || "Other")} · ${escHtml(issue.executive_fault_code || "Blank")} · ${escHtml(issue.fault_code_level_1 || "Unclassified")}</div>
+        <div class="issue-subtitle">${escHtml(issue.product_category || "Other")} · ${escHtml(issue.product_name || "Other")} · ${escHtml(issue.executive_fault_code || "Blank")} · ${escHtml(issue.fault_code_level_1 || "Unclassified")}</div>
       </div>
       <div class="issue-metrics">
         <div class="issue-metric"><div class="issue-metric-label">Tickets</div><div class="issue-metric-value">${fmtNum(issue.volume)}</div></div>
@@ -535,11 +557,15 @@ function renderBotTrend(points) {
         const y = pad.top + innerH - ratio * innerH;
         return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="#e2e8f0"></line><text x="${width - pad.right + 8}" y="${y + 4}" font-size="10" fill="#64748b">${Math.round(ratio * 100)}%</text>`;
       }).join("")}
+      ${[0, 0.5, 1].map((ratio) => {
+        const y = pad.top + innerH - ratio * innerH;
+        return `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#64748b">${fmtNum(Math.round(maxTickets * ratio))}</text>`;
+      }).join("")}
       ${bucketed.map((item, index) => {
         const barH = ((item.tickets || 0) / maxTickets) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="rgba(37,99,235,0.18)" stroke="rgba(37,99,235,0.45)"></rect><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="#64748b">${escHtml(item.label)}</text>`;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="rgba(37,99,235,0.18)" stroke="rgba(37,99,235,0.45)"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="#2563eb">${fmtNum(item.tickets || 0)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="#64748b">${escHtml(item.label)}</text>`;
       }).join("")}
       <path d="${linePath}" fill="none" stroke="#17845f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
       ${linePoints.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="4.5" fill="#17845f"></circle><text x="${point.x}" y="${Math.max(12, point.y - 10)}" text-anchor="middle" font-size="10" fill="#17845f">${(point.pct * 100).toFixed(0)}%</text>`).join("")}
@@ -563,6 +589,38 @@ function renderMixList(container, rows) {
       </div>
       <div class="mix-value">${fmtNum(row.count)}</div>
     </div>`).join("")}</div>`;
+}
+
+function renderDonut(container, rows, label) {
+  if (!rows.length) {
+    container.innerHTML = `<div class="empty-state">No ${escHtml(label.toLowerCase())} data for this view.</div>`;
+    return;
+  }
+  const palette = ["#2563eb", "#17845f", "#c97a18", "#8b5cf6", "#cf4b3f", "#0f766e", "#64748b"];
+  const items = rows.slice(0, 5);
+  const total = items.reduce((sum, row) => sum + Number(row.count || 0), 0) || 1;
+  let current = 0;
+  const radius = 52;
+  const circumference = 2 * Math.PI * radius;
+  const arcs = items.map((row, index) => {
+    const share = Number(row.count || 0) / total;
+    const length = share * circumference;
+    const arc = `<circle cx="70" cy="70" r="${radius}" fill="none" stroke="${palette[index % palette.length]}" stroke-width="18" stroke-dasharray="${length} ${circumference - length}" stroke-dashoffset="${-current}" transform="rotate(-90 70 70)"></circle>`;
+    current += length;
+    return arc;
+  }).join("");
+  container.innerHTML = `
+    <div class="donut-card">
+      <svg viewBox="0 0 140 140" width="180" height="180" aria-label="${escHtml(label)} breakdown">
+        <circle cx="70" cy="70" r="${radius}" fill="none" stroke="#e5edf5" stroke-width="18"></circle>
+        ${arcs}
+        <text x="70" y="64" text-anchor="middle" font-size="11" fill="#64748b">${escHtml(label)}</text>
+        <text x="70" y="82" text-anchor="middle" font-size="18" font-weight="800" fill="#12233a">${fmtNum(total)}</text>
+      </svg>
+      <div class="donut-legend">
+        ${items.map((row, index) => `<div class="donut-legend-item"><span class="donut-swatch" style="background:${palette[index % palette.length]}"></span><span>${escHtml(row.label || "Unknown")}</span><strong>${fmtPct(row.share)}</strong></div>`).join("")}
+      </div>
+    </div>`;
 }
 
 function renderPipeline(pipeline) {
@@ -730,12 +788,16 @@ function renderBarChart(container, { points, color, yLabel }) {
         const y = pad.top + innerH - innerH * ratio;
         return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="#e2e8f0"></line>`;
       }).join("")}
+      ${[0, 0.5, 1].map((ratio) => {
+        const y = pad.top + innerH - innerH * ratio;
+        return `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#64748b">${fmtNum(Math.round(max * ratio))}</text>`;
+      }).join("")}
       ${points.map((point, index) => {
         const value = Number(point.value || 0);
         const barH = (value / max) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${color}" opacity="0.78"></rect><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="#64748b">${escHtml(point.label)}</text>`;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${color}" opacity="0.78"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="${color}">${fmtNum(value)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="#64748b">${escHtml(point.label)}</text>`;
       }).join("")}
       <text x="12" y="${pad.top + 12}" font-size="11" fill="#64748b">${escHtml(yLabel)}</text>
     </svg>`;
@@ -780,7 +842,7 @@ function getControlOptions(control) {
 }
 
 function summarizeSelection(options, selected) {
-  if (!selected.length) return { main: "All selected", count: options.length ? `${options.length} available` : "" };
+  if (!selected.length) return { main: "All selected", count: options.length ? `${options.length}` : "" };
   if (selected.length === 1) return { main: selected[0], count: "1 selected" };
   return { main: selected[0], count: `+${selected.length - 1} more` };
 }
@@ -840,9 +902,11 @@ function renderLoading() {
     els.botTrendChart,
     els.botLeakyIssues,
     els.botBestIssues,
+    els.categoryDonut,
+    els.channelDonut,
+    els.botActionDonut,
+    els.statusDonut,
     els.departmentMix,
-    els.channelMix,
-    els.statusMix,
     els.installationMix,
     els.pipelineHealth,
   ].forEach((element) => { element.innerHTML = loading; });
@@ -864,9 +928,11 @@ function renderError(error) {
     els.botTrendChart,
     els.botLeakyIssues,
     els.botBestIssues,
+    els.categoryDonut,
+    els.channelDonut,
+    els.botActionDonut,
+    els.statusDonut,
     els.departmentMix,
-    els.channelMix,
-    els.statusMix,
     els.installationMix,
     els.pipelineHealth,
   ].forEach((element) => { element.innerHTML = `<div class="error-state">${escHtml(message)}</div>`; });

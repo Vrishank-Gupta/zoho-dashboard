@@ -29,7 +29,10 @@
           <div class="section-label">Filters</div>
           <h2 class="panel-title">Slice the board by business lens</h2>
         </div>
-        <button class="ghost-btn" id="resetFilters" type="button">Reset filters</button>
+        <div class="panel-actions">
+          <button class="ghost-btn" id="toggleAdvancedFilters" type="button">Advanced filters</button>
+          <button class="ghost-btn" id="resetFilters" type="button">Reset filters</button>
+        </div>
       </div>
 
       <div class="date-toolbar">
@@ -46,7 +49,8 @@
         <div class="quick-presets" id="quickPresets"></div>
       </div>
 
-      <div class="filter-grid" id="filterGrid"></div>
+      <div class="filter-grid filter-grid-primary" id="primaryFilterGrid"></div>
+      <div class="filter-grid filter-grid-secondary hidden" id="secondaryFilterGrid"></div>
       <div class="active-chip-row" id="activeChips"></div>
     </section>
 
@@ -135,16 +139,24 @@
         </div>
         <div class="mix-grid">
           <div>
-            <div class="mini-title">Support team</div>
-            <div id="departmentMix"></div>
+            <div class="mini-title">Category</div>
+            <div class="donut-host" id="categoryDonut"></div>
           </div>
           <div>
             <div class="mini-title">Channel</div>
-            <div id="channelMix"></div>
+            <div class="donut-host" id="channelDonut"></div>
+          </div>
+          <div>
+            <div class="mini-title">Bot action</div>
+            <div class="donut-host" id="botActionDonut"></div>
           </div>
           <div>
             <div class="mini-title">Status</div>
-            <div id="statusMix"></div>
+            <div class="donut-host" id="statusDonut"></div>
+          </div>
+          <div>
+            <div class="mini-title">Support team</div>
+            <div id="departmentMix"></div>
           </div>
           <div>
             <div class="mini-title">Installation split</div>

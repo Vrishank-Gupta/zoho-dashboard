@@ -144,7 +144,7 @@ button { border: 0; background: none; cursor: pointer; }
 
 .filters-panel {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .date-toolbar {
@@ -182,6 +182,10 @@ button { border: 0; background: none; cursor: pointer; }
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.active-chip-row {
+  margin-top: 2px;
 }
 
 .ghost-btn,
@@ -238,7 +242,12 @@ button { border: 0; background: none; cursor: pointer; }
 .filter-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
+}
+
+.filter-grid-secondary {
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
 }
 
 .filter-control {
@@ -246,19 +255,19 @@ button { border: 0; background: none; cursor: pointer; }
 }
 
 .control-label {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .control-trigger {
   width: 100%;
-  min-height: 46px;
+  min-height: 42px;
   border-radius: 12px;
   background: var(--surface-soft);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 14px;
+  padding: 0 12px;
   color: var(--text);
   font-weight: 600;
   text-align: left;
@@ -575,6 +584,36 @@ button { border: 0; background: none; cursor: pointer; }
 .two-col,
 .mix-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.donut-host {
+  min-height: 220px;
+}
+
+.donut-card {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.donut-legend {
+  display: grid;
+  gap: 8px;
+}
+
+.donut-legend-item {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.donut-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
 }
 
 .mix-row {

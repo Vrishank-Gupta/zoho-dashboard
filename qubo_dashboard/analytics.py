@@ -279,8 +279,10 @@ class AnalyticsService:
 
     def _agg_service_ops(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         return {
+            "category_mix": self._mix(rows, "product_category"),
             "department_mix": self._mix(rows, "department_name"),
             "channel_mix": self._mix(rows, "channel"),
+            "bot_action_mix": self._mix(rows, "normalized_bot_action"),
             "status_mix": self._mix(rows, "status"),
             "installation_mix": self._installation_mix(rows),
         }
@@ -512,6 +514,7 @@ class AnalyticsService:
             "issue_id": issue.issue_id,
             "product_category": issue.product_category,
             "product_name": issue.product_name,
+            "product_context": f"{issue.product_category} / {issue.product_name}",
             "executive_fault_code": issue.executive_fault_code,
             "fault_code": issue.fault_code,
             "fault_code_level_1": issue.fault_code_level_1,
@@ -590,7 +593,7 @@ class AnalyticsService:
             "category_health": [],
             "product_health": [],
             "issue_views": {"highest_volume": [], "installation_tickets": [], "repeat_heavy": [], "bot_leakage": []},
-            "service_ops": {"department_mix": [], "channel_mix": [], "status_mix": [], "installation_mix": []},
+            "service_ops": {"category_mix": [], "department_mix": [], "channel_mix": [], "bot_action_mix": [], "status_mix": [], "installation_mix": []},
             "bot_summary": {"overview": {}, "by_product": [], "best_issues": [], "leaky_issues": []},
             "pipeline_health": {"status": "Unavailable", "last_run_at": "Unknown", "duration_minutes": 0, "rows_fetched": 0, "rows_inserted": 0, "recent_runs": []},
         }
