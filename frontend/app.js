@@ -123,6 +123,13 @@ const VISUAL_THEME = {
   barStroke: "rgba(77, 142, 244, 0.9)",
 };
 
+function shouldShowAxisLabel(index, total) {
+  if (total <= 6) return true;
+  if (total <= 10) return index % 2 === 0 || index === total - 1;
+  if (total <= 18) return index % 3 === 0 || index === total - 1;
+  return index % 4 === 0 || index === total - 1;
+}
+
 const state = {
   apiBaseUrl: (window.QUBO_APP_CONFIG?.apiBaseUrl || window.location.origin || "").replace(/\/$/, ""),
   filters: structuredClone(DEFAULT_FILTERS),
@@ -823,6 +830,7 @@ function renderBotTrend(points) {
   const maxTickets = Math.max(...bucketed.map((item) => item.tickets || 0), 1);
   const step = innerW / Math.max(bucketed.length, 1);
   const barW = Math.min(44, step * 0.62);
+  const showValueLabels = bucketed.length <= 10;
   const linePoints = bucketed.map((item, index) => {
     const pct = item.tickets ? (item.bot_resolved_tickets || 0) / item.tickets : 0;
     return {
@@ -847,10 +855,10 @@ function renderBotTrend(points) {
         const barH = ((item.tickets || 0) / maxTickets) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.blue}">${fmtNum(item.tickets || 0)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>`;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 8)}" text-anchor="middle" font-size="10" font-weight="700" fill="${VISUAL_THEME.text}">${fmtNum(item.tickets || 0)}</text>` : ""}${shouldShowAxisLabel(index, bucketed.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>` : ""}`;
       }).join("")}
       <path d="${linePath}" fill="none" stroke="${VISUAL_THEME.green}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
-      ${linePoints.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="4.5" fill="${VISUAL_THEME.green}"></circle><text x="${point.x}" y="${Math.max(12, point.y - 10)}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.green}">${(point.pct * 100).toFixed(0)}%</text>`).join("")}
+      ${linePoints.map((point, index) => `<circle cx="${point.x}" cy="${point.y}" r="4.5" fill="${VISUAL_THEME.green}"></circle>${bucketed.length <= 8 || shouldShowAxisLabel(index, bucketed.length) ? `<text x="${point.x}" y="${Math.max(14, point.y - 10)}" text-anchor="middle" font-size="10" font-weight="700" fill="${VISUAL_THEME.green}">${(point.pct * 100).toFixed(0)}%</text>` : ""}`).join("")}
     </svg>`;
 }
 
@@ -1187,6 +1195,7 @@ function renderDrilldownPanels(drilldown) {
   renderDrilldownTabs();
   const overview = `
     <section class="drilldown-section">
+      <div class="section-label">Snapshot</div>
       <div class="mini-summary-grid">
         ${renderMiniStat("Tickets", summary.tickets || 0)}
         ${renderMiniStat("Installation", ratio(summary.installation_tickets, summary.tickets), true)}
@@ -1195,9 +1204,11 @@ function renderDrilldownPanels(drilldown) {
       </div>
     </section>
     <section class="drilldown-section">
+      <div class="section-label">Trend</div>
       <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline)}</div>
     </section>
     <section class="drilldown-section">
+      <div class="section-label">Leading signals</div>
       <div class="drilldown-kpi-rail">
         ${renderInsightCard("Top EFC", ((drilldown.efcs || [])[0]?.label || "Others"), ((drilldown.efcs || [])[0]?.tickets || 0))}
         ${renderInsightCard("Top resolution", ((drilldown.resolutions || [])[0]?.label || "Unknown"), ((drilldown.resolutions || [])[0]?.tickets || 0))}
@@ -1206,6 +1217,7 @@ function renderDrilldownPanels(drilldown) {
     </section>`;
   const analysis = `
     <section class="drilldown-section">
+      <div class="section-label">Breakdown</div>
       <div class="drilldown-two-col">
         <div class="mini-panel"><h3>Issue distribution</h3>${renderMiniTable(drilldown.issue_matrix || [], [
           { key: "executive_fault_code", label: "EFC" },
@@ -1237,6 +1249,7 @@ function renderCategoryDrilldownPanels(drilldown) {
   renderDrilldownTabs();
   const overview = `
     <section class="drilldown-section">
+      <div class="section-label">Snapshot</div>
       <div class="mini-summary-grid">
         ${renderMiniStat("Tickets", summary.tickets || 0)}
         ${renderMiniStat("Installation", ratio(summary.installation_tickets, summary.tickets), true)}
@@ -1245,9 +1258,11 @@ function renderCategoryDrilldownPanels(drilldown) {
       </div>
     </section>
     <section class="drilldown-section">
+      <div class="section-label">Trend</div>
       <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline)}</div>
     </section>
     <section class="drilldown-section">
+      <div class="section-label">Product and issue mix</div>
       <div class="drilldown-two-col">
         <div class="mini-panel"><h3>Products in category</h3>${renderMiniTable(drilldown.products || [], [
           { key: "label", label: "Product" },
@@ -1264,6 +1279,7 @@ function renderCategoryDrilldownPanels(drilldown) {
       </div>
     </section>
     <section class="drilldown-section">
+      <div class="section-label">Leading signals</div>
       <div class="drilldown-kpi-rail">
         ${renderInsightCard("Top EFC", ((drilldown.efcs || [])[0]?.label || "Others"), ((drilldown.efcs || [])[0]?.tickets || 0))}
         ${renderInsightCard("Top resolution", ((drilldown.resolutions || [])[0]?.label || "Unknown"), ((drilldown.resolutions || [])[0]?.tickets || 0))}
@@ -1592,6 +1608,7 @@ function renderMiniChartSvg(points) {
   const innerH = height - pad.top - pad.bottom;
   const max = Math.max(...points.map((point) => Number(point.tickets || 0)), 1);
   const barW = innerW / Math.max(points.length, 1) * 0.65;
+  const showValueLabels = points.length <= 8;
   return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:220px">
     ${[0, 0.5, 1].map((ratio) => {
       const y = pad.top + innerH - innerH * ratio;
@@ -1603,7 +1620,7 @@ function renderMiniChartSvg(points) {
     const barH = (value / max) * innerH;
     const x = pad.left + step * index + (step - barW) / 2;
     const y = pad.top + innerH - barH;
-    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="6" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.blue}">${fmtNum(value)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>`;
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="6" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 8)}" text-anchor="middle" font-size="10" font-weight="700" fill="${VISUAL_THEME.text}">${fmtNum(value)}</text>` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
   }).join("")}</svg>`;
 }
 
@@ -1640,6 +1657,7 @@ function renderBarChart(container, { points, color, yLabel }) {
   const max = Math.max(...points.map((point) => Number(point.value || 0)), 1);
   const step = innerW / Math.max(points.length, 1);
   const barW = Math.min(42, step * 0.65);
+  const showValueLabels = points.length <= 10;
   container.innerHTML = `
       <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:290px">
       ${[0.25, 0.5, 0.75].map((ratio) => {
@@ -1655,7 +1673,7 @@ function renderBarChart(container, { points, color, yLabel }) {
         const barH = (value / max) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${color}" opacity="0.84"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="${color}">${fmtNum(value)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>`;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${color}" opacity="0.84"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 8)}" text-anchor="middle" font-size="10" font-weight="700" fill="${VISUAL_THEME.text}">${fmtNum(value)}</text>` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
       }).join("")}
       <text x="12" y="${pad.top + 12}" font-size="11" fill="${VISUAL_THEME.muted}">${escHtml(yLabel)}</text>
     </svg>`;
