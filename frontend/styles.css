@@ -680,9 +680,9 @@ button { border: 0; background: none; cursor: pointer; }
 
 .donut-card {
   display: grid;
-  grid-template-columns: 180px 1fr;
+  grid-template-columns: 168px minmax(0, 1fr);
   gap: 12px;
-  align-items: center;
+  align-items: start;
   background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(245,247,250,0.94) 100%);
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -696,10 +696,21 @@ button { border: 0; background: none; cursor: pointer; }
 
 .donut-legend-item {
   display: grid;
-  grid-template-columns: 12px 1fr auto;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
   gap: 8px;
-  align-items: center;
+  align-items: start;
   font-size: 12px;
+}
+
+.donut-legend-item span:nth-child(2) {
+  min-width: 0;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.donut-legend-item strong {
+  white-space: nowrap;
+  align-self: start;
 }
 
 .donut-swatch {

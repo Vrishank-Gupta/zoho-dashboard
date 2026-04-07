@@ -82,6 +82,11 @@ const QUICK_PRESETS = [
   { key: "all", label: "All data", days: null },
 ];
 
+const DEFAULT_EXCLUDED_SELECTIONS = {
+  products: new Set(["Blank Product"]),
+  efcs: new Set(["Blank"]),
+};
+
 const state = {
   apiBaseUrl: (window.QUBO_APP_CONFIG?.apiBaseUrl || window.location.origin || "").replace(/\/$/, ""),
   filters: structuredClone(DEFAULT_FILTERS),
@@ -97,6 +102,7 @@ const state = {
   botBucket: "auto",
   activePreset: "60d",
   advancedFiltersOpen: false,
+  defaultSelectionsApplied: false,
 };
 
 const els = {
@@ -184,6 +190,7 @@ function bindEvents() {
     state.searches = {};
     state.activePreset = "60d";
     state.advancedFiltersOpen = false;
+    state.defaultSelectionsApplied = false;
     renderDateToolbar();
     renderFilterControls();
     renderActiveChips();
@@ -251,6 +258,7 @@ async function loadDashboard() {
     const payload = await response.json();
     state.payload = payload;
     state.options = payload.filter_options || {};
+    applyDefaultSelections();
     reconcileFilterState();
     renderDateToolbar();
     renderFilterControls();
@@ -259,6 +267,20 @@ async function loadDashboard() {
   } catch (error) {
     renderError(error);
   }
+}
+
+function applyDefaultSelections() {
+  if (state.defaultSelectionsApplied) return;
+  Object.entries(DEFAULT_EXCLUDED_SELECTIONS).forEach(([key, excluded]) => {
+    if ((state.filters[key] || []).length) return;
+    const control = CONTROLS.find((item) => item.key === key);
+    if (!control) return;
+    const values = getControlOptions(control)
+      .map((item) => item.label)
+      .filter((label) => !excluded.has(label));
+    state.filters[key] = values;
+  });
+  state.defaultSelectionsApplied = true;
 }
 
 function renderDashboard(payload) {
