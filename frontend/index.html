@@ -36,11 +36,16 @@
           <p class="hero-subtitle">Use the workbook mapping as the base, then override Product -> Category and FC2 -> EFC for this browser session only.</p>
         </div>
         <div class="panel-actions">
+          <button class="ghost-btn" id="exportMappingOverrides" type="button">Export session overrides</button>
           <button class="ghost-btn" id="resetMappingOverrides" type="button">Reset session overrides</button>
           <button class="primary-btn" id="applyMappingOverrides" type="button">Apply to session</button>
         </div>
       </div>
       <div class="mapping-summary" id="mappingStudioSummary"></div>
+      <div class="mapping-toolbar">
+        <input class="mapping-search mapping-search-wide" id="mappingGlobalSearch" type="search" placeholder="Search products, FC2, category, or EFC">
+        <label class="mapping-toggle"><input type="checkbox" id="mappingShowOverriddenOnly"> <span>Show only overridden rows</span></label>
+      </div>
       <div class="mapping-grid">
         <div class="mapping-panel">
           <div class="mapping-panel-head">

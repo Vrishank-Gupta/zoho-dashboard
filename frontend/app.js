@@ -105,7 +105,8 @@ const state = {
   activeView: loadSessionJson("quboActiveView", "dashboard"),
   mappingOverrides: loadSessionJson("quboMappingOverrides", { product_category_overrides: {}, efc_overrides: {} }),
   mappingDraft: { product_category_overrides: {}, efc_overrides: {} },
-  mappingSearches: { products: "", fc2: "" },
+  mappingSearches: { global: "", products: "", fc2: "" },
+  mappingShowOverriddenOnly: loadSessionJson("quboMappingShowOverriddenOnly", false),
   issueWidgetFilters: { categories: [], products: [] },
   issueWidgetOpenFilter: null,
 };
@@ -120,12 +121,15 @@ const els = {
   viewTabs: document.getElementById("viewTabs"),
   mappingStudioView: document.getElementById("mappingStudioView"),
   mappingStudioSummary: document.getElementById("mappingStudioSummary"),
+  mappingGlobalSearch: document.getElementById("mappingGlobalSearch"),
   mappingProductSearch: document.getElementById("mappingProductSearch"),
   mappingFc2Search: document.getElementById("mappingFc2Search"),
+  mappingShowOverriddenOnly: document.getElementById("mappingShowOverriddenOnly"),
   mappingProductTable: document.getElementById("mappingProductTable"),
   mappingFc2Table: document.getElementById("mappingFc2Table"),
   applyMappingOverrides: document.getElementById("applyMappingOverrides"),
   resetMappingOverrides: document.getElementById("resetMappingOverrides"),
+  exportMappingOverrides: document.getElementById("exportMappingOverrides"),
   dateStart: document.getElementById("dateStart"),
   dateEnd: document.getElementById("dateEnd"),
   quickPresets: document.getElementById("quickPresets"),
@@ -273,6 +277,15 @@ function bindEvents() {
     state.mappingSearches.fc2 = els.mappingFc2Search.value;
     renderMappingStudio(state.payload?.mapping_studio || {});
   });
+  els.mappingGlobalSearch?.addEventListener("input", () => {
+    state.mappingSearches.global = els.mappingGlobalSearch.value;
+    renderMappingStudio(state.payload?.mapping_studio || {});
+  });
+  els.mappingShowOverriddenOnly?.addEventListener("change", () => {
+    state.mappingShowOverriddenOnly = Boolean(els.mappingShowOverriddenOnly.checked);
+    saveSessionJson("quboMappingShowOverriddenOnly", state.mappingShowOverriddenOnly);
+    renderMappingStudio(state.payload?.mapping_studio || {});
+  });
   els.applyMappingOverrides?.addEventListener("click", () => {
     state.mappingOverrides = normalizeMappingOverrides(state.mappingDraft);
     saveSessionJson("quboMappingOverrides", state.mappingOverrides);
@@ -285,6 +298,7 @@ function bindEvents() {
     renderMappingStudio(state.payload?.mapping_studio || {});
     loadDashboard();
   });
+  els.exportMappingOverrides?.addEventListener("click", exportMappingOverrides);
 }
 
 async function loadDashboard() {
@@ -853,13 +867,22 @@ function renderActiveView() {
 function renderMappingStudio(mappingStudio) {
   state.mappingDraft = mergeDraftWithPayload(state.mappingDraft, mappingStudio);
   const active = mappingStudio.active_overrides || {};
+  if (els.mappingGlobalSearch) els.mappingGlobalSearch.value = state.mappingSearches.global || "";
+  if (els.mappingShowOverriddenOnly) els.mappingShowOverriddenOnly.checked = !!state.mappingShowOverriddenOnly;
   els.mappingStudioSummary.innerHTML = `
     <div class="mapping-note">Workbook mapping is treated as the base. Session overrides live only in this browser tab and are sent with dashboard requests.</div>
     <div class="mapping-note"><strong>${fmtNum(active.products || 0)}</strong> product overrides active · <strong>${fmtNum(active.efcs || 0)}</strong> FC2 overrides active</div>
   `;
 
+  const globalSearch = (state.mappingSearches.global || "").toLowerCase();
   const productSearch = (state.mappingSearches.products || "").toLowerCase();
-  const productRows = (mappingStudio.product_rows || []).filter((row) => row.product_name.toLowerCase().includes(productSearch));
+  const productRows = (mappingStudio.product_rows || []).filter((row) => {
+    const matchesGlobal = !globalSearch || [row.product_name, row.base_category, row.effective_category].some((value) => String(value || "").toLowerCase().includes(globalSearch));
+    const matchesLocal = !productSearch || row.product_name.toLowerCase().includes(productSearch);
+    const isOverridden = hasDraftOverride("product_category_overrides", row.product_name, row.base_category);
+    const matchesOverrideOnly = !state.mappingShowOverriddenOnly || isOverridden;
+    return matchesGlobal && matchesLocal && matchesOverrideOnly;
+  });
   const categoryOptions = mappingStudio.category_options || [];
   els.mappingProductTable.innerHTML = renderMappingTable({
     rows: productRows,
@@ -877,7 +900,13 @@ function renderMappingStudio(mappingStudio) {
   });
 
   const fc2Search = (state.mappingSearches.fc2 || "").toLowerCase();
-  const fc2Rows = (mappingStudio.fc2_rows || []).filter((row) => row.fault_code_level_2.toLowerCase().includes(fc2Search));
+  const fc2Rows = (mappingStudio.fc2_rows || []).filter((row) => {
+    const matchesGlobal = !globalSearch || [row.fault_code_level_2, row.fault_code_level_1, row.base_efc, row.effective_efc].some((value) => String(value || "").toLowerCase().includes(globalSearch));
+    const matchesLocal = !fc2Search || row.fault_code_level_2.toLowerCase().includes(fc2Search);
+    const isOverridden = hasDraftOverride("efc_overrides", row.fault_code_level_2, row.base_efc);
+    const matchesOverrideOnly = !state.mappingShowOverriddenOnly || isOverridden;
+    return matchesGlobal && matchesLocal && matchesOverrideOnly;
+  });
   const efcOptions = mappingStudio.efc_options || [];
   els.mappingFc2Table.innerHTML = renderMappingTable({
     rows: fc2Rows,
@@ -906,6 +935,15 @@ function renderMappingStudio(mappingStudio) {
       renderMappingStudio(mappingStudio);
     });
   });
+  document.querySelectorAll("[data-mapping-revert]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const scope = button.dataset.mappingRevert;
+      const key = button.dataset.mappingKey;
+      if (!scope || !key) return;
+      delete state.mappingDraft[scope][key];
+      renderMappingStudio(mappingStudio);
+    });
+  });
 }
 
 function renderMappingTable({ rows, idKey, valueKey, selectKey, labelColumns, valueLabel, options, countKey, countLabel }) {
@@ -924,13 +962,18 @@ function renderMappingTable({ rows, idKey, valueKey, selectKey, labelColumns, va
           ${rows.map((row) => {
             const overrideValue = state.mappingDraft[selectKey][String(row[idKey]).toLowerCase()] || "";
             const effectiveValue = overrideValue || row[valueKey] || "";
-            return `<tr class="${row.overridden || overrideValue ? "mapping-overridden" : ""}">
+            const baseValue = selectKey === "product_category_overrides" ? row.base_category : row.base_efc;
+            const isOverridden = hasDraftOverride(selectKey, row[idKey], baseValue);
+            return `<tr class="${isOverridden ? "mapping-overridden" : ""}">
               ${labelColumns.map((column) => `<td>${escHtml(row[column.key] || "")}</td>`).join("")}
               <td>
-                <select class="mapping-select" data-mapping-select="true" data-mapping-scope="${escHtml(selectKey)}" data-mapping-key="${escHtml(String(row[idKey]).toLowerCase())}">
-                  <option value="">Use workbook</option>
-                  ${options.map((option) => `<option value="${escHtml(option)}" ${effectiveValue === option ? "selected" : ""}>${escHtml(option)}</option>`).join("")}
-                </select>
+                <div class="mapping-select-row">
+                  <select class="mapping-select" data-mapping-select="true" data-mapping-scope="${escHtml(selectKey)}" data-mapping-key="${escHtml(String(row[idKey]).toLowerCase())}">
+                    <option value="">Use workbook</option>
+                    ${options.map((option) => `<option value="${escHtml(option)}" ${effectiveValue === option ? "selected" : ""}>${escHtml(option)}</option>`).join("")}
+                  </select>
+                  ${isOverridden ? `<button class="mapping-revert" type="button" data-mapping-revert="${escHtml(selectKey)}" data-mapping-key="${escHtml(String(row[idKey]).toLowerCase())}">Revert</button>` : ""}
+                </div>
               </td>
               <td class="num">${fmtNum(row[countKey] || 0)}</td>
             </tr>`;
@@ -1395,6 +1438,24 @@ function mergeDraftWithPayload(draft, mappingStudio) {
   next.product_category_overrides = Object.fromEntries(Object.entries(next.product_category_overrides).filter(([key]) => productKeys.has(key)));
   next.efc_overrides = Object.fromEntries(Object.entries(next.efc_overrides).filter(([key]) => fc2Keys.has(key)));
   return next;
+}
+
+function hasDraftOverride(scope, key, baseValue) {
+  const overrideValue = state.mappingDraft?.[scope]?.[String(key).toLowerCase()];
+  return Boolean(overrideValue && overrideValue !== baseValue);
+}
+
+function exportMappingOverrides() {
+  const payload = normalizeMappingOverrides(state.mappingDraft);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "qubo-mapping-overrides-session.json";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 function apiUrl(path) {

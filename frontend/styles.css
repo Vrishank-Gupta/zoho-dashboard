@@ -777,6 +777,15 @@ button { border: 0; background: none; cursor: pointer; }
   margin-bottom: 16px;
 }
 
+.mapping-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
 .mapping-note {
   padding: 10px 12px;
   border-radius: 12px;
@@ -826,6 +835,19 @@ button { border: 0; background: none; cursor: pointer; }
   min-width: 220px;
 }
 
+.mapping-search-wide {
+  min-width: min(520px, 100%);
+}
+
+.mapping-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .mapping-table-wrap {
   max-height: 620px;
   overflow: auto;
@@ -833,6 +855,27 @@ button { border: 0; background: none; cursor: pointer; }
 
 .mapping-overridden td {
   background: rgba(30, 91, 184, 0.04);
+}
+
+.mapping-select-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.mapping-revert {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.92);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.mapping-revert:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
 }
 
 .modal-shell {
@@ -948,8 +991,18 @@ button { border: 0; background: none; cursor: pointer; }
     flex-direction: column;
   }
 
+  .mapping-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .mapping-search {
     min-width: 0;
+  }
+
+  .mapping-select-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 
