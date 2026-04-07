@@ -152,6 +152,47 @@ def product_drilldown(
     return service.get_product_drilldown(filters, category, product_name)
 
 
+@app.get("/api/drilldown/category")
+def category_drilldown(
+    category: str = Query(...),
+    date_start: str | None = Query(default=None),
+    date_end: str | None = Query(default=None),
+    categories: list[str] = Query(default=[]),
+    products: list[str] = Query(default=[]),
+    departments: list[str] = Query(default=[]),
+    channels: list[str] = Query(default=[]),
+    efcs: list[str] = Query(default=[]),
+    issue_details: list[str] = Query(default=[]),
+    statuses: list[str] = Query(default=[]),
+    bot_actions: list[str] = Query(default=[]),
+    include_fc1: list[str] = Query(default=[]),
+    exclude_fc1: list[str] = Query(default=[]),
+    include_fc2: list[str] = Query(default=[]),
+    exclude_fc2: list[str] = Query(default=[]),
+    include_bot_action: list[str] = Query(default=[]),
+    exclude_bot_action: list[str] = Query(default=[]),
+) -> dict:
+    filters = DashboardFilters(
+        date_start=date_start,
+        date_end=date_end,
+        categories=categories,
+        products=products,
+        departments=departments,
+        channels=channels,
+        efcs=efcs,
+        issue_details=issue_details,
+        statuses=statuses,
+        bot_actions=bot_actions,
+        include_fc1=include_fc1,
+        exclude_fc1=exclude_fc1,
+        include_fc2=include_fc2,
+        exclude_fc2=exclude_fc2,
+        include_bot_action=include_bot_action,
+        exclude_bot_action=exclude_bot_action,
+    )
+    return service.get_category_drilldown(filters, category)
+
+
 @app.get("/api/drilldown/issue/{issue_id}")
 def issue_drilldown(
     issue_id: str,

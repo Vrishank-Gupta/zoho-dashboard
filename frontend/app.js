@@ -443,7 +443,9 @@ function renderProductHealth() {
   }
   rows.sort((a, b) => Number(b[state.productSort] || 0) - Number(a[state.productSort] || 0));
   const body = rows.slice(0, 18).map((row, index) => `
-    <tr class="click-row" data-product-row="${state.productView === "category" ? "" : escHtml(JSON.stringify({ category: row.product_category, product_name: row.product_name }))}">
+    <tr class="click-row"
+      data-product-row="${state.productView === "category" ? "" : escHtml(JSON.stringify({ category: row.product_category, product_name: row.product_name }))}"
+      data-category-row="${state.productView === "category" ? escHtml(row.product_category || "") : ""}">
       <td class="num">${index + 1}</td>
       <td>
         <div class="name-stack">
@@ -483,6 +485,11 @@ function renderProductHealth() {
       const parsed = JSON.parse(meta);
       openProductDrilldown(parsed.category, parsed.product_name);
     });
+  });
+  els.productHealthTable.querySelectorAll("[data-category-row]").forEach((row) => {
+    const category = row.dataset.categoryRow;
+    if (!category) return;
+    row.addEventListener("click", () => openCategoryDrilldown(category));
   });
 }
 
@@ -618,7 +625,7 @@ function renderDonut(container, rows, label) {
         <text x="70" y="82" text-anchor="middle" font-size="18" font-weight="800" fill="#12233a">${fmtNum(total)}</text>
       </svg>
       <div class="donut-legend">
-        ${items.map((row, index) => `<div class="donut-legend-item"><span class="donut-swatch" style="background:${palette[index % palette.length]}"></span><span>${escHtml(row.label || "Unknown")}</span><strong>${fmtPct(row.share)}</strong></div>`).join("")}
+        ${items.map((row, index) => `<div class="donut-legend-item"><span class="donut-swatch" style="background:${palette[index % palette.length]}"></span><span>${escHtml(formatBotActionLabel(row.label || "Unknown"))}</span><strong>${fmtPct(row.share)}</strong></div>`).join("")}
       </div>
     </div>`;
 }
@@ -678,6 +685,23 @@ async function openProductDrilldown(category, productName) {
   }
 }
 
+async function openCategoryDrilldown(category) {
+  els.drilldownModal.classList.remove("hidden");
+  els.drilldownEyebrow.textContent = "Category drilldown";
+  els.drilldownTitle.textContent = category;
+  els.drilldownSubtitle.textContent = "Product mix, issues, resolutions, and bot actions for this category";
+  els.drilldownBody.innerHTML = '<div class="empty-state">Loading details...</div>';
+  try {
+    const params = buildQueryParams(state.filters);
+    params.set("category", category);
+    const response = await fetch(`${apiUrl("/api/drilldown/category")}?${params.toString()}`);
+    const payload = await response.json();
+    renderCategoryDrilldownPanels(payload.drilldown || {});
+  } catch (error) {
+    els.drilldownBody.innerHTML = `<div class="error-state">${escHtml(error.message || "Failed to load details.")}</div>`;
+  }
+}
+
 async function openIssueDrilldown(issueId) {
   els.drilldownModal.classList.remove("hidden");
   els.drilldownEyebrow.textContent = "Issue drilldown";
@@ -711,9 +735,31 @@ function renderDrilldownPanels(drilldown) {
       <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
     </div>
     <div class="drilldown-stack">
-      <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [])}</div>
+      <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
       <div class="mini-panel"><h3>Status summary</h3>${renderMiniBars(drilldown.statuses || [])}</div>
       <div class="mini-panel"><h3>${drilldown.departments ? "Support team split" : "Issue buckets"}</h3>${renderMiniBars(drilldown.departments || drilldown.efcs || drilldown.fc2 || [])}</div>
+    </div>`;
+}
+
+function renderCategoryDrilldownPanels(drilldown) {
+  const timeline = bucketTimeline((drilldown.timeline || []).map((row) => ({
+    date: row.metric_date,
+    tickets: row.tickets,
+    installation_tickets: row.installation_tickets,
+    bot_resolved_tickets: row.bot_resolved_tickets,
+    repeat_tickets: 0,
+  })), "weekly");
+  els.drilldownBody.innerHTML = `
+    <div class="drilldown-stack">
+      <div class="mini-panel"><h3>Category trend</h3>${renderMiniChartSvg(timeline)}</div>
+      <div class="mini-panel"><h3>Top products</h3>${renderMiniBars(drilldown.products || [])}</div>
+      <div class="mini-panel"><h3>Top issues</h3>${renderMiniBars(drilldown.issues || [])}</div>
+    </div>
+    <div class="drilldown-stack">
+      <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
+      <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
+      <div class="mini-panel"><h3>EFC summary</h3>${renderMiniBars(drilldown.efcs || [])}</div>
+      <div class="mini-panel"><h3>Status summary</h3>${renderMiniBars(drilldown.statuses || [])}</div>
     </div>`;
 }
 
@@ -721,12 +767,13 @@ function closeDrilldown() {
   els.drilldownModal.classList.add("hidden");
 }
 
-function renderMiniBars(rows) {
+function renderMiniBars(rows, labelFormatter = null) {
   if (!rows.length) return '<div class="empty-state">No summary available.</div>';
   const max = Math.max(...rows.map((row) => Number(row.tickets || row.count || 0)), 1);
   return `<div class="mini-bars">${rows.slice(0, 8).map((row) => {
     const value = Number(row.tickets || row.count || 0);
-    return `<div class="mini-bar-row"><div class="mix-row-head"><span class="mix-label">${escHtml(row.label || "Unknown")}</span><span class="mix-value">${fmtNum(value)}</span></div><div class="mini-bar-track"><div class="mini-bar-fill" style="width:${(value / max) * 100}%"></div></div></div>`;
+    const label = labelFormatter ? labelFormatter(row.label || "Unknown") : (row.label || "Unknown");
+    return `<div class="mini-bar-row"><div class="mix-row-head"><span class="mix-label">${escHtml(label)}</span><span class="mix-value">${fmtNum(value)}</span></div><div class="mini-bar-track"><div class="mini-bar-fill" style="width:${(value / max) * 100}%"></div></div></div>`;
   }).join("")}</div>`;
 }
 
@@ -739,13 +786,18 @@ function renderMiniChartSvg(points) {
   const innerH = height - pad.top - pad.bottom;
   const max = Math.max(...points.map((point) => Number(point.tickets || 0)), 1);
   const barW = innerW / Math.max(points.length, 1) * 0.65;
-  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:220px">${points.map((point, index) => {
+  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:220px">
+    ${[0, 0.5, 1].map((ratio) => {
+      const y = pad.top + innerH - innerH * ratio;
+      return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="#e2e8f0"></line><text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#64748b">${fmtNum(Math.round(max * ratio))}</text>`;
+    }).join("")}
+    ${points.map((point, index) => {
     const step = innerW / Math.max(points.length, 1);
     const value = Number(point.tickets || 0);
     const barH = (value / max) * innerH;
     const x = pad.left + step * index + (step - barW) / 2;
     const y = pad.top + innerH - barH;
-    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="6" fill="rgba(37,99,235,0.2)" stroke="rgba(37,99,235,0.45)"></rect><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="#64748b">${escHtml(point.label)}</text>`;
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="6" fill="rgba(37,99,235,0.2)" stroke="rgba(37,99,235,0.45)"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="#2563eb">${fmtNum(value)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="#64748b">${escHtml(point.label)}</text>`;
   }).join("")}</svg>`;
 }
 
@@ -1011,4 +1063,10 @@ function escHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#x27;");
+}
+
+function formatBotActionLabel(value) {
+  if (value === "No bot action") return "No recorded bot action";
+  if (value === "Other bot/system action") return "Other unmapped bot/system action";
+  return value;
 }

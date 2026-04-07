@@ -238,6 +238,87 @@ class ClickHouseAnalyticsRepository:
             ),
         }
 
+    def fetch_category_drilldown(self, filters: DashboardFilters, category: str) -> dict[str, list[dict]]:
+        clauses = [
+            self._fact_filters(filters, None, None),
+            f"product_category = {self._quote(category)}",
+        ]
+        where_sql = " AND ".join([clause for clause in clauses if clause])
+        return {
+            "timeline": self._query(
+                f"""
+                SELECT
+                    created_date AS metric_date,
+                    count() AS tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(is_bot_transferred = 1) AS bot_transferred_tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY metric_date
+                ORDER BY metric_date
+                """
+            ),
+            "products": self._query(
+                f"""
+                SELECT product_name AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                LIMIT 15
+                """
+            ),
+            "bot_actions": self._query(
+                f"""
+                SELECT normalized_bot_action AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+            "resolutions": self._query(
+                f"""
+                SELECT normalized_resolution AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                LIMIT 12
+                """
+            ),
+            "statuses": self._query(
+                f"""
+                SELECT ifNull(status, 'Unknown') AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+            "efcs": self._query(
+                f"""
+                SELECT executive_fault_code AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                LIMIT 12
+                """
+            ),
+            "issues": self._query(
+                f"""
+                SELECT normalized_fault_code_l2 AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                LIMIT 15
+                """
+            ),
+        }
+
     def fetch_issue_drilldown(self, filters: DashboardFilters, issue_id: str) -> dict[str, list[dict]]:
         category, product_name, efc, issue_detail = self._parse_issue_id(issue_id)
         clauses = [

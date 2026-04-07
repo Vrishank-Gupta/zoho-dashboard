@@ -80,6 +80,14 @@ class AnalyticsService:
             }
         return {"meta": {"category": category, "product_name": product_name}, "drilldown": {}}
 
+    def get_category_drilldown(self, filters: DashboardFilters, category: str) -> dict[str, Any]:
+        if self._clickhouse and settings.analytics_backend == "clickhouse":
+            return {
+                "meta": {"category": category},
+                "drilldown": self._clickhouse.fetch_category_drilldown(filters, category),
+            }
+        return {"meta": {"category": category}, "drilldown": {}}
+
     def get_issue_drilldown(self, filters: DashboardFilters, issue_id: str) -> dict[str, Any]:
         issue = self._find_issue(filters, issue_id)
         if self._clickhouse and settings.analytics_backend == "clickhouse":
@@ -111,13 +119,16 @@ class AnalyticsService:
         previous_issue_rows = self._clickhouse.fetch_issue_rows(previous_start, previous_end, filters) if previous_end >= previous_start else []
         bot_rows = self._clickhouse.fetch_bot_rows(start_date, end_date, filters)
         pipeline_rows = self._clickhouse.fetch_pipeline_rows()
+        option_filters = DashboardFilters(date_start=start_date.isoformat(), date_end=end_date.isoformat())
+        option_daily_rows = self._clickhouse.fetch_daily_rows(start_date, end_date, option_filters)
+        option_issue_rows = self._clickhouse.fetch_issue_rows(start_date, end_date, option_filters)
 
         issues = self._agg_issues(current_issue_rows, previous_issue_rows)
         category_health = self._agg_category_health(current_daily_rows)
         product_health = self._agg_product_health(current_daily_rows)
         service_ops = self._agg_service_ops(current_daily_rows)
         kpis = self._agg_kpis(current_daily_rows, previous_daily_rows)
-        filter_options = self._agg_filter_options(current_daily_rows, issues, min_date, max_date)
+        filter_options = self._agg_filter_options(option_daily_rows, self._agg_issues(option_issue_rows, []), min_date, max_date)
         pipeline_health = self._agg_pipeline_health(pipeline_rows)
 
         return {
