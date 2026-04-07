@@ -60,6 +60,11 @@ const VIEW_TABS = [
   { key: "mapping", label: "Mapping Studio" },
 ];
 
+const DEFAULT_EXCLUDED_SELECTIONS = {
+  products: new Set(["blank product", "blankproduct"]),
+  efcs: new Set(["blank", "unclassified"]),
+};
+
 const MAPPING_STUDIO_TABS = [
   { key: "products", label: "Product to Category" },
   { key: "fc2", label: "FC2 to EFC" },
@@ -339,6 +344,15 @@ async function loadDashboard() {
 
 function applyDefaultSelections() {
   if (state.defaultSelectionsApplied) return;
+  Object.entries(DEFAULT_EXCLUDED_SELECTIONS).forEach(([key, excluded]) => {
+    if ((state.filters[key] || []).length) return;
+    const control = CONTROLS.find((item) => item.key === key);
+    if (!control) return;
+    const values = getControlOptions(control)
+      .map((item) => item.label)
+      .filter((label) => !excluded.has(String(label || "").trim().toLowerCase()));
+    state.filters[key] = values;
+  });
   state.defaultSelectionsApplied = true;
 }
 
