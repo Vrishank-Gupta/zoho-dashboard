@@ -109,6 +109,8 @@ const state = {
   mappingShowOverriddenOnly: loadSessionJson("quboMappingShowOverriddenOnly", false),
   issueWidgetFilters: { categories: [], products: [] },
   issueWidgetOpenFilter: null,
+  categoryDrilldownBucket: "auto",
+  currentCategoryDrilldown: null,
 };
 state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
 
@@ -1019,6 +1021,7 @@ async function openProductDrilldown(category, productName) {
 }
 
 async function openCategoryDrilldown(category) {
+  state.categoryDrilldownBucket = "auto";
   els.drilldownModal.classList.remove("hidden");
   els.drilldownEyebrow.textContent = "Category drilldown";
   els.drilldownTitle.textContent = category;
@@ -1029,7 +1032,8 @@ async function openCategoryDrilldown(category) {
     params.set("category", category);
     const response = await fetch(`${apiUrl("/api/drilldown/category")}?${params.toString()}`);
     const payload = await response.json();
-    renderCategoryDrilldownPanels(payload.drilldown || {});
+    state.currentCategoryDrilldown = payload.drilldown || {};
+    renderCategoryDrilldownPanels(state.currentCategoryDrilldown);
   } catch (error) {
     els.drilldownBody.innerHTML = `<div class="error-state">${escHtml(error.message || "Failed to load details.")}</div>`;
   }
@@ -1094,7 +1098,9 @@ function renderCategoryDrilldownPanels(drilldown) {
     installation_tickets: row.installation_tickets,
     bot_resolved_tickets: row.bot_resolved_tickets,
     repeat_tickets: 0,
-  })), "weekly");
+  })), state.categoryDrilldownBucket);
+  const productTrend = buildCategoryProductTrendModel(drilldown.product_daily || [], state.categoryDrilldownBucket);
+  const faultMatrices = buildCategoryFaultMatrixModel(drilldown.product_fault_daily || [], state.categoryDrilldownBucket);
   els.drilldownBody.innerHTML = `
     <div class="drilldown-stack">
       <div class="mini-summary-grid">
@@ -1118,6 +1124,28 @@ function renderCategoryDrilldownPanels(drilldown) {
         { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
       ])}</div>
     </div>
+    <div class="mini-panel analysis-panel">
+      <div class="analysis-panel-head">
+        <div>
+          <h3>Product trend by period</h3>
+          <div class="analysis-caption">Compare week-on-week or month-on-month volume across every product in this category.</div>
+        </div>
+        <div class="panel-actions">
+          ${renderCategoryBucketTabs()}
+        </div>
+      </div>
+      ${renderCategoryProductTrendTable(productTrend)}
+    </div>
+    <div class="mini-panel analysis-panel">
+      <div class="analysis-panel-head">
+        <div>
+          <h3>Fault-code movement by product</h3>
+          <div class="analysis-caption">Each product shows how its top issue buckets move across the same periods.</div>
+        </div>
+        <div class="analysis-chip">${escHtml(productTrend.bucketMode === "monthly" ? "Monthly view" : "Weekly view")}</div>
+      </div>
+      ${renderCategoryFaultMatrices(faultMatrices)}
+    </div>
     <div class="drilldown-stack">
       <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
       <div class="mini-panel"><h3>Resolution by product</h3>${renderMiniTable(drilldown.resolution_by_product || [], [
@@ -1128,10 +1156,226 @@ function renderCategoryDrilldownPanels(drilldown) {
       <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
       <div class="mini-panel"><h3>EFC summary</h3>${renderMiniBars(drilldown.efcs || [])}</div>
     </div>`;
+  els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.categoryDrilldownBucket = button.dataset.categoryBucket || "auto";
+      renderCategoryDrilldownPanels(state.currentCategoryDrilldown || drilldown);
+    });
+  });
 }
 
 function closeDrilldown() {
   els.drilldownModal.classList.add("hidden");
+  state.currentCategoryDrilldown = null;
+}
+
+function renderCategoryBucketTabs() {
+  return BUCKET_MODES.map((option) => `
+    <button class="segment-btn ${state.categoryDrilldownBucket === option.key ? "active" : ""}" type="button" data-category-bucket="${escHtml(option.key)}">${escHtml(option.label)}</button>
+  `).join("");
+}
+
+function buildCategoryProductTrendModel(rows, mode) {
+  if (!rows.length) return { bucketMode: "weekly", periods: [], rows: [] };
+  const bucketMode = resolveBucketMode(rows.map((row) => ({ metric_date: row.metric_date })), mode);
+  const periodMap = new Map();
+  const productMap = new Map();
+  rows.forEach((row) => {
+    const bucket = getBucketDescriptor(row.metric_date, bucketMode);
+    const productName = row.product_name || "Unknown";
+    const value = Number(row.tickets || 0);
+    if (!periodMap.has(bucket.key)) periodMap.set(bucket.key, bucket.label);
+    if (!productMap.has(productName)) productMap.set(productName, { total: 0, periods: new Map() });
+    const product = productMap.get(productName);
+    product.total += value;
+    product.periods.set(bucket.key, (product.periods.get(bucket.key) || 0) + value);
+  });
+  const periods = [...periodMap.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, label]) => ({ key, label }));
+  const max = Math.max(...[...productMap.values()].flatMap((product) => periods.map((period) => product.periods.get(period.key) || 0)), 1);
+  const rowsOut = [...productMap.entries()]
+    .map(([product_name, product]) => ({
+      product_name,
+      total: product.total,
+      cells: periods.map((period) => ({
+        key: period.key,
+        label: period.label,
+        tickets: product.periods.get(period.key) || 0,
+      })),
+    }))
+    .sort((a, b) => b.total - a.total || a.product_name.localeCompare(b.product_name))
+    .map((row) => ({
+      ...row,
+      cells: row.cells.map((cell) => ({ ...cell, intensity: cell.tickets / max })),
+    }));
+  return { bucketMode, periods, rows: rowsOut };
+}
+
+function buildCategoryFaultMatrixModel(rows, mode) {
+  if (!rows.length) return { bucketMode: "weekly", products: [] };
+  const bucketMode = resolveBucketMode(rows.map((row) => ({ metric_date: row.metric_date })), mode);
+  const productMap = new Map();
+  rows.forEach((row) => {
+    const bucket = getBucketDescriptor(row.metric_date, bucketMode);
+    const productName = row.product_name || "Unknown";
+    const key = buildFaultKey(row.executive_fault_code, row.fault_code_level_2);
+    if (!productMap.has(productName)) productMap.set(productName, { total: 0, periods: new Map(), faults: new Map() });
+    const product = productMap.get(productName);
+    product.total += Number(row.tickets || 0);
+    product.periods.set(bucket.key, bucket.label);
+    if (!product.faults.has(key)) {
+      product.faults.set(key, {
+        efc: row.executive_fault_code || "Blank",
+        fc2: row.fault_code_level_2 || "",
+        total: 0,
+        periods: new Map(),
+      });
+    }
+    const fault = product.faults.get(key);
+    const value = Number(row.tickets || 0);
+    fault.total += value;
+    fault.periods.set(bucket.key, (fault.periods.get(bucket.key) || 0) + value);
+  });
+  const products = [...productMap.entries()]
+    .map(([product_name, product]) => {
+      const periods = [...product.periods.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, label]) => ({ key, label }));
+      const sortedFaults = [...product.faults.values()].sort((a, b) => b.total - a.total || faultPrimaryLabel(a).localeCompare(faultPrimaryLabel(b)));
+      const topFaults = sortedFaults.slice(0, 6);
+      if (sortedFaults.length > 6) {
+        const other = { efc: "Other issues", fc2: "", total: 0, periods: new Map() };
+        sortedFaults.slice(6).forEach((fault) => {
+          other.total += fault.total;
+          fault.periods.forEach((value, key) => {
+            other.periods.set(key, (other.periods.get(key) || 0) + value);
+          });
+        });
+        if (other.total) topFaults.push(other);
+      }
+      const max = Math.max(...topFaults.flatMap((fault) => periods.map((period) => fault.periods.get(period.key) || 0)), 1);
+      return {
+        product_name,
+        total: product.total,
+        periods,
+        faults: topFaults.map((fault) => ({
+          ...fault,
+          primary: faultPrimaryLabel(fault),
+          secondary: faultSecondaryLabel(fault),
+          cells: periods.map((period) => {
+            const tickets = fault.periods.get(period.key) || 0;
+            return { key: period.key, label: period.label, tickets, intensity: tickets / max };
+          }),
+        })),
+      };
+    })
+    .sort((a, b) => b.total - a.total || a.product_name.localeCompare(b.product_name));
+  return { bucketMode, products };
+}
+
+function getBucketDescriptor(value, mode) {
+  const rawDate = toDate(value);
+  if (!rawDate) return { key: "unknown", label: "Unknown" };
+  if (mode === "monthly") {
+    return {
+      key: `${rawDate.getFullYear()}-${String(rawDate.getMonth() + 1).padStart(2, "0")}`,
+      label: rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", month: "short", year: "2-digit" }),
+    };
+  }
+  const weekStart = startOfWeek(rawDate);
+  return {
+    key: isoDate(weekStart),
+    label: weekStart.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }),
+  };
+}
+
+function buildFaultKey(efc, fc2) {
+  return `${String(efc || "Blank")}||${String(fc2 || "")}`;
+}
+
+function faultPrimaryLabel(fault) {
+  return fault.fc2 && fault.fc2 !== fault.efc ? fault.fc2 : fault.efc || "Blank";
+}
+
+function faultSecondaryLabel(fault) {
+  const primary = faultPrimaryLabel(fault);
+  return fault.efc && fault.efc !== primary ? fault.efc : "";
+}
+
+function renderCategoryProductTrendTable(model) {
+  if (!model.rows.length) return '<div class="empty-state">No product trend available in the selected range.</div>';
+  return `
+    <div class="heatmap-wrap">
+      <table class="heatmap-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            ${model.periods.map((period) => `<th>${escHtml(period.label)}</th>`).join("")}
+            <th class="num">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${model.rows.map((row) => `
+            <tr>
+              <td class="heatmap-row-label">${escHtml(row.product_name)}</td>
+              ${row.cells.map((cell) => `
+                <td>
+                  <div class="heat-cell" style="background: rgba(30, 91, 184, ${0.08 + cell.intensity * 0.46})">
+                    ${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}
+                  </div>
+                </td>
+              `).join("")}
+              <td class="num"><strong>${escHtml(fmtNum(row.total))}</strong></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderCategoryFaultMatrices(model) {
+  if (!model.products.length) return '<div class="empty-state">No fault-code movement available in the selected range.</div>';
+  return `
+    <div class="fault-matrix-grid">
+      ${model.products.map((product) => `
+        <section class="fault-product-card">
+          <div class="fault-product-head">
+            <div>
+              <h4>${escHtml(product.product_name)}</h4>
+              <div class="fault-product-meta">${escHtml(fmtNum(product.total))} tickets across ${escHtml(String(product.periods.length))} ${product.periods.length === 1 ? "period" : "periods"}</div>
+            </div>
+          </div>
+          <div class="heatmap-wrap">
+            <table class="heatmap-table compact">
+              <thead>
+                <tr>
+                  <th>Issue bucket</th>
+                  ${product.periods.map((period) => `<th>${escHtml(period.label)}</th>`).join("")}
+                  <th class="num">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${product.faults.map((fault) => `
+                  <tr>
+                    <td class="heatmap-row-label">
+                      <div class="fault-label-stack">
+                        <strong>${escHtml(fault.primary)}</strong>
+                        ${fault.secondary ? `<span>${escHtml(fault.secondary)}</span>` : ""}
+                      </div>
+                    </td>
+                    ${fault.cells.map((cell) => `
+                      <td>
+                        <div class="heat-cell issue" style="background: rgba(23, 122, 98, ${0.08 + cell.intensity * 0.48})">
+                          ${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}
+                        </div>
+                      </td>
+                    `).join("")}
+                    <td class="num"><strong>${escHtml(fmtNum(fault.total))}</strong></td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      `).join("")}
+    </div>`;
 }
 
 function renderMiniBars(rows, labelFormatter = null) {

@@ -277,7 +277,19 @@ class ClickHouseAnalyticsRepository:
 
     def fetch_category_drilldown(self, filters: DashboardFilters, category: str, product_names: list[str]) -> dict[str, list[dict]]:
         if not product_names:
-            return {"summary": [], "timeline": [], "products": [], "bot_actions": [], "resolutions": [], "statuses": [], "efcs": [], "issues": [], "resolution_by_product": []}
+            return {
+                "summary": [],
+                "timeline": [],
+                "products": [],
+                "bot_actions": [],
+                "resolutions": [],
+                "statuses": [],
+                "efcs": [],
+                "issues": [],
+                "resolution_by_product": [],
+                "product_daily": [],
+                "product_fault_daily": [],
+            }
         clauses = [
             self._fact_filters(filters, None, None),
             f"product_name IN ({self._quote_join(product_names)})",
@@ -390,6 +402,32 @@ class ClickHouseAnalyticsRepository:
                 GROUP BY product_name, resolution
                 ORDER BY tickets DESC
                 LIMIT 18
+                """
+            ),
+            "product_daily": self._query(
+                f"""
+                SELECT
+                    created_date AS metric_date,
+                    product_name,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY metric_date, product_name
+                ORDER BY metric_date, product_name
+                """
+            ),
+            "product_fault_daily": self._query(
+                f"""
+                SELECT
+                    created_date AS metric_date,
+                    product_name,
+                    executive_fault_code,
+                    normalized_fault_code_l2 AS fault_code_level_2,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY metric_date, product_name, executive_fault_code, fault_code_level_2
+                ORDER BY product_name, metric_date, tickets DESC
                 """
             ),
         }
