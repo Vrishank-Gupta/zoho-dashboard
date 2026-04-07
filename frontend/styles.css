@@ -177,6 +177,7 @@ button { border: 0; background: none; cursor: pointer; }
 }
 
 .quick-presets,
+.reporting-shortcuts,
 .segmented,
 .active-chip-row {
   display: flex;
@@ -188,9 +189,14 @@ button { border: 0; background: none; cursor: pointer; }
   margin-top: 2px;
 }
 
+.reporting-shortcuts {
+  margin-top: 2px;
+}
+
 .ghost-btn,
 .primary-btn,
 .preset-btn,
+.shortcut-pill,
 .segment-btn,
 .control-trigger,
 .chip-remove {
@@ -200,6 +206,7 @@ button { border: 0; background: none; cursor: pointer; }
 .ghost-btn,
 .primary-btn,
 .preset-btn,
+.shortcut-pill,
 .segment-btn,
 .control-tools button {
   height: 38px;
@@ -225,6 +232,7 @@ button { border: 0; background: none; cursor: pointer; }
 }
 
 .preset-btn,
+.shortcut-pill,
 .segment-btn,
 .control-tools button {
   color: var(--muted);
@@ -232,6 +240,8 @@ button { border: 0; background: none; cursor: pointer; }
 
 .preset-btn.active,
 .preset-btn:hover,
+.shortcut-pill.active,
+.shortcut-pill:hover,
 .segment-btn.active,
 .segment-btn:hover {
   background: var(--slate);
@@ -574,6 +584,12 @@ button { border: 0; background: none; cursor: pointer; }
 .mini-stat-key { font-size: 12px; color: var(--muted); font-weight: 700; }
 .mini-stat-value { margin-top: 6px; font-size: 24px; line-height: 1; font-weight: 800; }
 
+.mini-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .two-col,
 .mix-grid,
 .drilldown-grid {
@@ -719,6 +735,35 @@ button { border: 0; background: none; cursor: pointer; }
 
 .mini-bar-row { display: grid; gap: 4px; }
 
+.mini-table-wrap {
+  overflow: auto;
+}
+
+.mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.mini-table th,
+.mini-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.mini-table th {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mini-table tr:last-child td {
+  border-bottom: 0;
+}
+
 .empty-state,
 .error-state {
   padding: 14px;
@@ -744,7 +789,8 @@ button { border: 0; background: none; cursor: pointer; }
   .mix-grid,
   .issue-grid,
   .two-col,
-  .bot-overview {
+  .bot-overview,
+  .mini-summary-grid {
     grid-template-columns: 1fr;
   }
 }

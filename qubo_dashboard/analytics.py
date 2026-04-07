@@ -293,7 +293,7 @@ class AnalyticsService:
             "category_mix": self._mix(rows, "product_category"),
             "department_mix": self._mix(rows, "department_name"),
             "channel_mix": self._mix(rows, "channel"),
-            "bot_action_mix": self._mix(rows, "normalized_bot_action"),
+            "bot_action_mix": self._mix(rows, "normalized_bot_action", exclude_labels={"No bot action"}),
             "status_mix": self._mix(rows, "status"),
             "installation_mix": self._installation_mix(rows),
         }
@@ -475,11 +475,14 @@ class AnalyticsService:
                     current[text_key] = value
         return grouped
 
-    def _mix(self, rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    def _mix(self, rows: list[dict[str, Any]], key: str, exclude_labels: set[str] | None = None) -> list[dict[str, Any]]:
         grouped: dict[str, int] = defaultdict(int)
         total = 0
+        exclude_labels = exclude_labels or set()
         for row in rows:
             label = str(row.get(key) or "Unknown")
+            if label in exclude_labels:
+                continue
             value = int(row.get("tickets", 0) or 0)
             grouped[label] += value
             total += value

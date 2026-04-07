@@ -174,6 +174,19 @@ class ClickHouseAnalyticsRepository:
         ]
         where_sql = " AND ".join([clause for clause in clauses if clause])
         return {
+            "summary": self._query(
+                f"""
+                SELECT
+                    count() AS tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(is_bot_transferred = 1) AS bot_transferred_tickets,
+                    countIf(normalized_bot_action = 'Blank chat') AS blank_chat_tickets,
+                    countIf(match(lower(ifNull(status, '')), 'open|escal|pending|progress|wip')) AS open_tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                """
+            ),
             "timeline": self._query(
                 f"""
                 SELECT
@@ -226,6 +239,16 @@ class ClickHouseAnalyticsRepository:
                 LIMIT 12
                 """
             ),
+            "fc1": self._query(
+                f"""
+                SELECT normalized_fault_code_l1 AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                LIMIT 12
+                """
+            ),
             "fc2": self._query(
                 f"""
                 SELECT normalized_fault_code_l2 AS label, count() AS tickets
@@ -234,6 +257,21 @@ class ClickHouseAnalyticsRepository:
                 GROUP BY label
                 ORDER BY tickets DESC
                 LIMIT 12
+                """
+            ),
+            "issue_matrix": self._query(
+                f"""
+                SELECT
+                    executive_fault_code,
+                    normalized_fault_code_l2 AS issue_detail,
+                    count() AS tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY executive_fault_code, issue_detail
+                ORDER BY tickets DESC
+                LIMIT 15
                 """
             ),
         }
@@ -245,6 +283,19 @@ class ClickHouseAnalyticsRepository:
         ]
         where_sql = " AND ".join([clause for clause in clauses if clause])
         return {
+            "summary": self._query(
+                f"""
+                SELECT
+                    count() AS tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(is_bot_transferred = 1) AS bot_transferred_tickets,
+                    countIf(normalized_bot_action = 'Blank chat') AS blank_chat_tickets,
+                    countIf(match(lower(ifNull(status, '')), 'open|escal|pending|progress|wip')) AS open_tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                """
+            ),
             "timeline": self._query(
                 f"""
                 SELECT
@@ -261,7 +312,12 @@ class ClickHouseAnalyticsRepository:
             ),
             "products": self._query(
                 f"""
-                SELECT product_name AS label, count() AS tickets
+                SELECT
+                    product_name AS label,
+                    count() AS tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(match(lower(ifNull(status, '')), 'open|escal|pending|progress|wip')) AS open_tickets
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE {where_sql}
                 GROUP BY label
@@ -309,12 +365,30 @@ class ClickHouseAnalyticsRepository:
             ),
             "issues": self._query(
                 f"""
-                SELECT normalized_fault_code_l2 AS label, count() AS tickets
+                SELECT
+                    executive_fault_code,
+                    normalized_fault_code_l2 AS label,
+                    count() AS tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE {where_sql}
-                GROUP BY label
+                GROUP BY executive_fault_code, label
                 ORDER BY tickets DESC
                 LIMIT 15
+                """
+            ),
+            "resolution_by_product": self._query(
+                f"""
+                SELECT
+                    product_name,
+                    normalized_resolution AS resolution,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY product_name, resolution
+                ORDER BY tickets DESC
+                LIMIT 18
                 """
             ),
         }
@@ -523,6 +597,10 @@ class ClickHouseAnalyticsRepository:
             filters.include_bot_action,
             filters.exclude_bot_action,
         ))
+        if filters.exclude_installation:
+            clauses.append("(positionCaseInsensitive(fault_code_level_1, 'instal') = 0 AND positionCaseInsensitive(fault_code_level_2, 'instal') = 0)")
+        if filters.exclude_blank_chat:
+            clauses.append("normalized_bot_action != 'Blank chat'")
         return " AND ".join(clauses) if clauses else "1 = 1"
 
     def _issue_filters(self, filters: DashboardFilters, start_date: date | None, end_date: date | None) -> str:
@@ -555,6 +633,10 @@ class ClickHouseAnalyticsRepository:
             filters.include_bot_action,
             filters.exclude_bot_action,
         ))
+        if filters.exclude_installation:
+            clauses.append("(positionCaseInsensitive(normalized_fault_code_l1, 'instal') = 0 AND positionCaseInsensitive(normalized_fault_code_l2, 'instal') = 0)")
+        if filters.exclude_blank_chat:
+            clauses.append("normalized_bot_action != 'Blank chat'")
         return " AND ".join(clauses) if clauses else "1 = 1"
 
     def _multi_filters(self, column: str, include_values: list[str], exclude_values: list[str]) -> list[str]:

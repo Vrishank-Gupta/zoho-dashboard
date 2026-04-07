@@ -20,6 +20,48 @@ repository = TicketRepository()
 service = AnalyticsService(repository)
 pipeline_manager = PipelineManager()
 
+
+def build_filters(
+    date_start: str | None = None,
+    date_end: str | None = None,
+    exclude_installation: bool = False,
+    exclude_blank_chat: bool = False,
+    categories: list[str] | None = None,
+    products: list[str] | None = None,
+    departments: list[str] | None = None,
+    channels: list[str] | None = None,
+    efcs: list[str] | None = None,
+    issue_details: list[str] | None = None,
+    statuses: list[str] | None = None,
+    bot_actions: list[str] | None = None,
+    include_fc1: list[str] | None = None,
+    exclude_fc1: list[str] | None = None,
+    include_fc2: list[str] | None = None,
+    exclude_fc2: list[str] | None = None,
+    include_bot_action: list[str] | None = None,
+    exclude_bot_action: list[str] | None = None,
+) -> DashboardFilters:
+    return DashboardFilters(
+        date_start=date_start,
+        date_end=date_end,
+        exclude_installation=exclude_installation,
+        exclude_blank_chat=exclude_blank_chat,
+        categories=categories or [],
+        products=products or [],
+        departments=departments or [],
+        channels=channels or [],
+        efcs=efcs or [],
+        issue_details=issue_details or [],
+        statuses=statuses or [],
+        bot_actions=bot_actions or [],
+        include_fc1=include_fc1 or [],
+        exclude_fc1=exclude_fc1 or [],
+        include_fc2=include_fc2 or [],
+        exclude_fc2=exclude_fc2 or [],
+        include_bot_action=include_bot_action or [],
+        exclude_bot_action=exclude_bot_action or [],
+    )
+
 app = FastAPI(title="Qubo Support Executive Board")
 app.add_middleware(
     CORSMiddleware,
@@ -33,6 +75,8 @@ app.add_middleware(
 def dashboard(
     date_start: str | None = Query(default=None),
     date_end: str | None = Query(default=None),
+    exclude_installation: bool = Query(default=False),
+    exclude_blank_chat: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
@@ -48,9 +92,11 @@ def dashboard(
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
 ) -> dict:
-    filters = DashboardFilters(
+    filters = build_filters(
         date_start=date_start,
         date_end=date_end,
+        exclude_installation=exclude_installation,
+        exclude_blank_chat=exclude_blank_chat,
         categories=categories,
         products=products,
         departments=departments,
@@ -74,6 +120,8 @@ def issue_details(
     issue_id: str,
     date_start: str | None = Query(default=None),
     date_end: str | None = Query(default=None),
+    exclude_installation: bool = Query(default=False),
+    exclude_blank_chat: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
@@ -89,9 +137,11 @@ def issue_details(
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
 ) -> dict:
-    filters = DashboardFilters(
+    filters = build_filters(
         date_start=date_start,
         date_end=date_end,
+        exclude_installation=exclude_installation,
+        exclude_blank_chat=exclude_blank_chat,
         categories=categories,
         products=products,
         departments=departments,
@@ -116,6 +166,8 @@ def product_drilldown(
     product_name: str = Query(...),
     date_start: str | None = Query(default=None),
     date_end: str | None = Query(default=None),
+    exclude_installation: bool = Query(default=False),
+    exclude_blank_chat: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
@@ -131,9 +183,11 @@ def product_drilldown(
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
 ) -> dict:
-    filters = DashboardFilters(
+    filters = build_filters(
         date_start=date_start,
         date_end=date_end,
+        exclude_installation=exclude_installation,
+        exclude_blank_chat=exclude_blank_chat,
         categories=categories,
         products=products,
         departments=departments,
@@ -157,6 +211,8 @@ def category_drilldown(
     category: str = Query(...),
     date_start: str | None = Query(default=None),
     date_end: str | None = Query(default=None),
+    exclude_installation: bool = Query(default=False),
+    exclude_blank_chat: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
@@ -172,9 +228,11 @@ def category_drilldown(
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
 ) -> dict:
-    filters = DashboardFilters(
+    filters = build_filters(
         date_start=date_start,
         date_end=date_end,
+        exclude_installation=exclude_installation,
+        exclude_blank_chat=exclude_blank_chat,
         categories=categories,
         products=products,
         departments=departments,
@@ -198,6 +256,8 @@ def issue_drilldown(
     issue_id: str,
     date_start: str | None = Query(default=None),
     date_end: str | None = Query(default=None),
+    exclude_installation: bool = Query(default=False),
+    exclude_blank_chat: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
@@ -213,9 +273,11 @@ def issue_drilldown(
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
 ) -> dict:
-    filters = DashboardFilters(
+    filters = build_filters(
         date_start=date_start,
         date_end=date_end,
+        exclude_installation=exclude_installation,
+        exclude_blank_chat=exclude_blank_chat,
         categories=categories,
         products=products,
         departments=departments,
@@ -239,6 +301,8 @@ def tickets(
     query: str = Query(default=""),
     date_start: str | None = Query(default=None),
     date_end: str | None = Query(default=None),
+    exclude_installation: bool = Query(default=False),
+    exclude_blank_chat: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
@@ -254,9 +318,11 @@ def tickets(
     include_bot_action: list[str] = Query(default=[]),
     exclude_bot_action: list[str] = Query(default=[]),
 ) -> dict:
-    filters = DashboardFilters(
+    filters = build_filters(
         date_start=date_start,
         date_end=date_end,
+        exclude_installation=exclude_installation,
+        exclude_blank_chat=exclude_blank_chat,
         categories=categories,
         products=products,
         departments=departments,

@@ -1,6 +1,8 @@
 const DEFAULT_FILTERS = {
   date_start: "",
   date_end: "",
+  exclude_installation: false,
+  exclude_blank_chat: false,
   categories: [],
   products: [],
   efcs: [],
@@ -107,6 +109,7 @@ const els = {
   dateStart: document.getElementById("dateStart"),
   dateEnd: document.getElementById("dateEnd"),
   quickPresets: document.getElementById("quickPresets"),
+  reportingShortcuts: document.getElementById("reportingShortcuts"),
   primaryFilterGrid: document.getElementById("primaryFilterGrid"),
   secondaryFilterGrid: document.getElementById("secondaryFilterGrid"),
   activeChips: document.getElementById("activeChips"),
@@ -314,6 +317,24 @@ function renderDateToolbar() {
       loadDashboard();
     });
   });
+  renderReportingShortcuts();
+}
+
+function renderReportingShortcuts() {
+  const shortcuts = [
+    { key: "exclude_installation", label: "Exclude installation tickets" },
+    { key: "exclude_blank_chat", label: "Exclude blank chats" },
+  ];
+  els.reportingShortcuts.innerHTML = shortcuts.map((item) => `
+    <button class="shortcut-pill ${state.filters[item.key] ? "active" : ""}" type="button" data-shortcut="${escHtml(item.key)}">${escHtml(item.label)}</button>
+  `).join("");
+  els.reportingShortcuts.querySelectorAll("[data-shortcut]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.shortcut;
+      state.filters[key] = !state.filters[key];
+      loadDashboard();
+    });
+  });
 }
 
 function renderFilterControls() {
@@ -388,6 +409,8 @@ function renderActiveChips() {
   if (state.filters.date_start || state.filters.date_end) {
     chips.push(`<span class="chip">Date: ${escHtml(shortDate(state.filters.date_start))} - ${escHtml(shortDate(state.filters.date_end))}</span>`);
   }
+  if (state.filters.exclude_installation) chips.push('<span class="chip exclude">Reporting rule: exclude installation tickets</span>');
+  if (state.filters.exclude_blank_chat) chips.push('<span class="chip exclude">Reporting rule: exclude blank chats</span>');
   CONTROLS.forEach((control) => {
     (state.filters[control.key] || []).forEach((value) => {
       chips.push(`
@@ -722,6 +745,7 @@ async function openIssueDrilldown(issueId) {
 }
 
 function renderDrilldownPanels(drilldown) {
+  const summary = drilldown.summary?.[0] || {};
   const timeline = bucketTimeline((drilldown.timeline || []).map((row) => ({
     date: row.metric_date,
     tickets: row.tickets,
@@ -731,17 +755,30 @@ function renderDrilldownPanels(drilldown) {
   })), "weekly");
   els.drilldownBody.innerHTML = `
     <div class="drilldown-stack">
+      <div class="mini-summary-grid">
+        ${renderMiniStat("Tickets", summary.tickets || 0)}
+        ${renderMiniStat("Installation", ratio(summary.installation_tickets, summary.tickets), true)}
+        ${renderMiniStat("Bot resolved", ratio(summary.bot_resolved_tickets, summary.tickets), true)}
+        ${renderMiniStat("Open", ratio(summary.open_tickets, summary.tickets), true)}
+      </div>
       <div class="mini-panel"><h3>Trend</h3>${renderMiniChartSvg(timeline)}</div>
-      <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
+      <div class="mini-panel"><h3>Issue distribution</h3>${renderMiniTable(drilldown.issue_matrix || [], [
+        { key: "executive_fault_code", label: "EFC" },
+        { key: "issue_detail", label: "FC2" },
+        { key: "tickets", label: "Tickets", format: "number" },
+        { key: "bot_resolved_tickets", label: "Bot resolved", format: "number" },
+      ])}</div>
     </div>
     <div class="drilldown-stack">
+      <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
       <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
       <div class="mini-panel"><h3>Status summary</h3>${renderMiniBars(drilldown.statuses || [])}</div>
-      <div class="mini-panel"><h3>${drilldown.departments ? "Support team split" : "Issue buckets"}</h3>${renderMiniBars(drilldown.departments || drilldown.efcs || drilldown.fc2 || [])}</div>
+      <div class="mini-panel"><h3>Issue buckets</h3>${renderMiniBars(drilldown.efcs || drilldown.fc1 || drilldown.fc2 || [])}</div>
     </div>`;
 }
 
 function renderCategoryDrilldownPanels(drilldown) {
+  const summary = drilldown.summary?.[0] || {};
   const timeline = bucketTimeline((drilldown.timeline || []).map((row) => ({
     date: row.metric_date,
     tickets: row.tickets,
@@ -751,12 +788,34 @@ function renderCategoryDrilldownPanels(drilldown) {
   })), "weekly");
   els.drilldownBody.innerHTML = `
     <div class="drilldown-stack">
+      <div class="mini-summary-grid">
+        ${renderMiniStat("Tickets", summary.tickets || 0)}
+        ${renderMiniStat("Installation", ratio(summary.installation_tickets, summary.tickets), true)}
+        ${renderMiniStat("Bot resolved", ratio(summary.bot_resolved_tickets, summary.tickets), true)}
+        ${renderMiniStat("Open", ratio(summary.open_tickets, summary.tickets), true)}
+      </div>
       <div class="mini-panel"><h3>Category trend</h3>${renderMiniChartSvg(timeline)}</div>
-      <div class="mini-panel"><h3>Top products</h3>${renderMiniBars(drilldown.products || [])}</div>
-      <div class="mini-panel"><h3>Top issues</h3>${renderMiniBars(drilldown.issues || [])}</div>
+      <div class="mini-panel"><h3>Products in category</h3>${renderMiniTable(drilldown.products || [], [
+        { key: "label", label: "Product" },
+        { key: "tickets", label: "Tickets", format: "number" },
+        { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
+        { key: "bot_resolved_tickets", label: "Bot resolved", format: "percentOfTickets" },
+        { key: "open_tickets", label: "Open", format: "percentOfTickets" },
+      ])}</div>
+      <div class="mini-panel"><h3>Issue hotspots</h3>${renderMiniTable(drilldown.issues || [], [
+        { key: "executive_fault_code", label: "EFC" },
+        { key: "label", label: "FC2" },
+        { key: "tickets", label: "Tickets", format: "number" },
+        { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
+      ])}</div>
     </div>
     <div class="drilldown-stack">
       <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
+      <div class="mini-panel"><h3>Resolution by product</h3>${renderMiniTable(drilldown.resolution_by_product || [], [
+        { key: "product_name", label: "Product" },
+        { key: "resolution", label: "Resolution" },
+        { key: "tickets", label: "Tickets", format: "number" },
+      ])}</div>
       <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
       <div class="mini-panel"><h3>EFC summary</h3>${renderMiniBars(drilldown.efcs || [])}</div>
       <div class="mini-panel"><h3>Status summary</h3>${renderMiniBars(drilldown.statuses || [])}</div>
@@ -775,6 +834,36 @@ function renderMiniBars(rows, labelFormatter = null) {
     const label = labelFormatter ? labelFormatter(row.label || "Unknown") : (row.label || "Unknown");
     return `<div class="mini-bar-row"><div class="mix-row-head"><span class="mix-label">${escHtml(label)}</span><span class="mix-value">${fmtNum(value)}</span></div><div class="mini-bar-track"><div class="mini-bar-fill" style="width:${(value / max) * 100}%"></div></div></div>`;
   }).join("")}</div>`;
+}
+
+function renderMiniTable(rows, columns) {
+  if (!rows.length) return '<div class="empty-state">No summary available.</div>';
+  return `
+    <div class="mini-table-wrap">
+      <table class="mini-table">
+        <thead>
+          <tr>${columns.map((column) => `<th>${escHtml(column.label)}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${rows.slice(0, 12).map((row) => `
+            <tr>
+              ${columns.map((column) => `<td>${formatMiniCell(row, column)}</td>`).join("")}
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function formatMiniCell(row, column) {
+  const value = row[column.key];
+  if (column.format === "number") return escHtml(fmtNum(value || 0));
+  if (column.format === "percentOfTickets") return escHtml(fmtPct(ratio(value, row.tickets)));
+  return escHtml(formatBotActionLabelIfNeeded(column.key, value));
+}
+
+function renderMiniStat(label, value, isPercent = false) {
+  return `<div class="mini-stat"><div class="mini-stat-key">${escHtml(label)}</div><div class="mini-stat-value">${isPercent ? fmtPct(value) : fmtNum(value)}</div></div>`;
 }
 
 function renderMiniChartSvg(points) {
@@ -1077,4 +1166,17 @@ function formatOptionLabel(control, value) {
     return formatBotActionLabel(value);
   }
   return value;
+}
+
+function formatBotActionLabelIfNeeded(key, value) {
+  if (key.includes("bot") || key === "label") {
+    return formatBotActionLabel(value);
+  }
+  return value ?? "Unknown";
+}
+
+function ratio(numerator, denominator) {
+  const n = Number(numerator || 0);
+  const d = Number(denominator || 0);
+  return d ? n / d : 0;
 }

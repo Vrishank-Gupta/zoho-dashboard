@@ -199,6 +199,8 @@ class TicketRecord:
 class DashboardFilters:
     date_start: str | None = None
     date_end: str | None = None
+    exclude_installation: bool = False
+    exclude_blank_chat: bool = False
     categories: list[str] = field(default_factory=list)
     products: list[str] = field(default_factory=list)
     departments: list[str] = field(default_factory=list)
