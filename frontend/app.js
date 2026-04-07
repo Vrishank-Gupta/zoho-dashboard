@@ -103,6 +103,8 @@ const state = {
   activePreset: "60d",
   advancedFiltersOpen: false,
   defaultSelectionsApplied: false,
+  issueWidgetFilters: { categories: [], products: [] },
+  issueWidgetOpenFilter: null,
 };
 
 const els = {
@@ -117,13 +119,13 @@ const els = {
   reportingShortcuts: document.getElementById("reportingShortcuts"),
   primaryFilterGrid: document.getElementById("primaryFilterGrid"),
   secondaryFilterGrid: document.getElementById("secondaryFilterGrid"),
-  activeChips: document.getElementById("activeChips"),
   toggleAdvancedFilters: document.getElementById("toggleAdvancedFilters"),
   resetFilters: document.getElementById("resetFilters"),
   kpiStrip: document.getElementById("kpiStrip"),
   timelineChart: document.getElementById("timelineChart"),
   productHealthTable: document.getElementById("productHealthTable"),
   issueBoard: document.getElementById("issueBoard"),
+  issueWidgetFilters: document.getElementById("issueWidgetFilters"),
   botOverview: document.getElementById("botOverview"),
   botTrendChart: document.getElementById("botTrendChart"),
   botLeakyIssues: document.getElementById("botLeakyIssues"),
@@ -191,9 +193,10 @@ function bindEvents() {
     state.activePreset = "60d";
     state.advancedFiltersOpen = false;
     state.defaultSelectionsApplied = false;
+    state.issueWidgetFilters = { categories: [], products: [] };
+    state.issueWidgetOpenFilter = null;
     renderDateToolbar();
     renderFilterControls();
-    renderActiveChips();
     loadDashboard();
   });
 
@@ -239,9 +242,11 @@ function bindEvents() {
       return;
     }
 
-    if (!target.closest("[data-filter-panel]")) {
+    if (!target.closest("[data-filter-panel]") && !target.closest("[data-widget-filter-panel]")) {
       state.openFilter = null;
+      state.issueWidgetOpenFilter = null;
       renderFilterControls();
+      renderIssueWidgetFilters();
     }
   });
 
@@ -260,9 +265,9 @@ async function loadDashboard() {
     state.options = payload.filter_options || {};
     applyDefaultSelections();
     reconcileFilterState();
+    reconcileIssueWidgetFilters();
     renderDateToolbar();
     renderFilterControls();
-    renderActiveChips();
     renderDashboard(payload);
   } catch (error) {
     renderError(error);
@@ -307,6 +312,7 @@ function renderDashboard(payload) {
   renderKpis(payload.kpis || {});
   renderTimeline(payload.timeline || []);
   renderProductHealth();
+  renderIssueWidgetFilters();
   renderIssueBoard(payload.issue_views || {});
   renderBotSummary(payload.bot_summary || {});
   renderDonut(els.categoryDonut, payload.service_ops?.category_mix || [], "Category");
@@ -422,7 +428,6 @@ function renderFilterControls() {
         const key = button.dataset.filterClear;
         state.filters[key] = [];
         renderFilterControls();
-        renderActiveChips();
         loadDashboard();
       });
     });
@@ -430,7 +435,6 @@ function renderFilterControls() {
       input.addEventListener("change", () => {
         toggleFilterValue(input.dataset.filterOption, input.value, input.checked);
         renderFilterControls();
-        renderActiveChips();
         loadDashboard();
       });
     });
@@ -445,25 +449,6 @@ function renderFilterControls() {
       }
     }
   }
-}
-
-function renderActiveChips() {
-  const chips = [];
-  if (state.filters.date_start || state.filters.date_end) {
-    chips.push(`<span class="chip">Date: ${escHtml(shortDate(state.filters.date_start))} - ${escHtml(shortDate(state.filters.date_end))}</span>`);
-  }
-  if (state.filters.exclude_installation) chips.push('<span class="chip exclude">Reporting rule: exclude installation tickets</span>');
-  if (state.filters.exclude_blank_chat) chips.push('<span class="chip exclude">Reporting rule: exclude blank chats</span>');
-  CONTROLS.forEach((control) => {
-    (state.filters[control.key] || []).forEach((value) => {
-      chips.push(`
-        <span class="chip ${control.key.startsWith("exclude_") ? "exclude" : ""}">
-          ${escHtml(`${control.label}: ${formatOptionLabel(control, value)}`)}
-          <button class="chip-remove" type="button" data-remove-chip="${escHtml(control.key)}" data-value="${escHtml(value)}">×</button>
-        </span>`);
-    });
-  });
-  els.activeChips.innerHTML = chips.join("");
 }
 
 function renderKpis(kpis) {
@@ -550,7 +535,7 @@ function renderProductHealth() {
 }
 
 function renderIssueBoard(issueViews) {
-  const items = issueViews[state.issueView] || [];
+  const items = filterIssueWidgetItems(issueViews[state.issueView] || []);
   if (!items.length) {
     els.issueBoard.innerHTML = '<div class="empty-state">No issues match the current filters.</div>';
     return;
@@ -571,6 +556,100 @@ function renderIssueBoard(issueViews) {
   els.issueBoard.querySelectorAll("[data-issue-id]").forEach((button) => {
     button.addEventListener("click", () => openIssueDrilldown(button.dataset.issueId));
   });
+}
+
+function renderIssueWidgetFilters() {
+  if (!els.issueWidgetFilters) return;
+  const options = getIssueWidgetOptions();
+  const definitions = [
+    { key: "categories", label: "Category", options: options.categories },
+    { key: "products", label: "Product", options: options.products },
+  ];
+  els.issueWidgetFilters.innerHTML = definitions.map((definition) => {
+    const selected = state.issueWidgetFilters[definition.key] || [];
+    const summary = summarizeSelection({ key: definition.key, optionsKey: definition.key }, definition.options, selected);
+    return `
+      <div class="filter-control widget-filter-control ${state.issueWidgetOpenFilter === definition.key ? "open" : ""}">
+        <button class="control-trigger widget-control-trigger" type="button" data-widget-filter-trigger="${escHtml(definition.key)}">
+          <span class="control-summary">
+            <span class="control-main">${escHtml(`${definition.label}: ${summary.main}`)}</span>
+            ${summary.count ? `<span class="control-count">${escHtml(summary.count)}</span>` : ""}
+          </span>
+          <span class="control-caret">${state.issueWidgetOpenFilter === definition.key ? "▲" : "▼"}</span>
+        </button>
+        <div class="control-panel widget-control-panel" data-widget-filter-panel="${escHtml(definition.key)}">
+          <div class="option-list">
+            ${definition.options.length ? definition.options.map((item) => `
+              <label class="option-item">
+                <input type="checkbox" data-widget-filter-option="${escHtml(definition.key)}" value="${escHtml(item.label)}" ${selected.includes(item.label) ? "checked" : ""}>
+                <span>${escHtml(item.label)}</span>
+                <span class="option-count">${fmtNum(item.count)}</span>
+              </label>
+            `).join("") : '<div class="empty-state">No values in the current view.</div>'}
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  els.issueWidgetFilters.querySelectorAll("[data-widget-filter-trigger]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.widgetFilterTrigger;
+      state.issueWidgetOpenFilter = state.issueWidgetOpenFilter === key ? null : key;
+      renderIssueWidgetFilters();
+    });
+  });
+  els.issueWidgetFilters.querySelectorAll("[data-widget-filter-option]").forEach((input) => {
+    input.addEventListener("change", () => {
+      toggleIssueWidgetFilterValue(input.dataset.widgetFilterOption, input.value, input.checked);
+      renderIssueWidgetFilters();
+      renderIssueBoard(state.payload?.issue_views || {});
+    });
+  });
+}
+
+function getIssueWidgetOptions() {
+  const issueViews = state.payload?.issue_views || {};
+  const allItems = Object.values(issueViews).flat();
+  const categoryCounts = new Map();
+  const productCounts = new Map();
+  allItems.forEach((item) => {
+    const category = item.product_category || "Other";
+    categoryCounts.set(category, (categoryCounts.get(category) || 0) + Number(item.volume || 0));
+  });
+  const selectedCategories = state.issueWidgetFilters.categories.length
+    ? new Set(state.issueWidgetFilters.categories)
+    : new Set(categoryCounts.keys());
+  allItems.forEach((item) => {
+    const category = item.product_category || "Other";
+    if (!selectedCategories.has(category)) return;
+    const product = item.product_name || "Other";
+    productCounts.set(product, (productCounts.get(product) || 0) + Number(item.volume || 0));
+  });
+  return {
+    categories: [...categoryCounts.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+    products: [...productCounts.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+  };
+}
+
+function filterIssueWidgetItems(items) {
+  const selectedCategories = state.issueWidgetFilters.categories;
+  const selectedProducts = state.issueWidgetFilters.products;
+  return items.filter((item) => {
+    const categoryOkay = !selectedCategories.length || selectedCategories.includes(item.product_category || "Other");
+    const productOkay = !selectedProducts.length || selectedProducts.includes(item.product_name || "Other");
+    return categoryOkay && productOkay;
+  });
+}
+
+function toggleIssueWidgetFilterValue(key, value, checked) {
+  const next = new Set(state.issueWidgetFilters[key] || []);
+  if (checked) next.add(value);
+  else next.delete(value);
+  state.issueWidgetFilters[key] = [...next];
+  if (key === "categories") {
+    const validProducts = new Set(getIssueWidgetOptions().products.map((item) => item.label));
+    state.issueWidgetFilters.products = state.issueWidgetFilters.products.filter((item) => validProducts.has(item));
+  }
 }
 
 function renderBotSummary(botSummary) {
@@ -996,6 +1075,14 @@ function reconcileFilterState() {
     const valid = new Set(getControlOptions(control).map((item) => item.label));
     state.filters[control.key] = (state.filters[control.key] || []).filter((value) => valid.has(value));
   });
+}
+
+function reconcileIssueWidgetFilters() {
+  const options = getIssueWidgetOptions();
+  const validCategories = new Set(options.categories.map((item) => item.label));
+  const validProducts = new Set(options.products.map((item) => item.label));
+  state.issueWidgetFilters.categories = state.issueWidgetFilters.categories.filter((value) => validCategories.has(value));
+  state.issueWidgetFilters.products = state.issueWidgetFilters.products.filter((value) => validProducts.has(value));
 }
 
 function getControlOptions(control) {

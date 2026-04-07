@@ -210,6 +210,26 @@ button { border: 0; background: none; cursor: pointer; }
   justify-content: flex-end;
 }
 
+.widget-filter-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.widget-filter-control {
+  min-width: 220px;
+}
+
+.widget-control-trigger {
+  min-width: 220px;
+  background: rgba(255,255,255,0.88);
+}
+
+.widget-control-panel {
+  min-width: 260px;
+}
+
 .filters-panel {
   display: grid;
   gap: 14px;
