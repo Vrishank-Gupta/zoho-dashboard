@@ -347,7 +347,13 @@ async function loadDashboard() {
     state.payload = payload;
     state.mappingStudioData = null;
     state.options = payload.filter_options || {};
-    applyDefaultSelections();
+    const appliedDefaults = applyDefaultSelections();
+    if (appliedDefaults) {
+      renderDateToolbar();
+      renderFilterControls();
+      loadDashboard();
+      return;
+    }
     reconcileFilterState();
     reconcileIssueWidgetFilters();
     renderDateToolbar();
@@ -359,7 +365,8 @@ async function loadDashboard() {
 }
 
 function applyDefaultSelections() {
-  if (state.defaultSelectionsApplied) return;
+  if (state.defaultSelectionsApplied) return false;
+  let changed = false;
   Object.entries(DEFAULT_EXCLUDED_SELECTIONS).forEach(([key, excluded]) => {
     if ((state.filters[key] || []).length) return;
     const control = CONTROLS.find((item) => item.key === key);
@@ -368,8 +375,10 @@ function applyDefaultSelections() {
       .map((item) => item.label)
       .filter((label) => !excluded.has(String(label || "").trim().toLowerCase()));
     state.filters[key] = values;
+    changed = true;
   });
   state.defaultSelectionsApplied = true;
+  return changed;
 }
 
 function renderDashboard(payload) {
