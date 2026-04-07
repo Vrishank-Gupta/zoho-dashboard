@@ -106,6 +106,23 @@ const QUICK_PRESETS = [
   { key: "all", label: "All data", days: null },
 ];
 
+const VISUAL_THEME = {
+  blue: "#4d8ef4",
+  green: "#1ec55a",
+  amber: "#f5a010",
+  red: "#f03c3c",
+  purple: "#9b6dff",
+  teal: "#05b6d4",
+  orange: "#f97316",
+  slate: "#98a0bd",
+  text: "#e4e7f0",
+  muted: "#98a0bd",
+  grid: "rgba(255,255,255,0.10)",
+  donutTrack: "rgba(255,255,255,0.08)",
+  barFill: "rgba(77, 142, 244, 0.42)",
+  barStroke: "rgba(77, 142, 244, 0.9)",
+};
+
 const state = {
   apiBaseUrl: (window.QUBO_APP_CONFIG?.apiBaseUrl || window.location.origin || "").replace(/\/$/, ""),
   filters: structuredClone(DEFAULT_FILTERS),
@@ -563,7 +580,13 @@ function renderKpis(kpis) {
 function renderTimeline(points) {
   const bucketed = bucketTimeline(points, state.timelineBucket);
   const metricKey = state.timelineMetric;
-  const color = metricKey === "installation_tickets" ? "#c97a18" : metricKey === "bot_resolved_tickets" ? "#17845f" : metricKey === "repeat_tickets" ? "#8b5cf6" : "#2563eb";
+  const color = metricKey === "installation_tickets"
+    ? VISUAL_THEME.amber
+    : metricKey === "bot_resolved_tickets"
+      ? VISUAL_THEME.green
+      : metricKey === "repeat_tickets"
+        ? VISUAL_THEME.purple
+        : VISUAL_THEME.blue;
   renderBarChart(els.timelineChart, {
     points: bucketed.map((item) => ({ label: item.label, value: item[metricKey] || 0 })),
     color,
@@ -811,23 +834,23 @@ function renderBotTrend(points) {
   });
   const linePath = linePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
   els.botTrendChart.innerHTML = `
-    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:250px">
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:250px">
       ${[0, 0.5, 1].map((ratio) => {
         const y = pad.top + innerH - ratio * innerH;
-        return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="#e2e8f0"></line><text x="${width - pad.right + 8}" y="${y + 4}" font-size="10" fill="#64748b">${Math.round(ratio * 100)}%</text>`;
+        return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line><text x="${width - pad.right + 8}" y="${y + 4}" font-size="10" fill="${VISUAL_THEME.muted}">${Math.round(ratio * 100)}%</text>`;
       }).join("")}
       ${[0, 0.5, 1].map((ratio) => {
         const y = pad.top + innerH - ratio * innerH;
-        return `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#64748b">${fmtNum(Math.round(maxTickets * ratio))}</text>`;
+        return `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(maxTickets * ratio))}</text>`;
       }).join("")}
       ${bucketed.map((item, index) => {
         const barH = ((item.tickets || 0) / maxTickets) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="rgba(37,99,235,0.18)" stroke="rgba(37,99,235,0.45)"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="#2563eb">${fmtNum(item.tickets || 0)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="#64748b">${escHtml(item.label)}</text>`;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.blue}">${fmtNum(item.tickets || 0)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>`;
       }).join("")}
-      <path d="${linePath}" fill="none" stroke="#17845f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
-      ${linePoints.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="4.5" fill="#17845f"></circle><text x="${point.x}" y="${Math.max(12, point.y - 10)}" text-anchor="middle" font-size="10" fill="#17845f">${(point.pct * 100).toFixed(0)}%</text>`).join("")}
+      <path d="${linePath}" fill="none" stroke="${VISUAL_THEME.green}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+      ${linePoints.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="4.5" fill="${VISUAL_THEME.green}"></circle><text x="${point.x}" y="${Math.max(12, point.y - 10)}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.green}">${(point.pct * 100).toFixed(0)}%</text>`).join("")}
     </svg>`;
 }
 
@@ -855,7 +878,7 @@ function renderDonut(container, rows, label) {
     container.innerHTML = `<div class="empty-state">No ${escHtml(label.toLowerCase())} data for this view.</div>`;
     return;
   }
-  const palette = ["#2563eb", "#17845f", "#c97a18", "#8b5cf6", "#cf4b3f", "#0f766e", "#64748b"];
+  const palette = [VISUAL_THEME.blue, VISUAL_THEME.green, VISUAL_THEME.amber, VISUAL_THEME.purple, VISUAL_THEME.red, VISUAL_THEME.teal, VISUAL_THEME.slate];
   const items = rows.slice(0, 5);
   const total = items.reduce((sum, row) => sum + Number(row.count || 0), 0) || 1;
   let current = 0;
@@ -871,10 +894,10 @@ function renderDonut(container, rows, label) {
   container.innerHTML = `
     <div class="donut-card">
       <svg viewBox="0 0 140 140" width="180" height="180" aria-label="${escHtml(label)} breakdown">
-        <circle cx="70" cy="70" r="${radius}" fill="none" stroke="#e5edf5" stroke-width="18"></circle>
+        <circle cx="70" cy="70" r="${radius}" fill="none" stroke="${VISUAL_THEME.donutTrack}" stroke-width="18"></circle>
         ${arcs}
-        <text x="70" y="64" text-anchor="middle" font-size="11" fill="#64748b">${escHtml(label)}</text>
-        <text x="70" y="82" text-anchor="middle" font-size="18" font-weight="800" fill="#12233a">${fmtNum(total)}</text>
+        <text x="70" y="64" text-anchor="middle" font-size="11" fill="${VISUAL_THEME.muted}">${escHtml(label)}</text>
+        <text x="70" y="82" text-anchor="middle" font-size="18" font-weight="800" fill="${VISUAL_THEME.text}">${fmtNum(total)}</text>
       </svg>
       <div class="donut-legend">
         ${items.map((row, index) => `<div class="donut-legend-item"><span class="donut-swatch" style="background:${palette[index % palette.length]}"></span><span>${escHtml(formatBotActionLabel(row.label || "Unknown"))}</span><strong>${fmtPct(row.share)}</strong></div>`).join("")}
@@ -1144,7 +1167,7 @@ async function openIssueDrilldown(issueId) {
     const payload = await response.json();
     const issue = payload.issue || {};
     els.drilldownTitle.textContent = issue.fault_code_level_2 || "Issue detail";
-    els.drilldownSubtitle.textContent = `${issue.product_name || "Other"} · ${issue.executive_fault_code || "Blank"} · ${issue.fault_code_level_1 || "Unclassified"}`;
+    els.drilldownSubtitle.textContent = `${issue.product_name || "Other"} · ${issue.executive_fault_code || "Others"} · ${issue.fault_code_level_1 || "Unclassified"}`;
     state.currentDrilldown = payload.drilldown || {};
     renderDrilldownPanels(state.currentDrilldown);
   } catch (error) {
@@ -1176,7 +1199,7 @@ function renderDrilldownPanels(drilldown) {
     </section>
     <section class="drilldown-section">
       <div class="drilldown-kpi-rail">
-        ${renderInsightCard("Top EFC", ((drilldown.efcs || [])[0]?.label || "Blank"), ((drilldown.efcs || [])[0]?.tickets || 0))}
+        ${renderInsightCard("Top EFC", ((drilldown.efcs || [])[0]?.label || "Others"), ((drilldown.efcs || [])[0]?.tickets || 0))}
         ${renderInsightCard("Top resolution", ((drilldown.resolutions || [])[0]?.label || "Unknown"), ((drilldown.resolutions || [])[0]?.tickets || 0))}
         ${renderInsightCard("Top bot action", formatBotActionLabel((drilldown.bot_actions || [])[0]?.label || "No bot action"), ((drilldown.bot_actions || [])[0]?.tickets || 0))}
       </div>
@@ -1242,7 +1265,7 @@ function renderCategoryDrilldownPanels(drilldown) {
     </section>
     <section class="drilldown-section">
       <div class="drilldown-kpi-rail">
-        ${renderInsightCard("Top EFC", ((drilldown.efcs || [])[0]?.label || "Blank"), ((drilldown.efcs || [])[0]?.tickets || 0))}
+        ${renderInsightCard("Top EFC", ((drilldown.efcs || [])[0]?.label || "Others"), ((drilldown.efcs || [])[0]?.tickets || 0))}
         ${renderInsightCard("Top resolution", ((drilldown.resolutions || [])[0]?.label || "Unknown"), ((drilldown.resolutions || [])[0]?.tickets || 0))}
         ${renderInsightCard("Top bot action", formatBotActionLabel((drilldown.bot_actions || [])[0]?.label || "No bot action"), ((drilldown.bot_actions || [])[0]?.tickets || 0))}
       </div>
@@ -1429,7 +1452,7 @@ function getBucketDescriptor(value, mode) {
 }
 
 function buildFaultKey(efc, fc2) {
-  return `${String(efc || "Blank")}||${String(fc2 || "")}`;
+  return `${String(efc || "Others")}||${String(fc2 || "")}`;
 }
 
 function faultPrimaryLabel(fault) {
@@ -1459,7 +1482,7 @@ function renderCategoryProductTrendTable(model) {
               <td class="heatmap-row-label">${escHtml(row.product_name)}</td>
               ${row.cells.map((cell) => `
                 <td>
-                  <div class="heat-cell" style="background: rgba(30, 91, 184, ${0.08 + cell.intensity * 0.46})">
+                  <div class="heat-cell" style="background: rgba(77, 142, 244, ${0.12 + cell.intensity * 0.42})">
                     ${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}
                   </div>
                 </td>
@@ -1504,7 +1527,7 @@ function renderCategoryFaultMatrices(model) {
                     </td>
                     ${fault.cells.map((cell) => `
                       <td>
-                        <div class="heat-cell issue" style="background: rgba(23, 122, 98, ${0.08 + cell.intensity * 0.48})">
+                        <div class="heat-cell issue" style="background: rgba(30, 197, 90, ${0.10 + cell.intensity * 0.38})">
                           ${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}
                         </div>
                       </td>
@@ -1572,7 +1595,7 @@ function renderMiniChartSvg(points) {
   return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:220px">
     ${[0, 0.5, 1].map((ratio) => {
       const y = pad.top + innerH - innerH * ratio;
-      return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="#e2e8f0"></line><text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#64748b">${fmtNum(Math.round(max * ratio))}</text>`;
+      return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line><text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(max * ratio))}</text>`;
     }).join("")}
     ${points.map((point, index) => {
     const step = innerW / Math.max(points.length, 1);
@@ -1580,7 +1603,7 @@ function renderMiniChartSvg(points) {
     const barH = (value / max) * innerH;
     const x = pad.left + step * index + (step - barW) / 2;
     const y = pad.top + innerH - barH;
-    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="6" fill="rgba(37,99,235,0.2)" stroke="rgba(37,99,235,0.45)"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="#2563eb">${fmtNum(value)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="#64748b">${escHtml(point.label)}</text>`;
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="6" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.blue}">${fmtNum(value)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>`;
   }).join("")}</svg>`;
 }
 
@@ -1621,20 +1644,20 @@ function renderBarChart(container, { points, color, yLabel }) {
       <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:290px">
       ${[0.25, 0.5, 0.75].map((ratio) => {
         const y = pad.top + innerH - innerH * ratio;
-        return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="#e2e8f0"></line>`;
+        return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line>`;
       }).join("")}
       ${[0, 0.5, 1].map((ratio) => {
         const y = pad.top + innerH - innerH * ratio;
-        return `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#64748b">${fmtNum(Math.round(max * ratio))}</text>`;
+        return `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(max * ratio))}</text>`;
       }).join("")}
       ${points.map((point, index) => {
         const value = Number(point.value || 0);
         const barH = (value / max) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${color}" opacity="0.78"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="${color}">${fmtNum(value)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="#64748b">${escHtml(point.label)}</text>`;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${color}" opacity="0.84"></rect><text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" font-size="10" fill="${color}">${fmtNum(value)}</text><text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>`;
       }).join("")}
-      <text x="12" y="${pad.top + 12}" font-size="11" fill="#64748b">${escHtml(yLabel)}</text>
+      <text x="12" y="${pad.top + 12}" font-size="11" fill="${VISUAL_THEME.muted}">${escHtml(yLabel)}</text>
     </svg>`;
 }
 
