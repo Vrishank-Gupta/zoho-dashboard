@@ -6,7 +6,7 @@
   <title>Qubo Support Board</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -58,30 +58,18 @@
 
     <section class="kpi-grid" id="kpiStrip"></section>
 
-    <section class="dashboard-grid dashboard-grid-wide">
-      <div class="panel">
-        <div class="panel-top">
-          <div>
-            <div class="section-label">Volume</div>
-            <h2 class="panel-title">Ticket volume trend</h2>
-          </div>
-          <div class="panel-actions">
-            <div class="segmented" id="timelineMetricTabs"></div>
-            <div class="segmented" id="timelineBucketTabs"></div>
-          </div>
+    <section class="panel">
+      <div class="panel-top">
+        <div>
+          <div class="section-label">Volume</div>
+          <h2 class="panel-title">Ticket volume trend</h2>
         </div>
-        <div class="chart-area" id="timelineChart"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-top">
-          <div>
-            <div class="section-label">Highlights</div>
-            <h2 class="panel-title">Needs attention</h2>
-          </div>
+        <div class="panel-actions">
+          <div class="segmented" id="timelineMetricTabs"></div>
+          <div class="segmented" id="timelineBucketTabs"></div>
         </div>
-        <div class="spotlight-list" id="spotlightCards"></div>
       </div>
+      <div class="chart-area" id="timelineChart"></div>
     </section>
 
     <section class="panel">
@@ -151,10 +139,6 @@
           <div>
             <div class="mini-title">Bot action</div>
             <div class="donut-host" id="botActionDonut"></div>
-          </div>
-          <div>
-            <div class="mini-title">Status</div>
-            <div class="donut-host" id="statusDonut"></div>
           </div>
           <div>
             <div class="mini-title">Support team</div>

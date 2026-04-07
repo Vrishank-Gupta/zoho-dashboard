@@ -130,6 +130,7 @@ class AnalyticsService:
         kpis = self._agg_kpis(current_daily_rows, previous_daily_rows)
         filter_options = self._agg_filter_options(option_daily_rows, self._agg_issues(option_issue_rows, []), min_date, max_date)
         pipeline_health = self._agg_pipeline_health(pipeline_rows)
+        freshness = self._build_freshness(max_date)
 
         return {
             "meta": {
@@ -139,11 +140,11 @@ class AnalyticsService:
                 "subtitle": "Executive view of ticket volume, installation tickets, issue concentration, and bot outcomes.",
                 "window_start": start_date.isoformat(),
                 "window_end": end_date.isoformat(),
+                "freshness": freshness,
             },
             "filters": asdict(filters),
             "filter_options": filter_options,
             "kpis": kpis,
-            "spotlight": self._spotlight_cards(category_health, issues, bot_rows),
             "timeline": self._agg_timeline(current_daily_rows),
             "category_health": category_health,
             "product_health": product_health,
@@ -173,7 +174,6 @@ class AnalyticsService:
             "installation_tickets": self._metric(current_counts["installation_field_tickets"], previous_counts["installation_field_tickets"]),
             "bot_resolved": self._metric(current_counts["bot_resolved_tickets"], previous_counts["bot_resolved_tickets"]),
             "repeat_tickets": self._metric(current_counts["repeat_tickets"], previous_counts["repeat_tickets"]),
-            "open_tickets": self._metric(self._open_ticket_count(current), self._open_ticket_count(previous)),
             "no_reopen_rate": self._metric_ratio(current_counts["fcr_tickets"], current_counts["tickets"], previous_counts["fcr_tickets"], previous_counts["tickets"]),
         }
 
@@ -207,7 +207,6 @@ class AnalyticsService:
                     "installation_rate": self._ratio(counts["installation_field_tickets"], counts["tickets"]),
                     "repeat_rate": self._ratio(counts["repeat_tickets"], counts["tickets"]),
                     "bot_resolved_rate": self._ratio(counts["bot_resolved_tickets"], counts["tickets"]),
-                    "open_rate": self._open_rate(category_rows),
                     "top_efc": max(efc_totals.items(), key=lambda item: item[1])[0] if efc_totals else "Blank",
                     "top_issue_detail": top_issue.get("fault_code_level_2") if top_issue else "Unclassified",
                 }
@@ -238,7 +237,6 @@ class AnalyticsService:
                     "installation_rate": self._ratio(counts["installation_field_tickets"], counts["tickets"]),
                     "repeat_rate": self._ratio(counts["repeat_tickets"], counts["tickets"]),
                     "bot_resolved_rate": self._ratio(counts["bot_resolved_tickets"], counts["tickets"]),
-                    "open_rate": self._open_rate(product_rows),
                     "top_efc": max(efc_totals.items(), key=lambda item: item[1])[0] if efc_totals else "Blank",
                     "top_issue_detail": top_issue.get("fault_code_level_2") if top_issue else "Unclassified",
                 }
@@ -294,7 +292,6 @@ class AnalyticsService:
             "department_mix": self._mix(rows, "department_name"),
             "channel_mix": self._mix(rows, "channel"),
             "bot_action_mix": self._mix(rows, "normalized_bot_action", exclude_labels={"No bot action"}),
-            "status_mix": self._mix(rows, "status"),
             "installation_mix": self._installation_mix(rows),
         }
 
@@ -433,19 +430,6 @@ class AnalyticsService:
             "fc2": ordered_counts(daily_rows, "fault_code_level_2"),
             "bot_actions": [label for label, _ in sorted(bot_action_counts.items(), key=lambda item: item[1], reverse=True)],
         }
-
-    def _spotlight_cards(self, categories: list[dict[str, Any]], issues: list[AggregateIssue], bot_rows: list[dict[str, Any]]) -> list[dict[str, str]]:
-        top_category = categories[0] if categories else None
-        top_installation = max(issues, key=lambda item: item.volume * item.installation_rate, default=None)
-        top_leak = max(issues, key=lambda item: item.volume * item.bot_transfer_rate, default=None)
-        items = []
-        if top_category:
-            items.append({"title": "Highest-volume category", "detail": f"{top_category['product_category']} carries {top_category['tickets']:,} tickets in the selected period."})
-        if top_installation:
-            items.append({"title": "Top installation issue", "detail": f"{top_installation.fault_code_level_2} in {top_installation.product_name} has the highest share of installation tickets at {top_installation.installation_rate:.1%}.", "issue_id": top_installation.issue_id})
-        if top_leak:
-            items.append({"title": "Largest bot transfer issue", "detail": f"{top_leak.fault_code_level_2} in {top_leak.product_name} transfers out of bot at {top_leak.bot_transfer_rate:.1%}.", "issue_id": top_leak.issue_id})
-        return items
 
     def _sum_counts(self, rows: list[dict[str, Any]]) -> dict[str, int]:
         keys = ("tickets", "field_visit_tickets", "repair_field_tickets", "installation_field_tickets", "bot_resolved_tickets", "bot_transferred_tickets", "blank_chat_tickets", "fcr_tickets", "repeat_tickets", "logistics_tickets")
@@ -591,6 +575,7 @@ class AnalyticsService:
                 "window_start": "",
                 "window_end": "",
                 "data_confidence_note": error,
+                "freshness": {"source_max_date": "", "clickhouse_max_date": "", "status": "Unavailable"},
             },
             "filters": asdict(filters),
             "filter_options": {"date_bounds": {"min": "", "max": ""}, "categories": [], "products": [], "products_by_category": {}, "departments": [], "channels": [], "efcs": [], "issue_details": [], "statuses": [], "fc1": [], "fc2": [], "bot_actions": []},
@@ -599,17 +584,30 @@ class AnalyticsService:
                 "installation_tickets": {"value": 0.0, "change": 0.0},
                 "bot_resolved": {"value": 0.0, "change": 0.0},
                 "repeat_tickets": {"value": 0.0, "change": 0.0},
-                "open_tickets": {"value": 0.0, "change": 0.0},
                 "no_reopen_rate": {"value": 0.0, "change": 0.0},
             },
-            "spotlight": [],
             "timeline": [],
             "category_health": [],
             "product_health": [],
             "issue_views": {"highest_volume": [], "installation_tickets": [], "repeat_heavy": [], "bot_leakage": []},
-            "service_ops": {"category_mix": [], "department_mix": [], "channel_mix": [], "bot_action_mix": [], "status_mix": [], "installation_mix": []},
+            "service_ops": {"category_mix": [], "department_mix": [], "channel_mix": [], "bot_action_mix": [], "installation_mix": []},
             "bot_summary": {"overview": {}, "by_product": [], "best_issues": [], "leaky_issues": []},
             "pipeline_health": {"status": "Unavailable", "last_run_at": "Unknown", "duration_minutes": 0, "rows_fetched": 0, "rows_inserted": 0, "recent_runs": []},
+        }
+
+    def _build_freshness(self, clickhouse_max_date: date | None) -> dict[str, str]:
+        source_max = None
+        try:
+            source_max = self._repository.fetch_source_max_created_time()
+        except Exception:
+            source_max = None
+        source_max_date = source_max.date().isoformat() if source_max else ""
+        clickhouse_date = clickhouse_max_date.isoformat() if clickhouse_max_date else ""
+        status = "In sync" if source_max_date and clickhouse_date and source_max_date == clickhouse_date else "Source ahead" if source_max_date and clickhouse_date and source_max_date > clickhouse_date else "Unavailable"
+        return {
+            "source_max_date": source_max_date,
+            "clickhouse_max_date": clickhouse_date,
+            "status": status,
         }
 
     def _resolve_window(self, filters: DashboardFilters, min_date: date | None, max_date: date | None) -> tuple[date, date]:

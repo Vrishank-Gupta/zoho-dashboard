@@ -23,7 +23,6 @@ const KPI_CONFIG = [
   { key: "installation_tickets", label: "Installation tickets", format: "number", lowerIsBetter: false },
   { key: "bot_resolved", label: "Bot resolved", format: "number", lowerIsBetter: false },
   { key: "repeat_tickets", label: "Repeat tickets", format: "number", lowerIsBetter: true },
-  { key: "open_tickets", label: "Open tickets", format: "number", lowerIsBetter: true },
   { key: "no_reopen_rate", label: "No-reopen rate", format: "percent", lowerIsBetter: false },
 ];
 
@@ -33,7 +32,6 @@ const CONTROLS = [
   { key: "efcs", label: "EFC", optionsKey: "efcs" },
   { key: "departments", label: "Support team", optionsKey: "departments" },
   { key: "channels", label: "Channel", optionsKey: "channels" },
-  { key: "statuses", label: "Status", optionsKey: "statuses" },
   { key: "bot_actions", label: "Bot action", optionsKey: "bot_actions" },
   { key: "include_fc1", label: "FC1 include", optionsKey: "fc1", oppositeKey: "exclude_fc1" },
   { key: "exclude_fc1", label: "FC1 exclude", optionsKey: "fc1", oppositeKey: "include_fc1" },
@@ -60,8 +58,8 @@ const PRODUCT_VIEWS = [
 const PRODUCT_SORTS = [
   { key: "tickets", label: "Volume" },
   { key: "installation_rate", label: "Installation %" },
-  { key: "open_rate", label: "Open %" },
   { key: "bot_resolved_rate", label: "Bot resolved %" },
+  { key: "repeat_rate", label: "Repeat %" },
 ];
 
 const TIMELINE_METRICS = [
@@ -117,7 +115,6 @@ const els = {
   resetFilters: document.getElementById("resetFilters"),
   kpiStrip: document.getElementById("kpiStrip"),
   timelineChart: document.getElementById("timelineChart"),
-  spotlightCards: document.getElementById("spotlightCards"),
   productHealthTable: document.getElementById("productHealthTable"),
   issueBoard: document.getElementById("issueBoard"),
   botOverview: document.getElementById("botOverview"),
@@ -127,7 +124,6 @@ const els = {
   categoryDonut: document.getElementById("categoryDonut"),
   channelDonut: document.getElementById("channelDonut"),
   botActionDonut: document.getElementById("botActionDonut"),
-  statusDonut: document.getElementById("statusDonut"),
   departmentMix: document.getElementById("departmentMix"),
   installationMix: document.getElementById("installationMix"),
   pipelineHealth: document.getElementById("pipelineHealth"),
@@ -272,16 +268,27 @@ function renderDashboard(payload) {
   els.sourceBadge.textContent = meta.source_mode === "clickhouse" ? "Live data" : "Sample data";
   els.sourceBadge.className = `status-badge ${meta.source_mode === "clickhouse" ? "live" : "warn"}`;
   els.lastUpdated.textContent = `Last refresh: ${fmtDateTime(pipeline.last_run_at || meta.window_end || "")}`;
+  const freshness = meta.freshness || {};
+  const freshnessText = freshness.source_max_date && freshness.clickhouse_max_date
+    ? `Source max date: ${prettyIsoDate(freshness.source_max_date)} | ClickHouse max date: ${prettyIsoDate(freshness.clickhouse_max_date)} | Status: ${freshness.status || "Unavailable"}`
+    : "";
+  if (freshnessText) {
+    els.lastUpdated.title = freshnessText;
+    els.lastUpdated.setAttribute("aria-label", freshnessText);
+    els.lastUpdated.dataset.syncStatus = freshness.status || "";
+  } else {
+    els.lastUpdated.title = "";
+    els.lastUpdated.removeAttribute("aria-label");
+    delete els.lastUpdated.dataset.syncStatus;
+  }
   renderKpis(payload.kpis || {});
   renderTimeline(payload.timeline || []);
-  renderSpotlight(payload.spotlight || []);
   renderProductHealth();
   renderIssueBoard(payload.issue_views || {});
   renderBotSummary(payload.bot_summary || {});
   renderDonut(els.categoryDonut, payload.service_ops?.category_mix || [], "Category");
   renderDonut(els.channelDonut, payload.service_ops?.channel_mix || [], "Channel");
   renderDonut(els.botActionDonut, payload.service_ops?.bot_action_mix || [], "Bot action");
-  renderDonut(els.statusDonut, payload.service_ops?.status_mix || [], "Status");
   renderMixList(els.departmentMix, payload.service_ops?.department_mix || []);
   renderMixList(els.installationMix, payload.service_ops?.installation_mix || []);
   renderPipeline(pipeline);
@@ -449,14 +456,6 @@ function renderTimeline(points) {
   });
 }
 
-function renderSpotlight(items) {
-  els.spotlightCards.innerHTML = items.length ? items.map((item) => `
-    <div class="spotlight-card">
-      <h3>${escHtml(item.title)}</h3>
-      <p>${escHtml(item.detail)}</p>
-    </div>`).join("") : '<div class="empty-state">No highlights in the selected range.</div>';
-}
-
 function renderProductHealth() {
   const payload = state.payload || {};
   const rows = state.productView === "category" ? [...(payload.category_health || [])] : [...(payload.product_health || [])];
@@ -480,7 +479,6 @@ function renderProductHealth() {
       <td class="num">${fmtPct(row.installation_rate)}</td>
       <td class="num">${fmtPct(row.repeat_rate)}</td>
       <td class="num">${fmtPct(row.bot_resolved_rate)}</td>
-      <td class="num">${fmtPct(row.open_rate)}</td>
       <td><span class="metric-pill">${escHtml(row.top_efc || "Blank")}</span></td>
     </tr>`).join("");
 
@@ -494,7 +492,6 @@ function renderProductHealth() {
           <th class="num">Installation %</th>
           <th class="num">Repeat %</th>
           <th class="num">Bot resolved %</th>
-          <th class="num">Open %</th>
           <th>Top EFC</th>
         </tr>
       </thead>
@@ -759,7 +756,7 @@ function renderDrilldownPanels(drilldown) {
         ${renderMiniStat("Tickets", summary.tickets || 0)}
         ${renderMiniStat("Installation", ratio(summary.installation_tickets, summary.tickets), true)}
         ${renderMiniStat("Bot resolved", ratio(summary.bot_resolved_tickets, summary.tickets), true)}
-        ${renderMiniStat("Open", ratio(summary.open_tickets, summary.tickets), true)}
+        ${renderMiniStat("Blank chat", ratio(summary.blank_chat_tickets, summary.tickets), true)}
       </div>
       <div class="mini-panel"><h3>Trend</h3>${renderMiniChartSvg(timeline)}</div>
       <div class="mini-panel"><h3>Issue distribution</h3>${renderMiniTable(drilldown.issue_matrix || [], [
@@ -772,7 +769,6 @@ function renderDrilldownPanels(drilldown) {
     <div class="drilldown-stack">
       <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
       <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
-      <div class="mini-panel"><h3>Status summary</h3>${renderMiniBars(drilldown.statuses || [])}</div>
       <div class="mini-panel"><h3>Issue buckets</h3>${renderMiniBars(drilldown.efcs || drilldown.fc1 || drilldown.fc2 || [])}</div>
     </div>`;
 }
@@ -792,7 +788,7 @@ function renderCategoryDrilldownPanels(drilldown) {
         ${renderMiniStat("Tickets", summary.tickets || 0)}
         ${renderMiniStat("Installation", ratio(summary.installation_tickets, summary.tickets), true)}
         ${renderMiniStat("Bot resolved", ratio(summary.bot_resolved_tickets, summary.tickets), true)}
-        ${renderMiniStat("Open", ratio(summary.open_tickets, summary.tickets), true)}
+        ${renderMiniStat("Blank chat", ratio(summary.blank_chat_tickets, summary.tickets), true)}
       </div>
       <div class="mini-panel"><h3>Category trend</h3>${renderMiniChartSvg(timeline)}</div>
       <div class="mini-panel"><h3>Products in category</h3>${renderMiniTable(drilldown.products || [], [
@@ -800,7 +796,7 @@ function renderCategoryDrilldownPanels(drilldown) {
         { key: "tickets", label: "Tickets", format: "number" },
         { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
         { key: "bot_resolved_tickets", label: "Bot resolved", format: "percentOfTickets" },
-        { key: "open_tickets", label: "Open", format: "percentOfTickets" },
+        { key: "blank_chat_tickets", label: "Blank chat", format: "percentOfTickets" },
       ])}</div>
       <div class="mini-panel"><h3>Issue hotspots</h3>${renderMiniTable(drilldown.issues || [], [
         { key: "executive_fault_code", label: "EFC" },
@@ -818,7 +814,6 @@ function renderCategoryDrilldownPanels(drilldown) {
       ])}</div>
       <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
       <div class="mini-panel"><h3>EFC summary</h3>${renderMiniBars(drilldown.efcs || [])}</div>
-      <div class="mini-panel"><h3>Status summary</h3>${renderMiniBars(drilldown.statuses || [])}</div>
     </div>`;
 }
 
@@ -1036,7 +1031,6 @@ function renderLoading() {
   [
     els.kpiStrip,
     els.timelineChart,
-    els.spotlightCards,
     els.productHealthTable,
     els.issueBoard,
     els.botOverview,
@@ -1046,7 +1040,6 @@ function renderLoading() {
     els.categoryDonut,
     els.channelDonut,
     els.botActionDonut,
-    els.statusDonut,
     els.departmentMix,
     els.installationMix,
     els.pipelineHealth,
@@ -1062,7 +1055,6 @@ function renderError(error) {
   [
     els.kpiStrip,
     els.timelineChart,
-    els.spotlightCards,
     els.productHealthTable,
     els.issueBoard,
     els.botOverview,
@@ -1072,7 +1064,6 @@ function renderError(error) {
     els.categoryDonut,
     els.channelDonut,
     els.botActionDonut,
-    els.statusDonut,
     els.departmentMix,
     els.installationMix,
     els.pipelineHealth,
@@ -1158,6 +1149,12 @@ function formatBotActionLabel(value) {
   if (value === "No bot action") return "No recorded bot action";
   if (value === "Other bot/system action") return "Other unmapped bot/system action";
   return value;
+}
+
+function prettyIsoDate(value) {
+  const date = toDate(value);
+  if (!date) return value || "";
+  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 function formatOptionLabel(control, value) {

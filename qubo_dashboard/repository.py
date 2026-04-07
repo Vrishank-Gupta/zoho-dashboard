@@ -77,6 +77,28 @@ class TicketRepository:
             },
         }
 
+    def fetch_source_max_created_time(self) -> datetime | None:
+        if not settings.has_zoho_database:
+            return None
+        import mysql.connector
+
+        connection = mysql.connector.connect(
+            host=settings.zoho_db.host,
+            port=settings.zoho_db.port,
+            user=settings.zoho_db.user,
+            password=settings.zoho_db.password,
+            database=settings.zoho_db.database,
+        )
+        try:
+            self._set_zoho_session(connection)
+            cursor = connection.cursor()
+            cursor.execute(f"SELECT MAX(Created_Time) FROM {settings.zoho_ticket_table}")
+            row = cursor.fetchone()
+            cursor.close()
+            return parse_datetime(row[0] if row else None)
+        finally:
+            connection.close()
+
     def _fetch_zoho_mysql(self) -> list[TicketRecord]:
         import mysql.connector
 
