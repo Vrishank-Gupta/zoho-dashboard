@@ -321,10 +321,10 @@ function renderFilterControls() {
   const renderControls = (controls) => controls.map((control) => {
     const options = getControlOptions(control);
     const selected = state.filters[control.key] || [];
-    const summary = summarizeSelection(options, selected);
+    const summary = summarizeSelection(control, options, selected);
     const search = state.searches[control.key] || "";
     const blocked = new Set(control.oppositeKey ? (state.filters[control.oppositeKey] || []) : []);
-    const visible = options.filter((item) => !blocked.has(item.label) && item.label.toLowerCase().includes(search.toLowerCase()));
+    const visible = options.filter((item) => !blocked.has(item.label) && formatOptionLabel(control, item.label).toLowerCase().includes(search.toLowerCase()));
     return `
       <div class="filter-control ${state.openFilter === control.key ? "open" : ""}">
         <div class="control-label">${escHtml(control.label)}</div>
@@ -344,7 +344,7 @@ function renderFilterControls() {
             ${visible.length ? visible.map((item) => `
               <label class="option-item">
                 <input type="checkbox" data-filter-option="${escHtml(control.key)}" value="${escHtml(item.label)}" ${selected.includes(item.label) ? "checked" : ""}>
-                <span>${escHtml(item.label)}</span>
+                <span>${escHtml(formatOptionLabel(control, item.label))}</span>
                 <span class="option-count">${fmtNum(item.count)}</span>
               </label>`).join("") : '<div class="empty-state">No values match the current search.</div>'}
           </div>
@@ -392,7 +392,7 @@ function renderActiveChips() {
     (state.filters[control.key] || []).forEach((value) => {
       chips.push(`
         <span class="chip ${control.key.startsWith("exclude_") ? "exclude" : ""}">
-          ${escHtml(`${control.label}: ${value}`)}
+          ${escHtml(`${control.label}: ${formatOptionLabel(control, value)}`)}
           <button class="chip-remove" type="button" data-remove-chip="${escHtml(control.key)}" data-value="${escHtml(value)}">×</button>
         </span>`);
     });
@@ -893,10 +893,10 @@ function getControlOptions(control) {
   return raw.map((label, index) => ({ label, count: raw.length - index }));
 }
 
-function summarizeSelection(options, selected) {
+function summarizeSelection(control, options, selected) {
   if (!selected.length) return { main: "All selected", count: options.length ? `${options.length}` : "" };
-  if (selected.length === 1) return { main: selected[0], count: "1 selected" };
-  return { main: selected[0], count: `+${selected.length - 1} more` };
+  if (selected.length === 1) return { main: formatOptionLabel(control, selected[0]), count: "1 selected" };
+  return { main: formatOptionLabel(control, selected[0]), count: `+${selected.length - 1} more` };
 }
 
 function toggleFilterValue(key, value, checked) {
@@ -1068,5 +1068,13 @@ function escHtml(value) {
 function formatBotActionLabel(value) {
   if (value === "No bot action") return "No recorded bot action";
   if (value === "Other bot/system action") return "Other unmapped bot/system action";
+  return value;
+}
+
+function formatOptionLabel(control, value) {
+  if (!value) return "Unknown";
+  if (control.optionsKey === "bot_actions" || control.key.includes("bot_action")) {
+    return formatBotActionLabel(value);
+  }
   return value;
 }
