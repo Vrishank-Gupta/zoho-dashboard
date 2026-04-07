@@ -107,6 +107,8 @@ const state = {
   mappingDraft: { product_category_overrides: {}, efc_overrides: {} },
   mappingSearches: { global: "", products: "", fc2: "" },
   mappingShowOverriddenOnly: loadSessionJson("quboMappingShowOverriddenOnly", false),
+  mappingStudioData: null,
+  mappingStudioLoading: false,
   issueWidgetFilters: { categories: [], products: [] },
   issueWidgetOpenFilter: null,
   categoryDrilldownBucket: "auto",
@@ -273,31 +275,33 @@ function bindEvents() {
   document.getElementById("closeDrilldown").addEventListener("click", closeDrilldown);
   els.mappingProductSearch?.addEventListener("input", () => {
     state.mappingSearches.products = els.mappingProductSearch.value;
-    renderMappingStudio(state.payload?.mapping_studio || {});
+    renderMappingStudio(state.mappingStudioData || {});
   });
   els.mappingFc2Search?.addEventListener("input", () => {
     state.mappingSearches.fc2 = els.mappingFc2Search.value;
-    renderMappingStudio(state.payload?.mapping_studio || {});
+    renderMappingStudio(state.mappingStudioData || {});
   });
   els.mappingGlobalSearch?.addEventListener("input", () => {
     state.mappingSearches.global = els.mappingGlobalSearch.value;
-    renderMappingStudio(state.payload?.mapping_studio || {});
+    renderMappingStudio(state.mappingStudioData || {});
   });
   els.mappingShowOverriddenOnly?.addEventListener("change", () => {
     state.mappingShowOverriddenOnly = Boolean(els.mappingShowOverriddenOnly.checked);
     saveSessionJson("quboMappingShowOverriddenOnly", state.mappingShowOverriddenOnly);
-    renderMappingStudio(state.payload?.mapping_studio || {});
+    renderMappingStudio(state.mappingStudioData || {});
   });
   els.applyMappingOverrides?.addEventListener("click", () => {
     state.mappingOverrides = normalizeMappingOverrides(state.mappingDraft);
     saveSessionJson("quboMappingOverrides", state.mappingOverrides);
+    state.mappingStudioData = null;
     loadDashboard();
   });
   els.resetMappingOverrides?.addEventListener("click", () => {
     state.mappingOverrides = { product_category_overrides: {}, efc_overrides: {} };
     state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
     saveSessionJson("quboMappingOverrides", state.mappingOverrides);
-    renderMappingStudio(state.payload?.mapping_studio || {});
+    state.mappingStudioData = null;
+    renderMappingStudio(state.mappingStudioData || {});
     loadDashboard();
   });
   els.exportMappingOverrides?.addEventListener("click", exportMappingOverrides);
@@ -311,6 +315,7 @@ async function loadDashboard() {
     if (!response.ok) throw new Error(`API ${response.status}`);
     const payload = await response.json();
     state.payload = payload;
+    state.mappingStudioData = null;
     state.options = payload.filter_options || {};
     applyDefaultSelections();
     reconcileFilterState();
@@ -370,7 +375,6 @@ function renderDashboard(payload) {
   renderMixList(els.departmentMix, payload.service_ops?.department_mix || []);
   renderMixList(els.installationMix, payload.service_ops?.installation_mix || []);
   renderPipeline(pipeline);
-  renderMappingStudio(payload.mapping_studio || {});
   renderActiveView();
 }
 
@@ -864,16 +868,33 @@ function renderActiveView() {
   const mappingOpen = state.activeView === "mapping";
   dashboardPanels.forEach((panel) => panel.classList.toggle("hidden", mappingOpen));
   els.mappingStudioView?.classList.toggle("hidden", !mappingOpen);
+  if (mappingOpen) {
+    if (state.mappingStudioData) renderMappingStudio(state.mappingStudioData);
+    else if (!state.mappingStudioLoading) loadMappingStudio();
+  }
 }
 
 function renderMappingStudio(mappingStudio) {
+  if (state.mappingStudioLoading && !mappingStudio?.product_rows && !mappingStudio?.fc2_rows) {
+    els.mappingStudioSummary.innerHTML = '<div class="mapping-banner">Loading mapping studio…</div>';
+    els.mappingProductTable.innerHTML = '<div class="empty-state">Loading product mapping…</div>';
+    els.mappingFc2Table.innerHTML = '<div class="empty-state">Loading FC2 to EFC mapping…</div>';
+    return;
+  }
   state.mappingDraft = mergeDraftWithPayload(state.mappingDraft, mappingStudio);
   const active = mappingStudio.active_overrides || {};
   if (els.mappingGlobalSearch) els.mappingGlobalSearch.value = state.mappingSearches.global || "";
   if (els.mappingShowOverriddenOnly) els.mappingShowOverriddenOnly.checked = !!state.mappingShowOverriddenOnly;
   els.mappingStudioSummary.innerHTML = `
-    <div class="mapping-note">Workbook mapping is treated as the base. Session overrides live only in this browser tab and are sent with dashboard requests.</div>
-    <div class="mapping-note"><strong>${fmtNum(active.products || 0)}</strong> product overrides active · <strong>${fmtNum(active.efcs || 0)}</strong> FC2 overrides active</div>
+    <div class="mapping-banner">Workbook mapping stays as the base. Edits here are session-only and affect only your current analysis.</div>
+    <div class="mapping-stat">
+      <span class="mapping-stat-value">${fmtNum(active.products || 0)}</span>
+      <span class="mapping-stat-label">Product overrides</span>
+    </div>
+    <div class="mapping-stat">
+      <span class="mapping-stat-value">${fmtNum(active.efcs || 0)}</span>
+      <span class="mapping-stat-label">FC2 overrides</span>
+    </div>
   `;
 
   const globalSearch = (state.mappingSearches.global || "").toLowerCase();
@@ -952,7 +973,7 @@ function renderMappingTable({ rows, idKey, valueKey, selectKey, labelColumns, va
   if (!rows.length) return '<div class="empty-state">No rows available for the current selection.</div>';
   return `
     <div class="mini-table-wrap mapping-table-wrap">
-      <table class="mini-table mapping-table">
+        <table class="mini-table mapping-table mapping-table-fixed">
         <thead>
           <tr>
             ${labelColumns.map((column) => `<th>${escHtml(column.label)}</th>`).join("")}
@@ -982,7 +1003,26 @@ function renderMappingTable({ rows, idKey, valueKey, selectKey, labelColumns, va
           }).join("")}
         </tbody>
       </table>
-    </div>`;
+      </div>`;
+}
+
+async function loadMappingStudio() {
+  state.mappingStudioLoading = true;
+  renderMappingStudio(state.mappingStudioData || {});
+  try {
+    const params = buildQueryParams(state.filters);
+    const response = await fetch(`${apiUrl("/api/mapping-studio")}?${params.toString()}`);
+    if (!response.ok) throw new Error(`API ${response.status}`);
+    const payload = await response.json();
+    state.mappingStudioData = payload.mapping_studio || {};
+    renderMappingStudio(state.mappingStudioData);
+  } catch (error) {
+    els.mappingStudioSummary.innerHTML = `<div class="error-state">${escHtml(error.message || "Failed to load mapping studio.")}</div>`;
+    els.mappingProductTable.innerHTML = '<div class="error-state">Could not load product mapping.</div>';
+    els.mappingFc2Table.innerHTML = '<div class="error-state">Could not load FC2 to EFC mapping.</div>';
+  } finally {
+    state.mappingStudioLoading = false;
+  }
 }
 
 async function runPipeline() {
@@ -1068,26 +1108,38 @@ function renderDrilldownPanels(drilldown) {
     repeat_tickets: 0,
   })), "weekly");
   els.drilldownBody.innerHTML = `
-    <div class="drilldown-stack">
+    <section class="drilldown-section">
       <div class="mini-summary-grid">
         ${renderMiniStat("Tickets", summary.tickets || 0)}
         ${renderMiniStat("Installation", ratio(summary.installation_tickets, summary.tickets), true)}
         ${renderMiniStat("Bot resolved", ratio(summary.bot_resolved_tickets, summary.tickets), true)}
         ${renderMiniStat("Blank chat", ratio(summary.blank_chat_tickets, summary.tickets), true)}
       </div>
-      <div class="mini-panel"><h3>Trend</h3>${renderMiniChartSvg(timeline)}</div>
-      <div class="mini-panel"><h3>Issue distribution</h3>${renderMiniTable(drilldown.issue_matrix || [], [
+    </section>
+    <section class="drilldown-section">
+      <div class="analysis-panel-head">
+        <div>
+          <h3 class="drilldown-section-title">Trend</h3>
+          <div class="analysis-caption">Volume movement across the selected period.</div>
+        </div>
+      </div>
+      <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline)}</div>
+    </section>
+    <section class="drilldown-section">
+      <div class="drilldown-two-col">
+        <div class="mini-panel"><h3>Issue distribution</h3>${renderMiniTable(drilldown.issue_matrix || [], [
         { key: "executive_fault_code", label: "EFC" },
         { key: "issue_detail", label: "FC2" },
         { key: "tickets", label: "Tickets", format: "number" },
         { key: "bot_resolved_tickets", label: "Bot resolved", format: "number" },
       ])}</div>
-    </div>
-    <div class="drilldown-stack">
-      <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
-      <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
-      <div class="mini-panel"><h3>Issue buckets</h3>${renderMiniBars(drilldown.efcs || drilldown.fc1 || drilldown.fc2 || [])}</div>
-    </div>`;
+        <div class="drilldown-stack">
+          <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
+          <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
+          <div class="mini-panel"><h3>Issue buckets</h3>${renderMiniBars(drilldown.efcs || drilldown.fc1 || drilldown.fc2 || [])}</div>
+        </div>
+      </div>
+    </section>`;
 }
 
 function renderCategoryDrilldownPanels(drilldown) {
@@ -1102,28 +1154,38 @@ function renderCategoryDrilldownPanels(drilldown) {
   const productTrend = buildCategoryProductTrendModel(drilldown.product_daily || [], state.categoryDrilldownBucket);
   const faultMatrices = buildCategoryFaultMatrixModel(drilldown.product_fault_daily || [], state.categoryDrilldownBucket);
   els.drilldownBody.innerHTML = `
-    <div class="drilldown-stack">
+    <section class="drilldown-section">
       <div class="mini-summary-grid">
         ${renderMiniStat("Tickets", summary.tickets || 0)}
         ${renderMiniStat("Installation", ratio(summary.installation_tickets, summary.tickets), true)}
         ${renderMiniStat("Bot resolved", ratio(summary.bot_resolved_tickets, summary.tickets), true)}
         ${renderMiniStat("Blank chat", ratio(summary.blank_chat_tickets, summary.tickets), true)}
       </div>
-      <div class="mini-panel"><h3>Category trend</h3>${renderMiniChartSvg(timeline)}</div>
-      <div class="mini-panel"><h3>Products in category</h3>${renderMiniTable(drilldown.products || [], [
+    </section>
+    <section class="drilldown-section">
+      <div class="analysis-panel-head">
+        <div>
+          <h3 class="drilldown-section-title">Category overview</h3>
+          <div class="analysis-caption">Start with the category trend, then compare products and issue hotspots within it.</div>
+        </div>
+      </div>
+      <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline)}</div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel"><h3>Products in category</h3>${renderMiniTable(drilldown.products || [], [
         { key: "label", label: "Product" },
         { key: "tickets", label: "Tickets", format: "number" },
         { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
         { key: "bot_resolved_tickets", label: "Bot resolved", format: "percentOfTickets" },
         { key: "blank_chat_tickets", label: "Blank chat", format: "percentOfTickets" },
       ])}</div>
-      <div class="mini-panel"><h3>Issue hotspots</h3>${renderMiniTable(drilldown.issues || [], [
+        <div class="mini-panel"><h3>Issue hotspots</h3>${renderMiniTable(drilldown.issues || [], [
         { key: "executive_fault_code", label: "EFC" },
         { key: "label", label: "FC2" },
         { key: "tickets", label: "Tickets", format: "number" },
         { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
       ])}</div>
-    </div>
+      </div>
+    </section>
     <div class="mini-panel analysis-panel">
       <div class="analysis-panel-head">
         <div>
@@ -1146,16 +1208,26 @@ function renderCategoryDrilldownPanels(drilldown) {
       </div>
       ${renderCategoryFaultMatrices(faultMatrices)}
     </div>
-    <div class="drilldown-stack">
-      <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
-      <div class="mini-panel"><h3>Resolution by product</h3>${renderMiniTable(drilldown.resolution_by_product || [], [
+    <section class="drilldown-section">
+      <div class="analysis-panel-head">
+        <div>
+          <h3 class="drilldown-section-title">Operational context</h3>
+          <div class="analysis-caption">Use this to understand what customers were told and how bot journeys split inside the category.</div>
+        </div>
+      </div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
+        <div class="mini-panel"><h3>Resolution by product</h3>${renderMiniTable(drilldown.resolution_by_product || [], [
         { key: "product_name", label: "Product" },
         { key: "resolution", label: "Resolution" },
         { key: "tickets", label: "Tickets", format: "number" },
       ])}</div>
-      <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
-      <div class="mini-panel"><h3>EFC summary</h3>${renderMiniBars(drilldown.efcs || [])}</div>
-    </div>`;
+      </div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
+        <div class="mini-panel"><h3>EFC summary</h3>${renderMiniBars(drilldown.efcs || [])}</div>
+      </div>
+    </section>`;
   els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
     button.addEventListener("click", () => {
       state.categoryDrilldownBucket = button.dataset.categoryBucket || "auto";

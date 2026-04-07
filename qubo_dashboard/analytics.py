@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -170,7 +170,56 @@ class AnalyticsService:
             "service_ops": service_ops,
             "bot_summary": self._agg_bot_summary(bot_rows, issues),
             "pipeline_health": pipeline_health,
-            "mapping_studio": self._build_mapping_studio(option_daily_rows, option_issue_rows, filters),
+        }
+
+    def get_mapping_studio(self, filters: DashboardFilters) -> dict[str, Any]:
+        if self._clickhouse and settings.analytics_backend == "clickhouse":
+            max_date = self._clickhouse.fetch_max_metric_date()
+            min_date = self._clickhouse.fetch_min_metric_date()
+            if not max_date or not min_date:
+                return {
+                    "mapping_studio": {
+                        "product_rows": [],
+                        "fc2_rows": [],
+                        "category_options": [],
+                        "efc_options": [],
+                        "active_overrides": {"products": 0, "efcs": 0},
+                    }
+                }
+            start_date, end_date = self._resolve_window(filters, min_date, max_date)
+            option_filters = replace(
+                filters,
+                products=[],
+                efcs=[],
+                departments=[],
+                channels=[],
+                bot_actions=[],
+                include_fc1=[],
+                exclude_fc1=[],
+                include_fc2=[],
+                exclude_fc2=[],
+                include_bot_action=[],
+                exclude_bot_action=[],
+            )
+            option_daily_rows = self._mapped_daily_rows(
+                self._clickhouse.fetch_daily_rows(start_date, end_date, option_filters),
+                option_filters,
+                apply_mapping_filters=False,
+            )
+            option_issue_rows = self._mapped_issue_rows(
+                self._clickhouse.fetch_issue_rows(start_date, end_date, option_filters),
+                option_filters,
+                apply_mapping_filters=False,
+            )
+            return {"mapping_studio": self._build_mapping_studio(option_daily_rows, option_issue_rows, filters)}
+        return {
+            "mapping_studio": {
+                "product_rows": [],
+                "fc2_rows": [],
+                "category_options": [],
+                "efc_options": [],
+                "active_overrides": {"products": 0, "efcs": 0},
+            }
         }
 
     def _find_issue(self, filters: DashboardFilters, issue_id: str) -> dict[str, Any] | None:

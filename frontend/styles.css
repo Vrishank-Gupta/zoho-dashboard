@@ -771,9 +771,9 @@ button { border: 0; background: none; cursor: pointer; }
 }
 
 .mapping-summary {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(280px, 1.8fr) repeat(2, minmax(170px, 0.6fr));
   gap: 12px;
-  flex-wrap: wrap;
   margin-bottom: 16px;
 }
 
@@ -786,13 +786,42 @@ button { border: 0; background: none; cursor: pointer; }
   flex-wrap: wrap;
 }
 
-.mapping-note {
+.mapping-note,
+.mapping-banner,
+.mapping-stat {
   padding: 10px 12px;
   border-radius: 12px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
+}
+
+.mapping-note,
+.mapping-banner {
   color: var(--muted);
   font-size: 13px;
+}
+
+.mapping-stat {
+  display: grid;
+  gap: 4px;
+  align-content: center;
+}
+
+.mapping-stat-value {
+  font-family: "Space Grotesk", "Manrope", sans-serif;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--text);
+}
+
+.mapping-stat-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .mapping-grid {
@@ -849,7 +878,7 @@ button { border: 0; background: none; cursor: pointer; }
 }
 
 .mapping-table-wrap {
-  max-height: 620px;
+  max-height: 68vh;
   overflow: auto;
 }
 
@@ -876,6 +905,35 @@ button { border: 0; background: none; cursor: pointer; }
 .mapping-revert:hover {
   border-color: var(--line-strong);
   color: var(--text);
+}
+
+.mapping-table-fixed {
+  table-layout: fixed;
+}
+
+.mapping-table-fixed th,
+.mapping-table-fixed td {
+  word-break: break-word;
+}
+
+.mapping-table-fixed td:first-child,
+.mapping-table-fixed th:first-child {
+  width: 34%;
+}
+
+.mapping-table-fixed td:nth-child(2),
+.mapping-table-fixed th:nth-child(2) {
+  width: 24%;
+}
+
+.mapping-table-fixed td:nth-child(3),
+.mapping-table-fixed th:nth-child(3) {
+  width: 26%;
+}
+
+.mapping-table .mapping-select {
+  width: 100%;
+  min-width: 0;
 }
 
 .modal-shell {
@@ -916,12 +974,32 @@ button { border: 0; background: none; cursor: pointer; }
 }
 
 .drilldown-grid {
-  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+  grid-template-columns: 1fr;
 }
 
 .drilldown-stack {
   display: grid;
   gap: 18px;
+}
+
+.drilldown-section {
+  display: grid;
+  gap: 14px;
+}
+
+.drilldown-section-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.drilldown-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.feature-panel {
+  padding: 18px;
 }
 
 .mini-bar-row { display: grid; gap: 4px; }
@@ -1123,6 +1201,11 @@ button { border: 0; background: none; cursor: pointer; }
   .fault-product-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .mapping-summary,
+  .drilldown-two-col {
+    grid-template-columns: 1fr;
   }
 
   .mapping-panel-head {
