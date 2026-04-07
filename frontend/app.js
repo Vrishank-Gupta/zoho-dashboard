@@ -320,11 +320,17 @@ function bindEvents() {
       return;
     }
 
-    if (!target.closest("[data-filter-panel]") && !target.closest("[data-widget-filter-panel]")) {
-      state.openFilter = null;
-      state.issueWidgetOpenFilter = null;
-      renderFilterControls();
-      renderIssueWidgetFilters();
+    const insideMainFilter = target.closest("[data-filter-panel]") || target.closest("[data-filter-trigger]");
+    const insideWidgetFilter = target.closest("[data-widget-filter-panel]") || target.closest("[data-widget-filter-trigger]");
+    if (!insideMainFilter || !insideWidgetFilter) {
+      if (!insideMainFilter) {
+        state.openFilter = null;
+        renderFilterControls();
+      }
+      if (!insideWidgetFilter) {
+        state.issueWidgetOpenFilter = null;
+        renderIssueWidgetFilters();
+      }
     }
   });
 
@@ -569,15 +575,21 @@ function renderFilterControls() {
 }
 
 function renderKpis(kpis) {
+  const totalTickets = Number(kpis.tickets?.value || 0);
   els.kpiStrip.innerHTML = KPI_CONFIG.map((config) => {
     const metric = kpis[config.key] || { value: 0, change: 0 };
+    const metricValue = Number(metric.value || 0);
     const delta = Number(metric.change || 0);
     const positive = config.lowerIsBetter ? delta <= 0 : delta >= 0;
     const deltaLabel = delta === 0 ? "No change vs prior window" : `${delta > 0 ? "▲" : "▼"} ${fmtPct(Math.abs(delta))} vs prior window`;
+    const shareLabel = config.key !== "tickets" && totalTickets > 0
+      ? `${fmtPct(metricValue / totalTickets)} of total tickets`
+      : "Selected ticket volume";
     return `
       <div class="kpi-card">
-        <div class="kpi-value">${config.format === "percent" ? fmtPct(metric.value) : fmtNum(metric.value)}</div>
+        <div class="kpi-value">${config.format === "percent" ? fmtPct(metricValue) : fmtNum(metricValue)}</div>
         <div class="kpi-label">${escHtml(config.label)}</div>
+        <div class="kpi-share">${escHtml(shareLabel)}</div>
         <div class="kpi-delta ${delta === 0 ? "" : positive ? "good" : "bad"}">${escHtml(deltaLabel)}</div>
       </div>`;
   }).join("");

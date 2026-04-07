@@ -461,7 +461,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -518,6 +518,13 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   margin-top: 12px;
 }
 
+.kpi-share {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted-strong);
+  font-weight: 700;
+}
+
 .kpi-delta,
 .mix-value,
 .issue-subtitle,
@@ -525,7 +532,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   font-size: 12px;
 }
 
-.kpi-delta { margin-top: 12px; font-weight: 700; }
+.kpi-delta { margin-top: 10px; font-weight: 700; }
 .kpi-delta { color: var(--muted); }
 
 .good { color: var(--green); }
@@ -1332,7 +1339,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 @media (max-width: 1300px) {
   .filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-grid-wide,
   .dashboard-grid-split,
   .drilldown-grid {
