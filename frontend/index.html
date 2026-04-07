@@ -46,8 +46,9 @@
         <input class="mapping-search mapping-search-wide" id="mappingGlobalSearch" type="search" placeholder="Search products, FC2, category, or EFC">
         <label class="mapping-toggle"><input type="checkbox" id="mappingShowOverriddenOnly"> <span>Show only overridden rows</span></label>
       </div>
+      <div class="segmented mapping-tabs" id="mappingStudioTabs"></div>
       <div class="mapping-grid">
-        <div class="mapping-panel">
+        <div class="mapping-panel" id="mappingProductPanel">
           <div class="mapping-panel-head">
             <div>
               <div class="mini-title">Product -> Category</div>
@@ -57,7 +58,7 @@
           </div>
           <div class="mapping-table-host" id="mappingProductTable"></div>
         </div>
-        <div class="mapping-panel">
+        <div class="mapping-panel" id="mappingFc2Panel">
           <div class="mapping-panel-head">
             <div>
               <div class="mini-title">FC2 -> EFC</div>

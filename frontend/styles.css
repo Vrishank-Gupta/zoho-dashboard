@@ -786,6 +786,10 @@ button { border: 0; background: none; cursor: pointer; }
   flex-wrap: wrap;
 }
 
+.mapping-tabs {
+  margin-bottom: 12px;
+}
+
 .mapping-note,
 .mapping-banner,
 .mapping-stat {
@@ -826,7 +830,7 @@ button { border: 0; background: none; cursor: pointer; }
 
 .mapping-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 18px;
 }
 
@@ -918,7 +922,7 @@ button { border: 0; background: none; cursor: pointer; }
 
 .mapping-table-fixed td:first-child,
 .mapping-table-fixed th:first-child {
-  width: 34%;
+  width: 42%;
 }
 
 .mapping-table-fixed td:nth-child(2),
@@ -928,7 +932,7 @@ button { border: 0; background: none; cursor: pointer; }
 
 .mapping-table-fixed td:nth-child(3),
 .mapping-table-fixed th:nth-child(3) {
-  width: 26%;
+  width: 20%;
 }
 
 .mapping-table .mapping-select {
@@ -1000,6 +1004,11 @@ button { border: 0; background: none; cursor: pointer; }
 
 .feature-panel {
   padding: 18px;
+}
+
+.feature-panel svg,
+.chart-area svg {
+  display: block;
 }
 
 .mini-bar-row { display: grid; gap: 4px; }

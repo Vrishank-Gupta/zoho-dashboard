@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import date, timedelta
+import json
+import time
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -57,11 +60,18 @@ class AnalyticsService:
         self._repository = repository
         self._clickhouse = ClickHouseAnalyticsRepository() if settings.has_clickhouse else None
         self._display_tz = ZoneInfo(settings.normalized_etl_timezone)
+        self._cache_ttl_seconds = 20
+        self._cache: dict[str, tuple[float, Any]] = {}
 
     def build_dashboard(self, filters: DashboardFilters) -> dict[str, Any]:
+        cached = self._cache_get("dashboard", filters)
+        if cached is not None:
+            return cached
         if self._clickhouse and settings.analytics_backend == "clickhouse":
             try:
-                return self._build_from_clickhouse(filters)
+                payload = self._build_from_clickhouse(filters)
+                self._cache_set("dashboard", filters, payload)
+                return payload
             except Exception as exc:
                 return self._build_seeded(filters, str(exc))
         return self._build_seeded(filters, "ClickHouse is not configured.")
@@ -76,14 +86,22 @@ class AnalyticsService:
         return {"issue": issue, "tickets": []}
 
     def get_product_drilldown(self, filters: DashboardFilters, category: str, product_name: str) -> dict[str, Any]:
+        cached = self._cache_get("product_drilldown", filters, {"category": category, "product_name": product_name})
+        if cached is not None:
+            return cached
         if self._clickhouse and settings.analytics_backend == "clickhouse":
-            return {
+            payload = {
                 "meta": {"category": category, "product_name": product_name},
                 "drilldown": self._clickhouse.fetch_product_drilldown(filters, category, product_name),
             }
+            self._cache_set("product_drilldown", filters, payload, {"category": category, "product_name": product_name})
+            return payload
         return {"meta": {"category": category, "product_name": product_name}, "drilldown": {}}
 
     def get_category_drilldown(self, filters: DashboardFilters, category: str) -> dict[str, Any]:
+        cached = self._cache_get("category_drilldown", filters, {"category": category})
+        if cached is not None:
+            return cached
         if self._clickhouse and settings.analytics_backend == "clickhouse":
             products = [
                 item["product_name"]
@@ -95,10 +113,12 @@ class AnalyticsService:
                 )
                 if item["product_category"] == category
             ]
-            return {
+            payload = {
                 "meta": {"category": category},
                 "drilldown": self._clickhouse.fetch_category_drilldown(filters, category, products),
             }
+            self._cache_set("category_drilldown", filters, payload, {"category": category})
+            return payload
         return {"meta": {"category": category}, "drilldown": {}}
 
     def get_issue_drilldown(self, filters: DashboardFilters, issue_id: str) -> dict[str, Any]:
@@ -173,6 +193,9 @@ class AnalyticsService:
         }
 
     def get_mapping_studio(self, filters: DashboardFilters) -> dict[str, Any]:
+        cached = self._cache_get("mapping_studio", filters)
+        if cached is not None:
+            return cached
         if self._clickhouse and settings.analytics_backend == "clickhouse":
             max_date = self._clickhouse.fetch_max_metric_date()
             min_date = self._clickhouse.fetch_min_metric_date()
@@ -211,8 +234,10 @@ class AnalyticsService:
                 option_filters,
                 apply_mapping_filters=False,
             )
-            return {"mapping_studio": self._build_mapping_studio(option_daily_rows, option_issue_rows, filters)}
-        return {
+            payload = {"mapping_studio": self._build_mapping_studio(option_daily_rows, option_issue_rows, filters)}
+            self._cache_set("mapping_studio", filters, payload)
+            return payload
+        payload = {
             "mapping_studio": {
                 "product_rows": [],
                 "fc2_rows": [],
@@ -221,6 +246,34 @@ class AnalyticsService:
                 "active_overrides": {"products": 0, "efcs": 0},
             }
         }
+        self._cache_set("mapping_studio", filters, payload)
+        return payload
+
+    def _cache_key(self, namespace: str, filters: DashboardFilters, extra: dict[str, Any] | None = None) -> str:
+        return json.dumps(
+            {
+                "ns": namespace,
+                "filters": asdict(filters),
+                "extra": extra or {},
+            },
+            sort_keys=True,
+            default=str,
+        )
+
+    def _cache_get(self, namespace: str, filters: DashboardFilters, extra: dict[str, Any] | None = None) -> Any | None:
+        key = self._cache_key(namespace, filters, extra)
+        cached = self._cache.get(key)
+        if not cached:
+            return None
+        cached_at, value = cached
+        if time.time() - cached_at > self._cache_ttl_seconds:
+            self._cache.pop(key, None)
+            return None
+        return deepcopy(value)
+
+    def _cache_set(self, namespace: str, filters: DashboardFilters, value: Any, extra: dict[str, Any] | None = None) -> None:
+        key = self._cache_key(namespace, filters, extra)
+        self._cache[key] = (time.time(), deepcopy(value))
 
     def _find_issue(self, filters: DashboardFilters, issue_id: str) -> dict[str, Any] | None:
         dashboard = self.build_dashboard(filters)

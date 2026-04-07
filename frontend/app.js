@@ -60,6 +60,11 @@ const VIEW_TABS = [
   { key: "mapping", label: "Mapping Studio" },
 ];
 
+const MAPPING_STUDIO_TABS = [
+  { key: "products", label: "Product to Category" },
+  { key: "fc2", label: "FC2 to EFC" },
+];
+
 const TIMELINE_METRICS = [
   { key: "tickets", label: "Tickets" },
   { key: "installation_tickets", label: "Installation" },
@@ -79,11 +84,6 @@ const QUICK_PRESETS = [
   { key: "90d", label: "Last 90 days", days: 89 },
   { key: "all", label: "All data", days: null },
 ];
-
-const DEFAULT_EXCLUDED_SELECTIONS = {
-  products: new Set(["Blank Product"]),
-  efcs: new Set(["Blank"]),
-};
 
 const state = {
   apiBaseUrl: (window.QUBO_APP_CONFIG?.apiBaseUrl || window.location.origin || "").replace(/\/$/, ""),
@@ -109,6 +109,7 @@ const state = {
   mappingShowOverriddenOnly: loadSessionJson("quboMappingShowOverriddenOnly", false),
   mappingStudioData: null,
   mappingStudioLoading: false,
+  mappingStudioTab: loadSessionJson("quboMappingStudioTab", "products"),
   issueWidgetFilters: { categories: [], products: [] },
   issueWidgetOpenFilter: null,
   categoryDrilldownBucket: "auto",
@@ -125,6 +126,9 @@ const els = {
   viewTabs: document.getElementById("viewTabs"),
   mappingStudioView: document.getElementById("mappingStudioView"),
   mappingStudioSummary: document.getElementById("mappingStudioSummary"),
+  mappingStudioTabs: document.getElementById("mappingStudioTabs"),
+  mappingProductPanel: document.getElementById("mappingProductPanel"),
+  mappingFc2Panel: document.getElementById("mappingFc2Panel"),
   mappingGlobalSearch: document.getElementById("mappingGlobalSearch"),
   mappingProductSearch: document.getElementById("mappingProductSearch"),
   mappingFc2Search: document.getElementById("mappingFc2Search"),
@@ -178,6 +182,11 @@ function boot() {
     state.activeView = value;
     saveSessionJson("quboActiveView", value);
     renderActiveView();
+  });
+  renderSegmented(els.mappingStudioTabs, MAPPING_STUDIO_TABS, state.mappingStudioTab, (value) => {
+    state.mappingStudioTab = value;
+    saveSessionJson("quboMappingStudioTab", value);
+    renderMappingStudioLayout();
   });
   renderSegmented(els.issueTabs, ISSUE_VIEWS, state.issueView, (value) => {
     state.issueView = value;
@@ -330,15 +339,6 @@ async function loadDashboard() {
 
 function applyDefaultSelections() {
   if (state.defaultSelectionsApplied) return;
-  Object.entries(DEFAULT_EXCLUDED_SELECTIONS).forEach(([key, excluded]) => {
-    if ((state.filters[key] || []).length) return;
-    const control = CONTROLS.find((item) => item.key === key);
-    if (!control) return;
-    const values = getControlOptions(control)
-      .map((item) => item.label)
-      .filter((label) => !excluded.has(label));
-    state.filters[key] = values;
-  });
   state.defaultSelectionsApplied = true;
 }
 
@@ -874,6 +874,11 @@ function renderActiveView() {
   }
 }
 
+function renderMappingStudioLayout() {
+  els.mappingProductPanel?.classList.toggle("hidden", state.mappingStudioTab !== "products");
+  els.mappingFc2Panel?.classList.toggle("hidden", state.mappingStudioTab !== "fc2");
+}
+
 function renderMappingStudio(mappingStudio) {
   if (state.mappingStudioLoading && !mappingStudio?.product_rows && !mappingStudio?.fc2_rows) {
     els.mappingStudioSummary.innerHTML = '<div class="mapping-banner">Loading mapping studio…</div>';
@@ -885,6 +890,7 @@ function renderMappingStudio(mappingStudio) {
   const active = mappingStudio.active_overrides || {};
   if (els.mappingGlobalSearch) els.mappingGlobalSearch.value = state.mappingSearches.global || "";
   if (els.mappingShowOverriddenOnly) els.mappingShowOverriddenOnly.checked = !!state.mappingShowOverriddenOnly;
+  renderMappingStudioLayout();
   els.mappingStudioSummary.innerHTML = `
     <div class="mapping-banner">Workbook mapping stays as the base. Edits here are session-only and affect only your current analysis.</div>
     <div class="mapping-stat">
@@ -1499,7 +1505,7 @@ function renderMiniChartSvg(points) {
   const innerH = height - pad.top - pad.bottom;
   const max = Math.max(...points.map((point) => Number(point.tickets || 0)), 1);
   const barW = innerW / Math.max(points.length, 1) * 0.65;
-  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:220px">
+  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:220px">
     ${[0, 0.5, 1].map((ratio) => {
       const y = pad.top + innerH - innerH * ratio;
       return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="#e2e8f0"></line><text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#64748b">${fmtNum(Math.round(max * ratio))}</text>`;
@@ -1548,7 +1554,7 @@ function renderBarChart(container, { points, color, yLabel }) {
   const step = innerW / Math.max(points.length, 1);
   const barW = Math.min(42, step * 0.65);
   container.innerHTML = `
-    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:290px">
+      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:290px">
       ${[0.25, 0.5, 0.75].map((ratio) => {
         const y = pad.top + innerH - innerH * ratio;
         return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="#e2e8f0"></line>`;
