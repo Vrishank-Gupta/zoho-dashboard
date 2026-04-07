@@ -93,9 +93,13 @@ class AnalyticsService:
         if cached is not None:
             return cached
         if self._clickhouse and settings.analytics_backend == "clickhouse":
+            drilldown = self._remap_product_drilldown(
+                self._clickhouse.fetch_product_drilldown(filters, category, product_name),
+                filters,
+            )
             payload = {
                 "meta": {"category": category, "product_name": product_name},
-                "drilldown": self._clickhouse.fetch_product_drilldown(filters, category, product_name),
+                "drilldown": drilldown,
             }
             self._cache_set("product_drilldown", filters, payload, {"category": category, "product_name": product_name})
             return payload
@@ -116,9 +120,13 @@ class AnalyticsService:
                 )
                 if item["product_category"] == category
             ]
+            drilldown = self._remap_category_drilldown(
+                self._clickhouse.fetch_category_drilldown(filters, category, products),
+                filters,
+            )
             payload = {
                 "meta": {"category": category},
-                "drilldown": self._clickhouse.fetch_category_drilldown(filters, category, products),
+                "drilldown": drilldown,
             }
             self._cache_set("category_drilldown", filters, payload, {"category": category})
             return payload
@@ -338,7 +346,7 @@ class AnalyticsService:
             top_issue = max(issue_rows, key=lambda row: int(row.get("tickets", 0) or 0), default=None)
             efc_totals: dict[str, int] = defaultdict(int)
             for row in category_rows:
-                efc_totals[str(row.get("executive_fault_code") or "Blank")] += int(row.get("tickets", 0) or 0)
+                efc_totals[str(row.get("executive_fault_code") or "Others")] += int(row.get("tickets", 0) or 0)
             items.append(
                 {
                     "product_category": category,
@@ -347,7 +355,7 @@ class AnalyticsService:
                     "installation_rate": self._ratio(counts["installation_field_tickets"], counts["tickets"]),
                     "repeat_rate": self._ratio(counts["repeat_tickets"], counts["tickets"]),
                     "bot_resolved_rate": self._ratio(counts["bot_resolved_tickets"], counts["tickets"]),
-                    "top_efc": max(efc_totals.items(), key=lambda item: item[1])[0] if efc_totals else "Blank",
+                    "top_efc": max(efc_totals.items(), key=lambda item: item[1])[0] if efc_totals else "Others",
                     "top_issue_detail": top_issue.get("fault_code_level_2") if top_issue else "Unclassified",
                 }
             )
@@ -362,7 +370,7 @@ class AnalyticsService:
             counts = self._sum_counts(product_rows)
             efc_totals: dict[str, int] = defaultdict(int)
             for row in product_rows:
-                efc_totals[str(row.get("executive_fault_code") or "Blank")] += int(row.get("tickets", 0) or 0)
+                efc_totals[str(row.get("executive_fault_code") or "Others")] += int(row.get("tickets", 0) or 0)
             top_issue = max(
                 [row for row in product_rows if row.get("fault_code_level_2") not in {None, "", "Unclassified"}],
                 key=lambda row: int(row.get("tickets", 0) or 0),
@@ -377,7 +385,7 @@ class AnalyticsService:
                     "installation_rate": self._ratio(counts["installation_field_tickets"], counts["tickets"]),
                     "repeat_rate": self._ratio(counts["repeat_tickets"], counts["tickets"]),
                     "bot_resolved_rate": self._ratio(counts["bot_resolved_tickets"], counts["tickets"]),
-                    "top_efc": max(efc_totals.items(), key=lambda item: item[1])[0] if efc_totals else "Blank",
+                    "top_efc": max(efc_totals.items(), key=lambda item: item[1])[0] if efc_totals else "Others",
                     "top_issue_detail": top_issue.get("fault_code_level_2") if top_issue else "Unclassified",
                 }
             )
@@ -670,7 +678,7 @@ class AnalyticsService:
     def _matches_mapping_filters(self, row: dict[str, Any], filters: DashboardFilters) -> bool:
         if filters.categories and str(row.get("product_category") or "Other") not in filters.categories:
             return False
-        if filters.efcs and str(row.get("executive_fault_code") or "Blank") not in filters.efcs:
+        if filters.efcs and str(row.get("executive_fault_code") or "Others") not in filters.efcs:
             return False
         return True
 
@@ -746,6 +754,86 @@ class AnalyticsService:
             },
         }
 
+    def _remap_product_drilldown(self, drilldown: dict[str, Any], filters: DashboardFilters) -> dict[str, Any]:
+        mapped = deepcopy(drilldown)
+        issue_totals: dict[tuple[str, str], dict[str, Any]] = {}
+        efc_totals: dict[str, int] = defaultdict(int)
+        for row in mapped.get("issue_matrix", []):
+            issue_detail = str(row.get("issue_detail") or row.get("label") or "")
+            effective_efc = map_executive_fault_code(None, issue_detail, filters.efc_overrides)
+            key = (effective_efc, issue_detail)
+            current = issue_totals.get(key)
+            if current is None:
+                current = {
+                    "executive_fault_code": effective_efc,
+                    "issue_detail": issue_detail,
+                    "tickets": 0,
+                    "bot_resolved_tickets": 0,
+                    "installation_tickets": 0,
+                }
+                issue_totals[key] = current
+            current["tickets"] += int(row.get("tickets", 0) or 0)
+            current["bot_resolved_tickets"] += int(row.get("bot_resolved_tickets", 0) or 0)
+            current["installation_tickets"] += int(row.get("installation_tickets", 0) or 0)
+            efc_totals[effective_efc] += int(row.get("tickets", 0) or 0)
+        mapped["issue_matrix"] = sorted(issue_totals.values(), key=lambda item: item["tickets"], reverse=True)
+        mapped["efcs"] = [
+            {"label": label, "tickets": tickets}
+            for label, tickets in sorted(efc_totals.items(), key=lambda item: item[1], reverse=True)
+        ]
+        return mapped
+
+    def _remap_category_drilldown(self, drilldown: dict[str, Any], filters: DashboardFilters) -> dict[str, Any]:
+        mapped = deepcopy(drilldown)
+        issue_totals: dict[tuple[str, str], dict[str, Any]] = {}
+        efc_totals: dict[str, int] = defaultdict(int)
+        product_fault_totals: dict[tuple[str, str, str, str], int] = defaultdict(int)
+        for row in mapped.get("issues", []):
+            issue_detail = str(row.get("label") or row.get("fault_code_level_2") or "")
+            effective_efc = map_executive_fault_code(None, issue_detail, filters.efc_overrides)
+            key = (effective_efc, issue_detail)
+            current = issue_totals.get(key)
+            if current is None:
+                current = {
+                    "executive_fault_code": effective_efc,
+                    "label": issue_detail,
+                    "tickets": 0,
+                    "bot_resolved_tickets": 0,
+                    "installation_tickets": 0,
+                }
+                issue_totals[key] = current
+            current["tickets"] += int(row.get("tickets", 0) or 0)
+            current["bot_resolved_tickets"] += int(row.get("bot_resolved_tickets", 0) or 0)
+            current["installation_tickets"] += int(row.get("installation_tickets", 0) or 0)
+            efc_totals[effective_efc] += int(row.get("tickets", 0) or 0)
+        for row in mapped.get("product_fault_daily", []):
+            issue_detail = str(row.get("fault_code_level_2") or "")
+            effective_efc = map_executive_fault_code(None, issue_detail, filters.efc_overrides)
+            key = (
+                str(row.get("metric_date") or ""),
+                str(row.get("product_name") or ""),
+                effective_efc,
+                issue_detail,
+            )
+            product_fault_totals[key] += int(row.get("tickets", 0) or 0)
+            efc_totals[effective_efc] += 0
+        mapped["issues"] = sorted(issue_totals.values(), key=lambda item: item["tickets"], reverse=True)
+        mapped["efcs"] = [
+            {"label": label, "tickets": tickets}
+            for label, tickets in sorted(efc_totals.items(), key=lambda item: item[1], reverse=True)
+        ]
+        mapped["product_fault_daily"] = [
+            {
+                "metric_date": metric_date,
+                "product_name": product_name,
+                "executive_fault_code": executive_fault_code,
+                "fault_code_level_2": fault_code_level_2,
+                "tickets": tickets,
+            }
+            for (metric_date, product_name, executive_fault_code, fault_code_level_2), tickets in sorted(product_fault_totals.items())
+        ]
+        return mapped
+
     def _sum_counts(self, rows: list[dict[str, Any]]) -> dict[str, int]:
         keys = ("tickets", "field_visit_tickets", "repair_field_tickets", "installation_field_tickets", "bot_resolved_tickets", "bot_transferred_tickets", "blank_chat_tickets", "fcr_tickets", "repeat_tickets", "logistics_tickets")
         totals = {key: 0 for key in keys}
@@ -760,7 +848,7 @@ class AnalyticsService:
             key = (
                 str(row.get("product_category") or "Other"),
                 str(row.get("product_name") or row.get("product_family") or "Other"),
-                str(row.get("executive_fault_code") or "Blank"),
+                str(row.get("executive_fault_code") or "Others"),
                 str(row.get("fault_code") or "Unclassified"),
                 str(row.get("fault_code_level_1") or "Unclassified"),
                 str(row.get("fault_code_level_2") or "Unclassified"),
@@ -858,7 +946,7 @@ class AnalyticsService:
             "product": item.get("product") or item.get("product_name") or item.get("product_family") or "Other",
             "department": item.get("department") or "Unknown",
             "channel": item.get("channel") or "Unknown",
-            "executive_fault_code": item.get("executive_fault_code") or "Blank",
+            "executive_fault_code": item.get("executive_fault_code") or "Others",
             "fault_code": item.get("fault_code") or "Unclassified",
             "fault_code_level_1": item.get("fault_code_level_1") or "Unclassified",
             "fault_code_level_2": item.get("fault_code_level_2") or "Unclassified",

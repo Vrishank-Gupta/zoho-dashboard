@@ -108,5 +108,15 @@ def map_executive_fault_code(
         efc = mappings.fc2_to_efc.get(candidate)
         if efc:
             return efc
-    fc1 = normalize_fault_code(fault_code_level_1)
-    return fc1 if fc1 != "Unclassified" else "Blank"
+    raw_fc1 = str(fault_code_level_1 or "").strip()
+    normalized_fc1 = normalize_fault_code(fault_code_level_1)
+    for candidate in (_key(raw_fc1), _key(normalized_fc1)):
+        if not candidate:
+            continue
+        direct = (overrides or {}).get(candidate)
+        if direct:
+            return direct
+        efc = mappings.fc2_to_efc.get(candidate)
+        if efc:
+            return efc
+    return "Others"
