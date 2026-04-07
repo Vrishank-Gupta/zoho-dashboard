@@ -70,6 +70,22 @@ const MAPPING_STUDIO_TABS = [
   { key: "fc2", label: "FC2 to EFC" },
 ];
 
+const DRILLDOWN_TABS = {
+  product: [
+    { key: "overview", label: "Overview" },
+    { key: "analysis", label: "Issue analysis" },
+  ],
+  category: [
+    { key: "overview", label: "Overview" },
+    { key: "products", label: "Product trend" },
+    { key: "issues", label: "Issue movement" },
+  ],
+  issue: [
+    { key: "overview", label: "Overview" },
+    { key: "analysis", label: "Actions & outcomes" },
+  ],
+};
+
 const TIMELINE_METRICS = [
   { key: "tickets", label: "Tickets" },
   { key: "installation_tickets", label: "Installation" },
@@ -118,6 +134,9 @@ const state = {
   issueWidgetFilters: { categories: [], products: [] },
   issueWidgetOpenFilter: null,
   categoryDrilldownBucket: "auto",
+  currentDrilldown: null,
+  currentDrilldownKind: null,
+  currentDrilldownTab: "overview",
   currentCategoryDrilldown: null,
 };
 state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
@@ -176,6 +195,7 @@ const els = {
   drilldownEyebrow: document.getElementById("drilldownEyebrow"),
   drilldownTitle: document.getElementById("drilldownTitle"),
   drilldownSubtitle: document.getElementById("drilldownSubtitle"),
+  drilldownTabs: document.getElementById("drilldownTabs"),
   drilldownBody: document.getElementById("drilldownBody"),
 };
 
@@ -293,10 +313,6 @@ function bindEvents() {
   });
   els.mappingFc2Search?.addEventListener("input", () => {
     state.mappingSearches.fc2 = els.mappingFc2Search.value;
-    renderMappingStudio(state.mappingStudioData || {});
-  });
-  els.mappingGlobalSearch?.addEventListener("input", () => {
-    state.mappingSearches.global = els.mappingGlobalSearch.value;
     renderMappingStudio(state.mappingStudioData || {});
   });
   els.mappingShowOverriddenOnly?.addEventListener("change", () => {
@@ -1063,6 +1079,8 @@ async function runPipeline() {
 }
 
 async function openProductDrilldown(category, productName) {
+  state.currentDrilldownKind = "product";
+  state.currentDrilldownTab = "overview";
   els.drilldownModal.classList.remove("hidden");
   els.drilldownEyebrow.textContent = "Product drilldown";
   els.drilldownTitle.textContent = productName;
@@ -1074,7 +1092,8 @@ async function openProductDrilldown(category, productName) {
     params.set("product_name", productName);
     const response = await fetch(`${apiUrl("/api/drilldown/product")}?${params.toString()}`);
     const payload = await response.json();
-    renderDrilldownPanels(payload.drilldown || {});
+    state.currentDrilldown = payload.drilldown || {};
+    renderDrilldownPanels(state.currentDrilldown);
   } catch (error) {
     els.drilldownBody.innerHTML = `<div class="error-state">${escHtml(error.message || "Failed to load details.")}</div>`;
   }
@@ -1082,6 +1101,8 @@ async function openProductDrilldown(category, productName) {
 
 async function openCategoryDrilldown(category) {
   state.categoryDrilldownBucket = "auto";
+  state.currentDrilldownKind = "category";
+  state.currentDrilldownTab = "overview";
   els.drilldownModal.classList.remove("hidden");
   els.drilldownEyebrow.textContent = "Category drilldown";
   els.drilldownTitle.textContent = category;
@@ -1093,6 +1114,7 @@ async function openCategoryDrilldown(category) {
     const response = await fetch(`${apiUrl("/api/drilldown/category")}?${params.toString()}`);
     const payload = await response.json();
     state.currentCategoryDrilldown = payload.drilldown || {};
+    state.currentDrilldown = state.currentCategoryDrilldown;
     renderCategoryDrilldownPanels(state.currentCategoryDrilldown);
   } catch (error) {
     els.drilldownBody.innerHTML = `<div class="error-state">${escHtml(error.message || "Failed to load details.")}</div>`;
@@ -1100,6 +1122,8 @@ async function openCategoryDrilldown(category) {
 }
 
 async function openIssueDrilldown(issueId) {
+  state.currentDrilldownKind = "issue";
+  state.currentDrilldownTab = "overview";
   els.drilldownModal.classList.remove("hidden");
   els.drilldownEyebrow.textContent = "Issue drilldown";
   els.drilldownTitle.textContent = "Loading issue";
@@ -1112,7 +1136,8 @@ async function openIssueDrilldown(issueId) {
     const issue = payload.issue || {};
     els.drilldownTitle.textContent = issue.fault_code_level_2 || "Issue detail";
     els.drilldownSubtitle.textContent = `${issue.product_name || "Other"} · ${issue.executive_fault_code || "Blank"} · ${issue.fault_code_level_1 || "Unclassified"}`;
-    renderDrilldownPanels(payload.drilldown || {});
+    state.currentDrilldown = payload.drilldown || {};
+    renderDrilldownPanels(state.currentDrilldown);
   } catch (error) {
     els.drilldownBody.innerHTML = `<div class="error-state">${escHtml(error.message || "Failed to load details.")}</div>`;
   }
@@ -1127,7 +1152,8 @@ function renderDrilldownPanels(drilldown) {
     bot_resolved_tickets: row.bot_resolved_tickets,
     repeat_tickets: 0,
   })), "weekly");
-  els.drilldownBody.innerHTML = `
+  renderDrilldownTabs();
+  const overview = `
     <section class="drilldown-section">
       <div class="mini-summary-grid">
         ${renderMiniStat("Tickets", summary.tickets || 0)}
@@ -1137,22 +1163,24 @@ function renderDrilldownPanels(drilldown) {
       </div>
     </section>
     <section class="drilldown-section">
-      <div class="analysis-panel-head">
-        <div>
-          <h3 class="drilldown-section-title">Trend</h3>
-          <div class="analysis-caption">Volume movement across the selected period.</div>
-        </div>
-      </div>
       <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline)}</div>
     </section>
     <section class="drilldown-section">
+      <div class="drilldown-kpi-rail">
+        ${renderInsightCard("Top EFC", ((drilldown.efcs || [])[0]?.label || "Blank"), ((drilldown.efcs || [])[0]?.tickets || 0))}
+        ${renderInsightCard("Top resolution", ((drilldown.resolutions || [])[0]?.label || "Unknown"), ((drilldown.resolutions || [])[0]?.tickets || 0))}
+        ${renderInsightCard("Top bot action", formatBotActionLabel((drilldown.bot_actions || [])[0]?.label || "No bot action"), ((drilldown.bot_actions || [])[0]?.tickets || 0))}
+      </div>
+    </section>`;
+  const analysis = `
+    <section class="drilldown-section">
       <div class="drilldown-two-col">
         <div class="mini-panel"><h3>Issue distribution</h3>${renderMiniTable(drilldown.issue_matrix || [], [
-        { key: "executive_fault_code", label: "EFC" },
-        { key: "issue_detail", label: "FC2" },
-        { key: "tickets", label: "Tickets", format: "number" },
-        { key: "bot_resolved_tickets", label: "Bot resolved", format: "number" },
-      ])}</div>
+          { key: "executive_fault_code", label: "EFC" },
+          { key: "issue_detail", label: "FC2" },
+          { key: "tickets", label: "Tickets", format: "number" },
+          { key: "bot_resolved_tickets", label: "Bot resolved", format: "number" },
+        ])}</div>
         <div class="drilldown-stack">
           <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
           <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
@@ -1160,6 +1188,7 @@ function renderDrilldownPanels(drilldown) {
         </div>
       </div>
     </section>`;
+  els.drilldownBody.innerHTML = state.currentDrilldownTab === "analysis" ? analysis : overview;
 }
 
 function renderCategoryDrilldownPanels(drilldown) {
@@ -1173,7 +1202,8 @@ function renderCategoryDrilldownPanels(drilldown) {
   })), state.categoryDrilldownBucket);
   const productTrend = buildCategoryProductTrendModel(drilldown.product_daily || [], state.categoryDrilldownBucket);
   const faultMatrices = buildCategoryFaultMatrixModel(drilldown.product_fault_daily || [], state.categoryDrilldownBucket);
-  els.drilldownBody.innerHTML = `
+  renderDrilldownTabs();
+  const overview = `
     <section class="drilldown-section">
       <div class="mini-summary-grid">
         ${renderMiniStat("Tickets", summary.tickets || 0)}
@@ -1183,71 +1213,60 @@ function renderCategoryDrilldownPanels(drilldown) {
       </div>
     </section>
     <section class="drilldown-section">
-      <div class="analysis-panel-head">
-        <div>
-          <h3 class="drilldown-section-title">Category overview</h3>
-          <div class="analysis-caption">Start with the category trend, then compare products and issue hotspots within it.</div>
-        </div>
-      </div>
       <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline)}</div>
+    </section>
+    <section class="drilldown-section">
       <div class="drilldown-two-col">
         <div class="mini-panel"><h3>Products in category</h3>${renderMiniTable(drilldown.products || [], [
-        { key: "label", label: "Product" },
-        { key: "tickets", label: "Tickets", format: "number" },
-        { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
-        { key: "bot_resolved_tickets", label: "Bot resolved", format: "percentOfTickets" },
-        { key: "blank_chat_tickets", label: "Blank chat", format: "percentOfTickets" },
-      ])}</div>
+          { key: "label", label: "Product" },
+          { key: "tickets", label: "Tickets", format: "number" },
+          { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
+          { key: "bot_resolved_tickets", label: "Bot resolved", format: "percentOfTickets" },
+        ])}</div>
         <div class="mini-panel"><h3>Issue hotspots</h3>${renderMiniTable(drilldown.issues || [], [
-        { key: "executive_fault_code", label: "EFC" },
-        { key: "label", label: "FC2" },
-        { key: "tickets", label: "Tickets", format: "number" },
-        { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
-      ])}</div>
+          { key: "executive_fault_code", label: "EFC" },
+          { key: "label", label: "FC2" },
+          { key: "tickets", label: "Tickets", format: "number" },
+          { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
+        ])}</div>
       </div>
     </section>
+    <section class="drilldown-section">
+      <div class="drilldown-kpi-rail">
+        ${renderInsightCard("Top EFC", ((drilldown.efcs || [])[0]?.label || "Blank"), ((drilldown.efcs || [])[0]?.tickets || 0))}
+        ${renderInsightCard("Top resolution", ((drilldown.resolutions || [])[0]?.label || "Unknown"), ((drilldown.resolutions || [])[0]?.tickets || 0))}
+        ${renderInsightCard("Top bot action", formatBotActionLabel((drilldown.bot_actions || [])[0]?.label || "No bot action"), ((drilldown.bot_actions || [])[0]?.tickets || 0))}
+      </div>
+    </section>`;
+  const productsView = `
     <div class="mini-panel analysis-panel">
       <div class="analysis-panel-head">
         <div>
           <h3>Product trend by period</h3>
           <div class="analysis-caption">Compare week-on-week or month-on-month volume across every product in this category.</div>
         </div>
-        <div class="panel-actions">
-          ${renderCategoryBucketTabs()}
-        </div>
+        <div class="panel-actions">${renderCategoryBucketTabs()}</div>
       </div>
       ${renderCategoryProductTrendTable(productTrend)}
-    </div>
+    </div>`;
+  const issuesView = `
     <div class="mini-panel analysis-panel">
       <div class="analysis-panel-head">
         <div>
           <h3>Fault-code movement by product</h3>
-          <div class="analysis-caption">Each product shows how its top issue buckets move across the same periods.</div>
+          <div class="analysis-caption">Top issue buckets for each product across the selected periods.</div>
         </div>
         <div class="analysis-chip">${escHtml(productTrend.bucketMode === "monthly" ? "Monthly view" : "Weekly view")}</div>
       </div>
       ${renderCategoryFaultMatrices(faultMatrices)}
     </div>
     <section class="drilldown-section">
-      <div class="analysis-panel-head">
-        <div>
-          <h3 class="drilldown-section-title">Operational context</h3>
-          <div class="analysis-caption">Use this to understand what customers were told and how bot journeys split inside the category.</div>
-        </div>
-      </div>
       <div class="drilldown-two-col">
         <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
-        <div class="mini-panel"><h3>Resolution by product</h3>${renderMiniTable(drilldown.resolution_by_product || [], [
-        { key: "product_name", label: "Product" },
-        { key: "resolution", label: "Resolution" },
-        { key: "tickets", label: "Tickets", format: "number" },
-      ])}</div>
-      </div>
-      <div class="drilldown-two-col">
         <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
-        <div class="mini-panel"><h3>EFC summary</h3>${renderMiniBars(drilldown.efcs || [])}</div>
       </div>
     </section>`;
+  els.drilldownBody.innerHTML = state.currentDrilldownTab === "products" ? productsView : state.currentDrilldownTab === "issues" ? issuesView : overview;
   els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
     button.addEventListener("click", () => {
       state.categoryDrilldownBucket = button.dataset.categoryBucket || "auto";
@@ -1259,6 +1278,28 @@ function renderCategoryDrilldownPanels(drilldown) {
 function closeDrilldown() {
   els.drilldownModal.classList.add("hidden");
   state.currentCategoryDrilldown = null;
+  state.currentDrilldown = null;
+  state.currentDrilldownKind = null;
+  state.currentDrilldownTab = "overview";
+}
+
+function renderDrilldownTabs() {
+  const tabs = DRILLDOWN_TABS[state.currentDrilldownKind] || [];
+  if (!tabs.length) {
+    els.drilldownTabs.innerHTML = "";
+    els.drilldownTabs.classList.add("hidden");
+    return;
+  }
+  els.drilldownTabs.classList.remove("hidden");
+  renderSegmented(els.drilldownTabs, tabs, state.currentDrilldownTab, (value) => {
+    state.currentDrilldownTab = value;
+    if (state.currentDrilldownKind === "category") renderCategoryDrilldownPanels(state.currentCategoryDrilldown || {});
+    else if (state.currentDrilldownKind === "product" || state.currentDrilldownKind === "issue") renderDrilldownPanels(state.currentDrilldown || {});
+  });
+}
+
+function renderInsightCard(label, title, value) {
+  return `<div class="insight-card"><div class="insight-label">${escHtml(label)}</div><div class="insight-title">${escHtml(title || "Unknown")}</div><div class="insight-value">${escHtml(fmtNum(value || 0))}</div></div>`;
 }
 
 function renderCategoryBucketTabs() {

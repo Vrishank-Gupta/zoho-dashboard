@@ -43,7 +43,11 @@
       </div>
       <div class="mapping-summary" id="mappingStudioSummary"></div>
       <div class="mapping-toolbar">
-        <input class="mapping-search mapping-search-wide" id="mappingGlobalSearch" type="search" placeholder="Search products, FC2, category, or EFC">
+        <div class="mapping-guide">
+          <span class="mapping-step">1. Choose mapping type</span>
+          <span class="mapping-step">2. Search and adjust</span>
+          <span class="mapping-step">3. Apply to session</span>
+        </div>
         <label class="mapping-toggle"><input type="checkbox" id="mappingShowOverriddenOnly"> <span>Show only overridden rows</span></label>
       </div>
       <div class="segmented mapping-tabs" id="mappingStudioTabs"></div>
@@ -224,6 +228,7 @@
         <button class="ghost-btn" id="closeDrilldown" type="button">Close</button>
       </div>
       <div class="drilldown-subtitle" id="drilldownSubtitle"></div>
+      <div class="segmented drilldown-tabs" id="drilldownTabs"></div>
       <div class="drilldown-grid" id="drilldownBody"></div>
     </div>
   </div>

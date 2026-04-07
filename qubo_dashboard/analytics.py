@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import date, timedelta
@@ -62,6 +63,8 @@ class AnalyticsService:
         self._display_tz = ZoneInfo(settings.normalized_etl_timezone)
         self._cache_ttl_seconds = 20
         self._cache: dict[str, tuple[float, Any]] = {}
+        self._freshness_ttl_seconds = 300
+        self._freshness_cache: tuple[float, dict[str, str]] | None = None
 
     def build_dashboard(self, filters: DashboardFilters) -> dict[str, Any]:
         cached = self._cache_get("dashboard", filters)
@@ -145,21 +148,37 @@ class AnalyticsService:
         start_date, end_date = self._resolve_window(filters, min_date, max_date)
         previous_end = start_date - timedelta(days=1)
         previous_start = previous_end - timedelta(days=(end_date - start_date).days)
+        option_filters = self._mapping_option_filters(filters, start_date, end_date)
+        needs_expanded_option_queries = self._needs_expanded_option_queries(filters)
 
-        current_daily_rows = self._clickhouse.fetch_daily_rows(start_date, end_date, filters)
-        previous_daily_rows = self._clickhouse.fetch_daily_rows(previous_start, previous_end, filters) if previous_end >= previous_start else []
-        current_issue_rows = self._clickhouse.fetch_issue_rows(start_date, end_date, filters)
-        previous_issue_rows = self._clickhouse.fetch_issue_rows(previous_start, previous_end, filters) if previous_end >= previous_start else []
-        bot_rows = self._clickhouse.fetch_bot_rows(start_date, end_date, filters)
-        pipeline_rows = self._clickhouse.fetch_pipeline_rows()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {
+                "current_daily": pool.submit(self._clickhouse.fetch_daily_rows, start_date, end_date, filters),
+                "current_issue": pool.submit(self._clickhouse.fetch_issue_rows, start_date, end_date, filters),
+                "bot_rows": pool.submit(self._clickhouse.fetch_bot_rows, start_date, end_date, filters),
+                "pipeline_rows": pool.submit(self._clickhouse.fetch_pipeline_rows),
+            }
+            if needs_expanded_option_queries:
+                futures["option_daily"] = pool.submit(self._clickhouse.fetch_daily_rows, start_date, end_date, option_filters)
+                futures["option_issue"] = pool.submit(self._clickhouse.fetch_issue_rows, start_date, end_date, option_filters)
+            if previous_end >= previous_start:
+                futures["previous_daily"] = pool.submit(self._clickhouse.fetch_daily_rows, previous_start, previous_end, filters)
+                futures["previous_issue"] = pool.submit(self._clickhouse.fetch_issue_rows, previous_start, previous_end, filters)
+            current_daily_rows = futures["current_daily"].result()
+            current_issue_rows = futures["current_issue"].result()
+            bot_rows = futures["bot_rows"].result()
+            pipeline_rows = futures["pipeline_rows"].result()
+            option_daily_rows = futures["option_daily"].result() if "option_daily" in futures else current_daily_rows
+            option_issue_rows = futures["option_issue"].result() if "option_issue" in futures else current_issue_rows
+            previous_daily_rows = futures["previous_daily"].result() if "previous_daily" in futures else []
+            previous_issue_rows = futures["previous_issue"].result() if "previous_issue" in futures else []
         current_daily_rows = self._mapped_daily_rows(current_daily_rows, filters)
         previous_daily_rows = self._mapped_daily_rows(previous_daily_rows, filters)
         current_issue_rows = self._mapped_issue_rows(current_issue_rows, filters)
         previous_issue_rows = self._mapped_issue_rows(previous_issue_rows, filters)
         bot_rows = self._mapped_bot_rows(bot_rows, filters)
-        option_filters = self._mapping_option_filters(filters, start_date, end_date)
-        option_daily_rows = self._mapped_daily_rows(self._clickhouse.fetch_daily_rows(start_date, end_date, option_filters), option_filters, apply_mapping_filters=False)
-        option_issue_rows = self._mapped_issue_rows(self._clickhouse.fetch_issue_rows(start_date, end_date, option_filters), option_filters, apply_mapping_filters=False)
+        option_daily_rows = self._mapped_daily_rows(option_daily_rows, option_filters, apply_mapping_filters=False)
+        option_issue_rows = self._mapped_issue_rows(option_issue_rows, option_filters, apply_mapping_filters=False)
 
         issues = self._agg_issues(current_issue_rows, previous_issue_rows)
         category_health = self._agg_category_health(current_daily_rows)
@@ -582,6 +601,15 @@ class AnalyticsService:
             efc_overrides=dict(filters.efc_overrides),
         )
 
+    def _needs_expanded_option_queries(self, filters: DashboardFilters) -> bool:
+        return any(
+            (
+                filters.categories,
+                filters.products,
+                filters.efcs,
+            )
+        )
+
     def _mapped_daily_rows(self, rows: list[dict[str, Any]], filters: DashboardFilters, apply_mapping_filters: bool = True) -> list[dict[str, Any]]:
         remapped = [self._remap_row(row, filters) for row in rows]
         if apply_mapping_filters:
@@ -884,6 +912,14 @@ class AnalyticsService:
         }
 
     def _build_freshness(self, clickhouse_max_date: date | None) -> dict[str, str]:
+        now = time.time()
+        if self._freshness_cache and (now - self._freshness_cache[0]) <= self._freshness_ttl_seconds:
+            cached = dict(self._freshness_cache[1])
+            cached["clickhouse_max_date"] = clickhouse_max_date.isoformat() if clickhouse_max_date else ""
+            source_max_date = cached.get("source_max_date", "")
+            clickhouse_date = cached.get("clickhouse_max_date", "")
+            cached["status"] = "In sync" if source_max_date and clickhouse_date and source_max_date == clickhouse_date else "Source ahead" if source_max_date and clickhouse_date and source_max_date > clickhouse_date else "Unavailable"
+            return cached
         source_max = None
         try:
             source_max = self._repository.fetch_source_max_created_time()
@@ -892,11 +928,13 @@ class AnalyticsService:
         source_max_date = source_max.date().isoformat() if source_max else ""
         clickhouse_date = clickhouse_max_date.isoformat() if clickhouse_max_date else ""
         status = "In sync" if source_max_date and clickhouse_date and source_max_date == clickhouse_date else "Source ahead" if source_max_date and clickhouse_date and source_max_date > clickhouse_date else "Unavailable"
-        return {
+        payload = {
             "source_max_date": source_max_date,
             "clickhouse_max_date": clickhouse_date,
             "status": status,
         }
+        self._freshness_cache = (now, dict(payload))
+        return payload
 
     def _resolve_window(self, filters: DashboardFilters, min_date: date | None, max_date: date | None) -> tuple[date, date]:
         if not max_date:
