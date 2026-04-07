@@ -55,13 +55,6 @@ const PRODUCT_VIEWS = [
   { key: "category", label: "By category" },
 ];
 
-const PRODUCT_SORTS = [
-  { key: "tickets", label: "Volume" },
-  { key: "installation_rate", label: "Installation %" },
-  { key: "bot_resolved_rate", label: "Bot resolved %" },
-  { key: "repeat_rate", label: "Repeat %" },
-];
-
 const TIMELINE_METRICS = [
   { key: "tickets", label: "Tickets" },
   { key: "installation_tickets", label: "Installation" },
@@ -97,6 +90,7 @@ const state = {
   issueView: "highest_volume",
   productView: "product",
   productSort: "tickets",
+  productSortDirection: "desc",
   timelineMetric: "tickets",
   timelineBucket: "auto",
   botBucket: "auto",
@@ -112,7 +106,7 @@ const els = {
   summary: document.getElementById("summary"),
   sourceBadge: document.getElementById("sourceBadge"),
   lastUpdated: document.getElementById("lastUpdated"),
-  freshnessInfo: document.getElementById("freshnessInfo"),
+  freshnessNote: document.getElementById("freshnessNote"),
   dateStart: document.getElementById("dateStart"),
   dateEnd: document.getElementById("dateEnd"),
   quickPresets: document.getElementById("quickPresets"),
@@ -139,7 +133,6 @@ const els = {
   runPipelineBtn: document.getElementById("runPipelineBtn"),
   issueTabs: document.getElementById("issueTabs"),
   productViewTabs: document.getElementById("productViewTabs"),
-  productSortTabs: document.getElementById("productSortTabs"),
   timelineMetricTabs: document.getElementById("timelineMetricTabs"),
   timelineBucketTabs: document.getElementById("timelineBucketTabs"),
   botBucketTabs: document.getElementById("botBucketTabs"),
@@ -160,10 +153,6 @@ function boot() {
   });
   renderSegmented(els.productViewTabs, PRODUCT_VIEWS, state.productView, (value) => {
     state.productView = value;
-    renderProductHealth();
-  });
-  renderSegmented(els.productSortTabs, PRODUCT_SORTS, state.productSort, (value) => {
-    state.productSort = value;
     renderProductHealth();
   });
   renderSegmented(els.timelineMetricTabs, TIMELINE_METRICS, state.timelineMetric, (value) => {
@@ -301,13 +290,13 @@ function renderDashboard(payload) {
     ? `Source max date: ${prettyIsoDate(freshness.source_max_date)} | ClickHouse max date: ${prettyIsoDate(freshness.clickhouse_max_date)} | Status: ${freshness.status || "Unavailable"}`
     : "";
   if (freshnessText) {
-    els.freshnessInfo.classList.remove("hidden");
-    els.freshnessInfo.dataset.tooltip = freshnessText;
-    els.freshnessInfo.setAttribute("aria-label", freshnessText);
+    els.freshnessNote.classList.remove("hidden");
+    els.freshnessNote.textContent = `Sync: ${prettyIsoDate(freshness.clickhouse_max_date)} · ${freshness.status || "Unavailable"}`;
+    els.freshnessNote.setAttribute("title", freshnessText);
   } else {
-    els.freshnessInfo.classList.add("hidden");
-    delete els.freshnessInfo.dataset.tooltip;
-    els.freshnessInfo.setAttribute("aria-label", "Data freshness details");
+    els.freshnessNote.classList.add("hidden");
+    els.freshnessNote.textContent = "";
+    els.freshnessNote.removeAttribute("title");
   }
   renderKpis(payload.kpis || {});
   renderTimeline(payload.timeline || []);
@@ -484,7 +473,16 @@ function renderProductHealth() {
     els.productHealthTable.innerHTML = '<div class="empty-state">No product data for this view.</div>';
     return;
   }
-  rows.sort((a, b) => Number(b[state.productSort] || 0) - Number(a[state.productSort] || 0));
+  rows.sort((a, b) => {
+    const delta = Number(b[state.productSort] || 0) - Number(a[state.productSort] || 0);
+    return state.productSortDirection === "desc" ? delta : -delta;
+  });
+  const sortHeader = (key, label, numeric = false) => {
+    const active = state.productSort === key;
+    const arrow = !active ? "↕" : state.productSortDirection === "desc" ? "↓" : "↑";
+    const classes = numeric ? "num" : "";
+    return `<th class="${classes}"><button class="sort-header" type="button" data-product-sort="${escHtml(key)}">${escHtml(label)} <span class="sort-indicator">${arrow}</span></button></th>`;
+  };
   const body = rows.slice(0, 18).map((row, index) => `
     <tr class="click-row"
       data-product-row="${state.productView === "category" ? "" : escHtml(JSON.stringify({ category: row.product_category, product_name: row.product_name }))}"
@@ -508,11 +506,11 @@ function renderProductHealth() {
       <thead>
         <tr>
           <th class="num">#</th>
-          <th>${state.productView === "category" ? "Category" : "Product"}</th>
-          <th class="num">Tickets</th>
-          <th class="num">Installation %</th>
-          <th class="num">Repeat %</th>
-          <th class="num">Bot resolved %</th>
+          ${sortHeader(state.productView === "category" ? "product_category" : "product_name", state.productView === "category" ? "Category" : "Product")}
+          ${sortHeader("tickets", "Tickets", true)}
+          ${sortHeader("installation_rate", "Installation %", true)}
+          ${sortHeader("repeat_rate", "Repeat %", true)}
+          ${sortHeader("bot_resolved_rate", "Bot resolved %", true)}
           <th>Top EFC</th>
         </tr>
       </thead>
@@ -531,6 +529,20 @@ function renderProductHealth() {
     const category = row.dataset.categoryRow;
     if (!category) return;
     row.addEventListener("click", () => openCategoryDrilldown(category));
+  });
+  els.productHealthTable.querySelectorAll("[data-product-sort]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const key = button.dataset.productSort;
+      if (!key) return;
+      if (state.productSort === key) {
+        state.productSortDirection = state.productSortDirection === "desc" ? "asc" : "desc";
+      } else {
+        state.productSort = key;
+        state.productSortDirection = key === "product_name" || key === "product_category" ? "asc" : "desc";
+      }
+      renderProductHealth();
+    });
   });
 }
 
