@@ -423,7 +423,7 @@ class ClickHouseAnalyticsRepository:
                 SELECT
                     executive_fault_code,
                     count() AS tickets,
-                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE {where_sql}
                 GROUP BY executive_fault_code
