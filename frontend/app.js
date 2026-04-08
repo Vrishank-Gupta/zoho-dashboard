@@ -102,44 +102,44 @@ const QUICK_PRESETS = [
 ];
 
 const VISUAL_THEME = {
-  blue: "#5d73ff",
-  green: "#2bd487",
-  amber: "#ffb347",
-  red: "#ff6b6b",
-  purple: "#8d6bff",
-  teal: "#26c6da",
-  orange: "#ff8f4d",
+  blue: "#7c8cff",
+  green: "#45c78d",
+  amber: "#d8a35d",
+  red: "#e57979",
+  purple: "#9a88ff",
+  teal: "#58b7c8",
+  orange: "#d98a63",
   slate: "#97a7c3",
   text: "#f6f8ff",
-  muted: "#8f9bb3",
-  grid: "rgba(180, 194, 224, 0.14)",
+  muted: "#97a0b2",
+  grid: "rgba(180, 194, 224, 0.12)",
   donutTrack: "rgba(255,255,255,0.06)",
-  barFill: "rgba(93, 115, 255, 0.26)",
-  barStroke: "rgba(121, 142, 255, 0.92)",
-  deltaLine: "rgba(255,255,255,0.38)",
-  badgeBg: "rgba(7, 10, 16, 0.92)",
+  barFill: "rgba(124, 140, 255, 0.22)",
+  barStroke: "rgba(146, 159, 255, 0.88)",
+  deltaLine: "rgba(255,255,255,0.28)",
+  badgeBg: "rgba(11, 14, 20, 0.94)",
 };
 
 const METRIC_VISUALS = {
   tickets: {
     accent: VISUAL_THEME.blue,
-    fill: "rgba(93, 115, 255, 0.34)",
-    stroke: "rgba(121, 142, 255, 0.96)",
+    fill: "rgba(124, 140, 255, 0.24)",
+    stroke: "rgba(153, 165, 255, 0.94)",
   },
   installation_tickets: {
     accent: VISUAL_THEME.amber,
-    fill: "rgba(255, 179, 71, 0.26)",
-    stroke: "rgba(255, 190, 92, 0.94)",
+    fill: "rgba(216, 163, 93, 0.24)",
+    stroke: "rgba(228, 183, 122, 0.9)",
   },
   bot_resolved_tickets: {
     accent: VISUAL_THEME.teal,
-    fill: "rgba(38, 198, 218, 0.24)",
-    stroke: "rgba(91, 218, 231, 0.94)",
+    fill: "rgba(88, 183, 200, 0.22)",
+    stroke: "rgba(114, 198, 212, 0.9)",
   },
   repeat_tickets: {
     accent: VISUAL_THEME.purple,
-    fill: "rgba(141, 107, 255, 0.26)",
-    stroke: "rgba(173, 145, 255, 0.94)",
+    fill: "rgba(154, 136, 255, 0.22)",
+    stroke: "rgba(183, 170, 255, 0.9)",
   },
 };
 
@@ -698,7 +698,7 @@ function renderProductHealth() {
       <td class="num">${index + 1}</td>
       <td>
         <div class="name-stack">
-          <div class="name-main">${escHtml(state.productView === "category" ? row.product_category : row.product_name || "Other")}</div>
+          <div class="name-main">${escHtml(state.productView === "category" ? row.product_category : row.product_name || "Other")}<span class="row-chevron">›</span></div>
           <div class="name-sub">${escHtml(state.productView === "category" ? `Top issue: ${row.top_issue_detail || "No issue detail"}` : `Category: ${row.product_category || "Other"}`)}</div>
         </div>
       </td>
@@ -1261,6 +1261,7 @@ async function openIssueDrilldown(issueId) {
     els.drilldownTitle.textContent = issue.fault_code_level_2 || "Issue detail";
     els.drilldownSubtitle.textContent = `${issue.product_name || "Other"} · ${issue.executive_fault_code || "Others"} · ${issue.fault_code_level_1 || "Unclassified"}`;
     state.currentDrilldown = payload.drilldown || {};
+    renderDrilldownFilters();
     renderDrilldownPanels(state.currentDrilldown);
   } catch (error) {
     els.drilldownBody.innerHTML = `<div class="error-state">${escHtml(error.message || "Failed to load details.")}</div>`;
@@ -1280,6 +1281,53 @@ function getDrilldownControlDefinitions() {
   return controls;
 }
 
+function getDrilldownOptions(definition) {
+  const source = state.currentDrilldownKind === "category"
+    ? state.currentCategoryDrilldown || {}
+    : state.currentDrilldown || {};
+  const rowsToOptions = (rows, formatter = (row) => row.label) => {
+    const counts = new Map();
+    (rows || []).forEach((row) => {
+      const label = String(formatter(row) || "").trim();
+      if (!label) return;
+      counts.set(label, (counts.get(label) || 0) + Number(row.tickets || 0));
+    });
+    return [...counts.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  };
+
+  if (state.currentDrilldownKind === "category") {
+    if (definition.key === "products") {
+      return rowsToOptions(source.products || source.product_daily || [], (row) => row.label || row.product_name);
+    }
+    if (definition.key === "efcs") {
+      return rowsToOptions(source.efcs || [], (row) => row.label);
+    }
+    if (definition.key === "include_fc1") {
+      return rowsToOptions(source.fc1 || [], (row) => row.label);
+    }
+    if (definition.key === "include_fc2") {
+      return rowsToOptions(source.product_fault_daily || [], (row) => row.fault_code_level_2);
+    }
+    if (definition.key === "bot_actions") {
+      return rowsToOptions(source.bot_actions || [], (row) => row.label);
+    }
+  }
+
+  if (state.currentDrilldownKind === "product" || state.currentDrilldownKind === "issue") {
+    if (definition.key === "efcs") return rowsToOptions(source.efcs || [], (row) => row.label);
+    if (definition.key === "include_fc1") return rowsToOptions(source.fc1 || [], (row) => row.label);
+    if (definition.key === "include_fc2") {
+      if (source.fc2?.length) return rowsToOptions(source.fc2 || [], (row) => row.label);
+      return rowsToOptions(source.issue_matrix || [], (row) => row.issue_detail);
+    }
+    if (definition.key === "bot_actions") return rowsToOptions(source.bot_actions || [], (row) => row.label);
+  }
+
+  return getControlOptions({ key: definition.key, optionsKey: definition.optionsKey });
+}
+
 function renderDrilldownFilters() {
   if (!els.drilldownFilters) return;
   if (!state.currentDrilldownKind || !state.drilldownFilters) {
@@ -1293,7 +1341,7 @@ function renderDrilldownFilters() {
   const bounds = state.options.date_bounds || {};
   const renderSelect = (definition) => {
     const selected = state.drilldownFilters[definition.key] || [];
-    const options = getControlOptions({ key: definition.key, optionsKey: definition.optionsKey });
+    const options = getDrilldownOptions(definition);
     const summary = summarizeSelection(definition, options, selected);
     const search = state.drilldownSearches[definition.key] || "";
     const filteredOptions = options.filter((item) => item.label.toLowerCase().includes(search.toLowerCase()));
@@ -1391,6 +1439,7 @@ async function refreshCurrentDrilldown() {
     const response = await fetch(`${apiUrl("/api/drilldown/product")}?${params.toString()}`);
     const payload = await response.json();
     state.currentDrilldown = payload.drilldown || {};
+    renderDrilldownFilters();
     renderDrilldownPanels(state.currentDrilldown);
     return;
   }
@@ -1401,6 +1450,7 @@ async function refreshCurrentDrilldown() {
     const payload = await response.json();
     state.currentCategoryDrilldown = payload.drilldown || {};
     state.currentDrilldown = state.currentCategoryDrilldown;
+    renderDrilldownFilters();
     renderCategoryDrilldownPanels(state.currentCategoryDrilldown);
     return;
   }
@@ -2013,6 +2063,7 @@ function shouldShowAxisLabel(index, total, mode = "weekly") {
 
 function shouldShowDeltaLabel(index, total, mode = "weekly") {
   if (index === 0) return false;
+  if (mode === "daily") return true;
   if (mode === "monthly") return true;
   if (mode === "weekly") return total <= 10 || index % 2 === 0 || index === total - 1;
   return total <= 12 || index % 4 === 0 || index === total - 1;

@@ -1,21 +1,21 @@
 :root {
-  --bg: #06070b;
-  --surface: #10131a;
-  --surface-soft: #161b24;
-  --surface-strong: #1c2330;
+  --bg: #0b0d12;
+  --surface: #13161d;
+  --surface-soft: #1a1f28;
+  --surface-strong: #212734;
   --text: #f7f8fc;
-  --muted: #8b97ab;
-  --muted-strong: #c3cad7;
-  --line: rgba(173, 183, 204, 0.12);
-  --line-strong: rgba(173, 183, 204, 0.24);
-  --blue: #5d73ff;
-  --green: #2bd487;
-  --amber: #ffb347;
-  --red: #ff6b6b;
-  --purple: #8d6bff;
-  --teal: #26c6da;
-  --orange: #ff8f4d;
-  --slate: #0a0d13;
+  --muted: #97a0b2;
+  --muted-strong: #d0d6e2;
+  --line: rgba(196, 204, 220, 0.10);
+  --line-strong: rgba(196, 204, 220, 0.18);
+  --blue: #7c8cff;
+  --green: #45c78d;
+  --amber: #d8a35d;
+  --red: #e57979;
+  --purple: #9a88ff;
+  --teal: #58b7c8;
+  --orange: #d98a63;
+  --slate: #0d1016;
   --ink-soft: #d4daea;
   --radius: 8px;
   --radius-sm: 4px;
@@ -30,9 +30,9 @@ html, body {
   font-family: "Sora", system-ui, sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(93, 115, 255, 0.08), transparent 16%),
-    radial-gradient(circle at top right, rgba(38, 198, 218, 0.05), transparent 14%),
-    linear-gradient(180deg, #05060a 0%, var(--bg) 100%);
+    radial-gradient(circle at top left, rgba(124, 140, 255, 0.04), transparent 18%),
+    radial-gradient(circle at top right, rgba(88, 183, 200, 0.03), transparent 16%),
+    linear-gradient(180deg, #090b10 0%, var(--bg) 100%);
 }
 
 button, input { font: inherit; }
@@ -176,7 +176,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .chart-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -186,16 +186,17 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   align-items: center;
   padding: 4px;
   border: 1px solid var(--line);
-  background: rgba(255,255,255,0.02);
+  background: rgba(255,255,255,0.018);
 }
 
 .toolbar-cluster-metric {
-  border-radius: 10px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.015);
 }
 
 .toolbar-cluster-grain {
   border-radius: 999px;
-  background: rgba(255,255,255,0.01);
+  background: rgba(255,255,255,0.008);
 }
 
 .widget-filter-row {
@@ -332,6 +333,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   height: 40px;
   border-radius: 6px;
   background: rgba(255,255,255,0.015);
+  color: var(--muted-strong);
 }
 
 #timelineBucketTabs .segment-btn,
@@ -341,6 +343,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   height: 36px;
   border-radius: 999px;
   background: transparent;
+  color: var(--muted);
 }
 
 .filter-grid {
@@ -594,6 +597,15 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
     linear-gradient(180deg, rgba(93,115,255,0.03), transparent 40%);
 }
 
+.panel,
+.mini-panel,
+.feature-panel,
+.chart-area,
+.modal-card,
+.drilldown-section {
+  min-width: 0;
+}
+
 .spotlight-list,
 .issue-list,
 .mix-list,
@@ -673,8 +685,20 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 }
 
 .data-table tr:last-child td { border-bottom: 0; }
+.click-row { cursor: pointer; }
+.click-row td {
+  transition: background 140ms ease, color 140ms ease;
+}
+.click-row:hover td {
+  background: rgba(124, 140, 255, 0.045);
+}
 .name-stack { display: grid; gap: 4px; }
-.name-main { font-weight: 700; white-space: nowrap; }
+.name-main { font-weight: 700; white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; }
+.row-chevron {
+  color: var(--muted);
+  font-size: 15px;
+  transform: translateY(-1px);
+}
 .name-main,
 .issue-title,
 .issue-metric-value,
@@ -695,10 +719,11 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   align-items: center;
   padding: 5px 9px;
   border-radius: 999px;
-  background: rgba(93, 115, 255, 0.10);
+  background: rgba(124, 140, 255, 0.09);
   font-size: 11px;
   font-weight: 700;
   color: var(--muted-strong);
+  border: 1px solid rgba(124, 140, 255, 0.12);
 }
 
 .issue-grid {
@@ -1130,6 +1155,10 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   border: 1px solid var(--line);
 }
 
+.drilldown-filter-grid .control-label {
+  margin-bottom: 8px;
+}
+
 .drilldown-filter-field {
   display: grid;
   gap: 6px;
@@ -1430,6 +1459,11 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: 8px;
+  overscroll-behavior-x: contain;
+}
+
+.chart-scroll svg {
+  display: block;
 }
 
 .fault-product-card h4 {

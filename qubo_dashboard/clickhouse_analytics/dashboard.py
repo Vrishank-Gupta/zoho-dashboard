@@ -313,6 +313,7 @@ class ClickHouseAnalyticsRepository:
                 "resolutions": [],
                 "statuses": [],
                 "efcs": [],
+                "fc1": [],
                 "issues": [],
                 "resolution_by_product": [],
                 "product_daily": [],
@@ -416,6 +417,15 @@ class ClickHouseAnalyticsRepository:
                 GROUP BY label
                 ORDER BY tickets DESC
                 LIMIT 12
+                """
+            ),
+            "fc1": self._query(
+                f"""
+                SELECT normalized_fault_code_l1 AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
                 """
             ),
             "issues": self._query(
