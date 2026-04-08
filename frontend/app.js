@@ -807,14 +807,14 @@ function renderRisingSignals(items) {
     return;
   }
   els.risingSignals.innerHTML = items.slice(0, 5).map((item) => `
-    <button class="issue-list-item click-card" type="button" data-rising-issue="${escHtml(item.issue_id)}">
+    <button class="issue-list-item click-card" type="button" data-rising-issue="${escHtml(item.issue_id)}" data-rising-week="${escHtml(item.week_start || "")}">
       <div class="issue-list-item-title">${escHtml(item.fault_code_level_2 || "Unclassified")}</div>
       <div class="issue-list-item-meta">${escHtml(item.product_category || "Other")} · ${escHtml(item.product_name || "Other")} · ${escHtml(item.executive_fault_code || "Others")}</div>
       <div class="issue-list-item-meta">${escHtml(fmtNum(item.volume || 0))} tickets · ${escHtml(formatSignedPct(item.delta_rate || 0))} vs prior week</div>
     </button>
   `).join("");
   els.risingSignals.querySelectorAll("[data-rising-issue]").forEach((button) => {
-    button.addEventListener("click", () => openIssueDrilldown(button.dataset.risingIssue));
+    button.addEventListener("click", () => openIssueDrilldown(button.dataset.risingIssue, { focusWeekStart: button.dataset.risingWeek || "" }));
   });
 }
 
@@ -1308,13 +1308,28 @@ async function openCategoryDrilldown(category) {
   await refreshCurrentDrilldown();
 }
 
-async function openIssueDrilldown(issueId) {
+async function openIssueDrilldown(issueId, options = {}) {
   state.drilldownFilters = structuredClone(state.filters);
   state.drilldownIssueTrendFilters.product = { efc: "", query: "" };
   state.currentDrilldownMeta = { issue_id: issueId };
   state.currentDrilldownKind = "issue";
-  state.currentDrilldownTab = "overview";
-  state.categoryDrilldownBucket = recommendedBucketMode(state.filters.date_start, state.filters.date_end, state.options.date_bounds);
+  state.currentDrilldownTab = options.focusWeekStart ? "analysis" : "overview";
+  if (options.focusWeekStart) {
+    const weekStart = toDate(options.focusWeekStart);
+    if (weekStart) {
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      const windowStart = new Date(weekStart);
+      windowStart.setDate(windowStart.getDate() - 21);
+      state.drilldownFilters.date_start = isoDate(windowStart);
+      state.drilldownFilters.date_end = isoDate(weekEnd);
+      state.categoryDrilldownBucket = "weekly";
+    } else {
+      state.categoryDrilldownBucket = recommendedBucketMode(state.filters.date_start, state.filters.date_end, state.options.date_bounds);
+    }
+  } else {
+    state.categoryDrilldownBucket = recommendedBucketMode(state.filters.date_start, state.filters.date_end, state.options.date_bounds);
+  }
   els.drilldownModal.classList.remove("hidden");
   els.drilldownEyebrow.textContent = "Issue drilldown";
   els.drilldownTitle.textContent = "Loading issue";

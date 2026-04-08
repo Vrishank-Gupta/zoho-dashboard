@@ -448,19 +448,55 @@ class AnalyticsService:
     def _agg_rising_signals(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         weekly: dict[tuple[str, str, str, str], dict[date, int]] = defaultdict(lambda: defaultdict(int))
         meta: dict[tuple[str, str, str, str], dict[str, str]] = {}
+        excluded_category_labels = {"other", "others", "blank product", "blankproduct", "-", ""}
+        excluded_exact_labels = {"others", "blank", "unclassified", "blank chat"}
+        excluded_keywords = (
+            "sales",
+            "marketing",
+            "logistics",
+            "order",
+            "fulfilment",
+            "fulfillment",
+            "delivery",
+            "subscription",
+            "billing",
+            "monetisation",
+            "monetization",
+            "promotional",
+            "promotion",
+            "pre-purchase",
+            "pre purchase",
+            "enquiry",
+            "inquiry",
+        )
         for row in rows:
             product_category = str(row.get("product_category") or "Other")
             product_name = str(row.get("product_name") or "Other")
             efc = str(row.get("executive_fault_code") or "Others")
             fc1 = str(row.get("fault_code_level_1") or "Unclassified")
             fc2 = str(row.get("fault_code_level_2") or "Unclassified")
-            if product_name.strip().lower() in {"blank product", "blankproduct", "-"}:
+            normalized_category = product_category.strip().lower()
+            normalized_product = product_name.strip().lower()
+            normalized_efc = efc.strip().lower()
+            normalized_fc1 = fc1.strip().lower()
+            normalized_fc2 = fc2.strip().lower()
+            if normalized_category in excluded_category_labels:
                 continue
-            if efc.strip().lower() in {"others", "blank", "unclassified"}:
+            if normalized_product in {"blank product", "blankproduct", "-", ""}:
                 continue
-            if fc2.strip().lower() in {"unclassified", "blank", "others"}:
+            if normalized_efc in excluded_exact_labels:
                 continue
-            if "instal" in fc1.lower() or "instal" in fc2.lower():
+            if normalized_fc2 in excluded_exact_labels:
+                continue
+            if any(keyword in normalized_efc for keyword in excluded_keywords):
+                continue
+            if any(keyword in normalized_fc1 for keyword in excluded_keywords):
+                continue
+            if any(keyword in normalized_fc2 for keyword in excluded_keywords):
+                continue
+            if "instal" in normalized_fc1 or "instal" in normalized_fc2:
+                continue
+            if str(row.get("normalized_bot_action") or "").strip().lower() == "blank chat":
                 continue
             metric_date = row.get("metric_date")
             if not isinstance(metric_date, date):
