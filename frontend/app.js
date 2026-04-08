@@ -1559,7 +1559,7 @@ function renderDrilldownPanels(drilldown) {
     bot_resolved_tickets: row.bot_resolved_tickets,
     repeat_tickets: 0,
   })), state.categoryDrilldownBucket);
-  const productPeriodModel = buildProductPeriodModel(drilldown.timeline || [], drilldown.issue_daily || [], state.categoryDrilldownBucket);
+  const productIssueTrendModel = buildProductIssueTrendModel(drilldown.issue_daily || [], state.categoryDrilldownBucket);
   renderDrilldownTabs();
   const snapshotCards = state.currentDrilldownKind === "issue"
     ? [
@@ -1622,7 +1622,7 @@ function renderDrilldownPanels(drilldown) {
           </div>
           <div class="panel-actions">${renderCategoryBucketTabs()}</div>
         </div>
-        ${renderProductPeriodTable(productPeriodModel)}
+        ${renderProductIssueTrendTable(productIssueTrendModel)}
       </div>
     </section>` : ""}`;
   els.drilldownBody.innerHTML = state.currentDrilldownTab === "analysis" ? analysis : overview;
@@ -2752,5 +2752,99 @@ function renderProductPeriodTable(periods) {
           </div>
         </details>
       `).join("")}
+    </div>`;
+}
+
+function buildProductIssueTrendModel(issueDailyRows, mode) {
+  const bucketMode = resolveBucketMode((issueDailyRows || []).map((row) => ({ metric_date: row.metric_date })), mode);
+  const periodMap = new Map();
+  const issueMap = new Map();
+  (issueDailyRows || []).forEach((row) => {
+    const bucket = getBucketDescriptor(row.metric_date, bucketMode);
+    if (!periodMap.has(bucket.key)) {
+      periodMap.set(bucket.key, { key: bucket.key, label: bucket.label });
+    }
+    const issueKey = `${row.executive_fault_code || "Others"}||${row.issue_detail || "Unclassified"}`;
+    if (!issueMap.has(issueKey)) {
+      issueMap.set(issueKey, {
+        executive_fault_code: row.executive_fault_code || "Others",
+        issue_detail: row.issue_detail || "Unclassified",
+        byPeriod: new Map(),
+      });
+    }
+    const current = issueMap.get(issueKey);
+    current.byPeriod.set(bucket.key, (current.byPeriod.get(bucket.key) || 0) + Number(row.tickets || 0));
+  });
+  const periods = [...periodMap.values()].sort((a, b) => a.key.localeCompare(b.key));
+  const rows = [...issueMap.values()].map((issue) => {
+    const cells = periods.map((period, index) => {
+      const tickets = Number(issue.byPeriod.get(period.key) || 0);
+      const previous = index === 0 ? 0 : Number(issue.byPeriod.get(periods[index - 1].key) || 0);
+      const delta = index === 0 ? 0 : previous > 0 ? (tickets - previous) / previous : tickets > 0 ? 1 : 0;
+      return {
+        key: period.key,
+        label: period.label,
+        tickets,
+        delta_vs_previous: delta,
+      };
+    });
+    const total = cells.reduce((sum, cell) => sum + cell.tickets, 0);
+    const latest = cells[cells.length - 1]?.tickets || 0;
+    const previous = cells.length > 1 ? cells[cells.length - 2]?.tickets || 0 : 0;
+    return {
+      executive_fault_code: issue.executive_fault_code,
+      issue_detail: issue.issue_detail,
+      total,
+      latest,
+      delta_vs_previous: previous > 0 ? (latest - previous) / previous : latest > 0 ? 1 : 0,
+      cells,
+    };
+  }).sort((a, b) => b.total - a.total).slice(0, 12);
+  const maxCell = Math.max(1, ...rows.flatMap((row) => row.cells.map((cell) => cell.tickets)));
+  rows.forEach((row) => {
+    row.cells = row.cells.map((cell) => ({
+      ...cell,
+      intensity: cell.tickets / maxCell,
+    }));
+  });
+  return { periods, rows };
+}
+
+function renderProductIssueTrendTable(model) {
+  if (!model.rows.length) return '<div class="empty-state">No issue trend available in the selected range.</div>';
+  return `
+    <div class="heatmap-wrap">
+      <table class="heatmap-table compact issue-trend-table">
+        <thead>
+          <tr>
+            <th>Issue</th>
+            ${model.periods.map((period) => `<th>${escHtml(period.label)}</th>`).join("")}
+            <th class="num">Total</th>
+            <th class="num">Latest change</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${model.rows.map((row) => `
+            <tr>
+              <td class="heatmap-row-label">
+                <div class="fault-label-stack">
+                  <strong>${escHtml(row.issue_detail)}</strong>
+                  <span>${escHtml(row.executive_fault_code)}</span>
+                </div>
+              </td>
+              ${row.cells.map((cell, index) => `
+                <td>
+                  <div class="heat-cell issue" style="background: rgba(98, 180, 171, ${0.10 + cell.intensity * 0.30})">
+                    <strong>${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}</strong>
+                    ${index > 0 && cell.tickets ? `<span class="heat-cell-delta ${cell.delta_vs_previous >= 0 ? "up" : "down"}">${escHtml(formatSignedPct(cell.delta_vs_previous))}</span>` : ""}
+                  </div>
+                </td>
+              `).join("")}
+              <td class="num"><strong>${escHtml(fmtNum(row.total))}</strong></td>
+              <td class="num ${row.delta_vs_previous >= 0 ? "good" : "bad"}"><strong>${escHtml(formatSignedPct(row.delta_vs_previous))}</strong></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
     </div>`;
 }
