@@ -429,7 +429,6 @@ class AnalyticsService:
     def _agg_issue_views(self, issues: list[AggregateIssue]) -> dict[str, list[dict[str, Any]]]:
         return {
             "highest_volume": [self._issue_payload(issue) for issue in issues[:10]],
-            "installation_tickets": [self._issue_payload(issue) for issue in sorted(issues, key=lambda item: (item.volume * item.installation_rate, item.volume), reverse=True)[:10]],
             "repeat_heavy": [self._issue_payload(issue) for issue in sorted(issues, key=lambda item: (item.volume * item.repeat_rate, item.volume), reverse=True)[:10]],
             "bot_leakage": [self._issue_payload(issue) for issue in sorted(issues, key=lambda item: (item.volume * item.bot_transfer_rate, item.volume), reverse=True)[:10]],
         }
@@ -790,7 +789,8 @@ class AnalyticsService:
         product_fault_totals: dict[tuple[str, str, str, str], int] = defaultdict(int)
         for row in mapped.get("issues", []):
             issue_detail = str(row.get("label") or row.get("fault_code_level_2") or "")
-            effective_efc = map_executive_fault_code(None, issue_detail, filters.efc_overrides)
+            original_efc = str(row.get("executive_fault_code") or "Others")
+            effective_efc = original_efc if original_efc and original_efc != "Others" else map_executive_fault_code(None, issue_detail, filters.efc_overrides)
             key = (effective_efc, issue_detail)
             current = issue_totals.get(key)
             if current is None:
@@ -799,12 +799,10 @@ class AnalyticsService:
                     "label": issue_detail,
                     "tickets": 0,
                     "bot_resolved_tickets": 0,
-                    "installation_tickets": 0,
                 }
                 issue_totals[key] = current
             current["tickets"] += int(row.get("tickets", 0) or 0)
             current["bot_resolved_tickets"] += int(row.get("bot_resolved_tickets", 0) or 0)
-            current["installation_tickets"] += int(row.get("installation_tickets", 0) or 0)
             efc_totals[effective_efc] += int(row.get("tickets", 0) or 0)
         for row in mapped.get("product_fault_daily", []):
             issue_detail = str(row.get("fault_code_level_2") or "")

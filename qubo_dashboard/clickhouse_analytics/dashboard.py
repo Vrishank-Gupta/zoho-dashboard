@@ -167,6 +167,8 @@ class ClickHouseAnalyticsRepository:
         return self._query(sql)
 
     def fetch_product_drilldown(self, filters: DashboardFilters, category: str, product_name: str) -> dict[str, list[dict]]:
+        current_start, current_end = self._resolve_date_range(filters)
+        previous_start, previous_end = self._previous_period(current_start, current_end)
         clauses = [
             self._fact_filters(filters, None, None),
             f"product_name = {self._quote(product_name)}",
@@ -184,6 +186,18 @@ class ClickHouseAnalyticsRepository:
                     countIf(match(lower(ifNull(status, '')), 'open|escal|pending|progress|wip')) AS open_tickets
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE {where_sql}
+                """
+            ),
+            "summary_previous": self._query(
+                f"""
+                SELECT
+                    count() AS tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(is_bot_transferred = 1) AS bot_transferred_tickets,
+                    countIf(normalized_bot_action = 'Blank chat') AS blank_chat_tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {self._fact_filters(filters, previous_start, previous_end)} AND product_name = {self._quote(product_name)}
                 """
             ),
             "timeline": self._query(
@@ -273,12 +287,26 @@ class ClickHouseAnalyticsRepository:
                 LIMIT 15
                 """
             ),
+            "issue_daily": self._query(
+                f"""
+                SELECT
+                    created_date AS metric_date,
+                    executive_fault_code,
+                    normalized_fault_code_l2 AS issue_detail,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY metric_date, executive_fault_code, issue_detail
+                ORDER BY metric_date, tickets DESC
+                """
+            ),
         }
 
     def fetch_category_drilldown(self, filters: DashboardFilters, category: str, product_names: list[str]) -> dict[str, list[dict]]:
         if not product_names:
             return {
                 "summary": [],
+                "summary_previous": [],
                 "timeline": [],
                 "products": [],
                 "bot_actions": [],
@@ -290,6 +318,8 @@ class ClickHouseAnalyticsRepository:
                 "product_daily": [],
                 "product_fault_daily": [],
             }
+        current_start, current_end = self._resolve_date_range(filters)
+        previous_start, previous_end = self._previous_period(current_start, current_end)
         clauses = [
             self._fact_filters(filters, None, None),
             f"product_name IN ({self._quote_join(product_names)})",
@@ -307,6 +337,18 @@ class ClickHouseAnalyticsRepository:
                     countIf(match(lower(ifNull(status, '')), 'open|escal|pending|progress|wip')) AS open_tickets
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE {where_sql}
+                """
+            ),
+            "summary_previous": self._query(
+                f"""
+                SELECT
+                    count() AS tickets,
+                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(is_bot_transferred = 1) AS bot_transferred_tickets,
+                    countIf(normalized_bot_action = 'Blank chat') AS blank_chat_tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {self._fact_filters(filters, previous_start, previous_end)} AND product_name IN ({self._quote_join(product_names)})
                 """
             ),
             "timeline": self._query(
@@ -380,13 +422,11 @@ class ClickHouseAnalyticsRepository:
                 f"""
                 SELECT
                     executive_fault_code,
-                    normalized_fault_code_l2 AS label,
                     count() AS tickets,
                     countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
-                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE {where_sql}
-                GROUP BY executive_fault_code, label
+                GROUP BY executive_fault_code
                 ORDER BY tickets DESC
                 LIMIT 15
                 """
@@ -434,6 +474,8 @@ class ClickHouseAnalyticsRepository:
 
     def fetch_issue_drilldown(self, filters: DashboardFilters, issue_id: str) -> dict[str, list[dict]]:
         category, product_name, efc, issue_detail = self._parse_issue_id(issue_id)
+        current_start, current_end = self._resolve_date_range(filters)
+        previous_start, previous_end = self._previous_period(current_start, current_end)
         clauses = [
             self._fact_filters(filters, None, None),
             f"product_name = {self._quote(product_name)}",
@@ -441,6 +483,28 @@ class ClickHouseAnalyticsRepository:
         ]
         where_sql = " AND ".join([clause for clause in clauses if clause])
         return {
+            "summary": self._query(
+                f"""
+                SELECT
+                    count() AS tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(is_bot_transferred = 1) AS bot_transferred_tickets,
+                    countIf(normalized_bot_action = 'Blank chat') AS blank_chat_tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                """
+            ),
+            "summary_previous": self._query(
+                f"""
+                SELECT
+                    count() AS tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(is_bot_transferred = 1) AS bot_transferred_tickets,
+                    countIf(normalized_bot_action = 'Blank chat') AS blank_chat_tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {self._fact_filters(filters, previous_start, previous_end)} AND product_name = {self._quote(product_name)} AND normalized_fault_code_l2 = {self._quote(issue_detail)}
+                """
+            ),
             "timeline": self._query(
                 f"""
                 SELECT
@@ -717,6 +781,12 @@ class ClickHouseAnalyticsRepository:
         if start_date > end_date:
             start_date = end_date
         return start_date, end_date
+
+    def _previous_period(self, start_date: date, end_date: date) -> tuple[date, date]:
+        span_days = max(0, (end_date - start_date).days)
+        previous_end = start_date - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=span_days)
+        return previous_start, previous_end
 
     def _parse_date(self, value: str | None) -> date | None:
         if not value:

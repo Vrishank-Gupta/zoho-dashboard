@@ -3,6 +3,7 @@ const DEFAULT_FILTERS = {
   date_end: "",
   exclude_installation: false,
   exclude_blank_chat: false,
+  exclude_unclassified_blank: false,
   categories: [],
   products: [],
   efcs: [],
@@ -46,7 +47,6 @@ const ISSUE_VIEWS = [
   { key: "highest_volume", label: "By volume" },
   { key: "bot_leakage", label: "High transfer" },
   { key: "repeat_heavy", label: "Repeat-heavy" },
-  { key: "installation_tickets", label: "Installation" },
 ];
 
 const PRODUCT_VIEWS = [
@@ -60,8 +60,8 @@ const VIEW_TABS = [
 ];
 
 const DEFAULT_EXCLUDED_SELECTIONS = {
-  products: new Set(["blank product", "blankproduct"]),
-  efcs: new Set(["blank", "unclassified"]),
+  products: new Set(),
+  efcs: new Set(),
 };
 
 const MAPPING_STUDIO_TABS = [
@@ -77,7 +77,6 @@ const DRILLDOWN_TABS = {
   category: [
     { key: "overview", label: "Overview" },
     { key: "products", label: "Product trend" },
-    { key: "issues", label: "Issue movement" },
   ],
   issue: [
     { key: "overview", label: "Overview" },
@@ -93,7 +92,7 @@ const TIMELINE_METRICS = [
 ];
 
 const BUCKET_MODES = [
-  { key: "auto", label: "Auto" },
+  { key: "daily", label: "Daily" },
   { key: "weekly", label: "Weekly" },
   { key: "monthly", label: "Monthly" },
 ];
@@ -141,8 +140,8 @@ const state = {
   productSort: "tickets",
   productSortDirection: "desc",
   timelineMetric: "tickets",
-  timelineBucket: "auto",
-  botBucket: "auto",
+  timelineBucket: "daily",
+  botBucket: "daily",
   activePreset: "60d",
   advancedFiltersOpen: false,
   defaultSelectionsApplied: false,
@@ -156,11 +155,14 @@ const state = {
   mappingStudioTab: loadSessionJson("quboMappingStudioTab", "products"),
   issueWidgetFilters: { categories: [], products: [] },
   issueWidgetOpenFilter: null,
-  categoryDrilldownBucket: "auto",
+  categoryDrilldownBucket: "daily",
   currentDrilldown: null,
   currentDrilldownKind: null,
   currentDrilldownTab: "overview",
   currentCategoryDrilldown: null,
+  drilldownFilters: null,
+  drilldownOpenFilter: null,
+  currentDrilldownMeta: null,
 };
 state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
 
@@ -218,6 +220,7 @@ const els = {
   drilldownEyebrow: document.getElementById("drilldownEyebrow"),
   drilldownTitle: document.getElementById("drilldownTitle"),
   drilldownSubtitle: document.getElementById("drilldownSubtitle"),
+  drilldownFilters: document.getElementById("drilldownFilters"),
   drilldownTabs: document.getElementById("drilldownTabs"),
   drilldownBody: document.getElementById("drilldownBody"),
 };
@@ -269,6 +272,7 @@ function bindEvents() {
     state.filters = structuredClone(DEFAULT_FILTERS);
     state.searches = {};
     state.activePreset = "60d";
+    syncDashboardBucketModes();
     state.advancedFiltersOpen = false;
     state.defaultSelectionsApplied = false;
     state.issueWidgetFilters = { categories: [], products: [] };
@@ -281,12 +285,14 @@ function bindEvents() {
   els.dateStart.addEventListener("change", () => {
     state.filters.date_start = els.dateStart.value;
     state.activePreset = "";
+    syncDashboardBucketModes();
     loadDashboard();
   });
 
   els.dateEnd.addEventListener("change", () => {
     state.filters.date_end = els.dateEnd.value;
     state.activePreset = "";
+    syncDashboardBucketModes();
     loadDashboard();
   });
 
@@ -378,12 +384,14 @@ async function loadDashboard() {
     state.options = payload.filter_options || {};
     const appliedDefaults = applyDefaultSelections();
     if (appliedDefaults) {
+      if (state.filters.exclude_unclassified_blank) applyBlankUnclassifiedShortcut(true);
       renderDateToolbar();
       renderFilterControls();
       loadDashboard();
       return;
     }
     reconcileFilterState();
+    syncDashboardBucketModes();
     reconcileIssueWidgetFilters();
     renderDateToolbar();
     renderFilterControls();
@@ -408,6 +416,52 @@ function applyDefaultSelections() {
   });
   state.defaultSelectionsApplied = true;
   return changed;
+}
+
+function syncDashboardBucketModes() {
+  const recommended = recommendedBucketMode(state.filters.date_start, state.filters.date_end, state.options.date_bounds);
+  state.timelineBucket = recommended;
+  state.botBucket = recommended;
+}
+
+function recommendedBucketMode(dateStart, dateEnd, bounds = {}) {
+  const start = toDate(dateStart || bounds.min);
+  const end = toDate(dateEnd || bounds.max);
+  if (!start || !end) return "weekly";
+  const days = Math.max(0, Math.round((end - start) / 86400000)) + 1;
+  if (days <= 35) return "daily";
+  if (days <= 150) return "weekly";
+  return "monthly";
+}
+
+function applyBlankUnclassifiedShortcut(active) {
+  const productExclusions = new Set(["blank product", "blankproduct"]);
+  const efcExclusions = new Set(["blank", "unclassified"]);
+  const ensureExplicitSelection = (key) => {
+    if ((state.filters[key] || []).length) return;
+    const control = CONTROLS.find((item) => item.key === key);
+    if (!control) return;
+    state.filters[key] = getControlOptions(control).map((item) => item.label);
+  };
+  ensureExplicitSelection("products");
+  ensureExplicitSelection("efcs");
+  if (active) {
+    state.filters.products = (state.filters.products || []).filter((label) => !productExclusions.has(String(label || "").trim().toLowerCase()));
+    state.filters.efcs = (state.filters.efcs || []).filter((label) => !efcExclusions.has(String(label || "").trim().toLowerCase()));
+    return;
+  }
+  const allProducts = getControlOptions({ key: "products", optionsKey: "products" }).map((item) => item.label);
+  const allEfcs = getControlOptions({ key: "efcs", optionsKey: "efcs" }).map((item) => item.label);
+  const productSet = new Set(state.filters.products || []);
+  const efcSet = new Set(state.filters.efcs || []);
+  allProducts.forEach((label) => {
+    if (productExclusions.has(String(label || "").trim().toLowerCase())) productSet.add(label);
+  });
+  allEfcs.forEach((label) => {
+    if (efcExclusions.has(String(label || "").trim().toLowerCase())) efcSet.add(label);
+  });
+  state.filters.products = [...productSet];
+  state.filters.efcs = [...efcSet];
 }
 
 function renderDashboard(payload) {
@@ -471,6 +525,7 @@ function renderDateToolbar() {
         state.filters.date_start = clampIsoDate(shiftIsoDate(bounds.max, -(preset?.days || 0)), bounds.min, bounds.max);
         state.filters.date_end = bounds.max;
       }
+      syncDashboardBucketModes();
       els.dateStart.value = state.filters.date_start;
       els.dateEnd.value = state.filters.date_end;
       loadDashboard();
@@ -483,6 +538,7 @@ function renderReportingShortcuts() {
   const shortcuts = [
     { key: "exclude_installation", label: "Exclude installation tickets" },
     { key: "exclude_blank_chat", label: "Exclude blank chats" },
+    { key: "exclude_unclassified_blank", label: "Exclude blank products & unclassified EFC" },
   ];
   els.reportingShortcuts.innerHTML = shortcuts.map((item) => `
     <button class="shortcut-pill ${state.filters[item.key] ? "active" : ""}" type="button" data-shortcut="${escHtml(item.key)}">${escHtml(item.label)}</button>
@@ -491,6 +547,7 @@ function renderReportingShortcuts() {
     button.addEventListener("click", () => {
       const key = button.dataset.shortcut;
       state.filters[key] = !state.filters[key];
+      if (key === "exclude_unclassified_blank") applyBlankUnclassifiedShortcut(state.filters[key]);
       loadDashboard();
     });
   });
@@ -605,8 +662,9 @@ function renderTimeline(points) {
       : metricKey === "repeat_tickets"
         ? VISUAL_THEME.purple
         : VISUAL_THEME.blue;
+  const chartPoints = addBaselineDelta(bucketed.map((item) => ({ label: item.label, value: item[metricKey] || 0 })));
   renderBarChart(els.timelineChart, {
-    points: bucketed.map((item) => ({ label: item.label, value: item[metricKey] || 0 })),
+    points: chartPoints,
     color,
     yLabel: TIMELINE_METRICS.find((item) => item.key === metricKey)?.label || "Tickets",
   });
@@ -706,9 +764,9 @@ function renderIssueBoard(issueViews) {
       </div>
       <div class="issue-metrics">
         <div class="issue-metric"><div class="issue-metric-label">Tickets</div><div class="issue-metric-value">${fmtNum(issue.volume)}</div></div>
-        <div class="issue-metric"><div class="issue-metric-label">Installation %</div><div class="issue-metric-value">${fmtPct(issue.installation_rate)}</div></div>
         <div class="issue-metric"><div class="issue-metric-label">Bot resolved %</div><div class="issue-metric-value">${fmtPct(issue.bot_resolved_rate)}</div></div>
         <div class="issue-metric"><div class="issue-metric-label">Transfer %</div><div class="issue-metric-value">${fmtPct(issue.bot_transfer_rate)}</div></div>
+        <div class="issue-metric"><div class="issue-metric-label">Change vs first period</div><div class="issue-metric-value">${formatSignedPct(issue.delta_rate || 0)}</div></div>
       </div>
     </button>`).join("");
   els.issueBoard.querySelectorAll("[data-issue-id]").forEach((button) => {
@@ -840,14 +898,16 @@ function renderBotTrend(points) {
   const innerH = height - pad.top - pad.bottom;
   const maxTickets = Math.max(...bucketed.map((item) => item.tickets || 0), 1);
   const step = innerW / Math.max(bucketed.length, 1);
-  const barW = Math.min(44, step * 0.62);
-  const showValueLabels = bucketed.length <= 10;
+  const barW = Math.max(34, Math.min(94, step * 0.78));
+  const showValueLabels = bucketed.length <= 14;
+  const baselineTickets = Number(bucketed[0]?.tickets || 0);
   const linePoints = bucketed.map((item, index) => {
     const pct = item.tickets ? (item.bot_resolved_tickets || 0) / item.tickets : 0;
     return {
       x: pad.left + step * index + step / 2,
       y: pad.top + innerH - pct * innerH,
       pct,
+      delta: index === 0 ? 0 : baselineTickets > 0 ? ((item.tickets || 0) - baselineTickets) / baselineTickets : 0,
       label: item.label,
     };
   });
@@ -860,13 +920,13 @@ function renderBotTrend(points) {
       }).join("")}
       ${[0, 0.5, 1].map((ratio) => {
         const y = pad.top + innerH - ratio * innerH;
-        return `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(maxTickets * ratio))}</text>`;
+        return ratio === 0 || ratio === 1 ? `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(maxTickets * ratio))}</text>` : "";
       }).join("")}
       ${bucketed.map((item, index) => {
         const barH = ((item.tickets || 0) / maxTickets) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 8)}" text-anchor="middle" font-size="10" font-weight="700" fill="${VISUAL_THEME.text}">${fmtNum(item.tickets || 0)}</text>` : ""}${shouldShowAxisLabel(index, bucketed.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>` : ""}`;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="10" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 10)}" text-anchor="middle" font-size="11" font-weight="800" fill="${VISUAL_THEME.text}">${fmtNum(item.tickets || 0)}</text>${index > 0 ? `<text x="${x + barW / 2}" y="${Math.max(26, y + 10)}" text-anchor="middle" font-size="10" font-weight="700" fill="${item.tickets >= baselineTickets ? VISUAL_THEME.green : VISUAL_THEME.red}">${formatSignedPct(linePoints[index].delta)}</text>` : ""}` : ""}${shouldShowAxisLabel(index, bucketed.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>` : ""}`;
       }).join("")}
       <path d="${linePath}" fill="none" stroke="${VISUAL_THEME.green}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
       ${linePoints.map((point, index) => `<circle cx="${point.x}" cy="${point.y}" r="4.5" fill="${VISUAL_THEME.green}"></circle>${bucketed.length <= 8 || shouldShowAxisLabel(index, bucketed.length) ? `<text x="${point.x}" y="${Math.max(14, point.y - 10)}" text-anchor="middle" font-size="10" font-weight="700" fill="${VISUAL_THEME.green}">${(point.pct * 100).toFixed(0)}%</text>` : ""}`).join("")}
@@ -1130,28 +1190,24 @@ async function runPipeline() {
 }
 
 async function openProductDrilldown(category, productName) {
+  state.drilldownFilters = structuredClone(state.filters);
+  state.currentDrilldownMeta = { category, product_name: productName };
   state.currentDrilldownKind = "product";
   state.currentDrilldownTab = "overview";
+  state.categoryDrilldownBucket = recommendedBucketMode(state.filters.date_start, state.filters.date_end, state.options.date_bounds);
   els.drilldownModal.classList.remove("hidden");
   els.drilldownEyebrow.textContent = "Product drilldown";
   els.drilldownTitle.textContent = productName;
   els.drilldownSubtitle.textContent = category;
   els.drilldownBody.innerHTML = '<div class="empty-state">Loading details...</div>';
-  try {
-    const params = buildQueryParams(state.filters);
-    params.set("category", category);
-    params.set("product_name", productName);
-    const response = await fetch(`${apiUrl("/api/drilldown/product")}?${params.toString()}`);
-    const payload = await response.json();
-    state.currentDrilldown = payload.drilldown || {};
-    renderDrilldownPanels(state.currentDrilldown);
-  } catch (error) {
-    els.drilldownBody.innerHTML = `<div class="error-state">${escHtml(error.message || "Failed to load details.")}</div>`;
-  }
+  renderDrilldownFilters();
+  await refreshCurrentDrilldown();
 }
 
 async function openCategoryDrilldown(category) {
-  state.categoryDrilldownBucket = "auto";
+  state.drilldownFilters = structuredClone(state.filters);
+  state.currentDrilldownMeta = { category };
+  state.categoryDrilldownBucket = recommendedBucketMode(state.filters.date_start, state.filters.date_end, state.options.date_bounds);
   state.currentDrilldownKind = "category";
   state.currentDrilldownTab = "overview";
   els.drilldownModal.classList.remove("hidden");
@@ -1159,27 +1215,24 @@ async function openCategoryDrilldown(category) {
   els.drilldownTitle.textContent = category;
   els.drilldownSubtitle.textContent = "Product mix, issues, resolutions, and bot actions for this category";
   els.drilldownBody.innerHTML = '<div class="empty-state">Loading details...</div>';
-  try {
-    const params = buildQueryParams(state.filters);
-    params.set("category", category);
-    const response = await fetch(`${apiUrl("/api/drilldown/category")}?${params.toString()}`);
-    const payload = await response.json();
-    state.currentCategoryDrilldown = payload.drilldown || {};
-    state.currentDrilldown = state.currentCategoryDrilldown;
-    renderCategoryDrilldownPanels(state.currentCategoryDrilldown);
-  } catch (error) {
-    els.drilldownBody.innerHTML = `<div class="error-state">${escHtml(error.message || "Failed to load details.")}</div>`;
-  }
+  renderDrilldownFilters();
+  await refreshCurrentDrilldown();
 }
 
 async function openIssueDrilldown(issueId) {
+  state.drilldownFilters = structuredClone(state.filters);
+  state.currentDrilldownMeta = { issue_id: issueId };
   state.currentDrilldownKind = "issue";
   state.currentDrilldownTab = "overview";
+  state.categoryDrilldownBucket = recommendedBucketMode(state.filters.date_start, state.filters.date_end, state.options.date_bounds);
   els.drilldownModal.classList.remove("hidden");
   els.drilldownEyebrow.textContent = "Issue drilldown";
   els.drilldownTitle.textContent = "Loading issue";
   els.drilldownSubtitle.textContent = "";
   els.drilldownBody.innerHTML = '<div class="empty-state">Loading details...</div>';
+  renderDrilldownFilters();
+  await refreshCurrentDrilldown();
+  return;
   try {
     const params = buildQueryParams(state.filters);
     const response = await fetch(`${apiUrl(`/api/drilldown/issue/${encodeURIComponent(issueId)}`)}?${params.toString()}`);
@@ -1194,28 +1247,144 @@ async function openIssueDrilldown(issueId) {
   }
 }
 
+function getDrilldownControlDefinitions() {
+  const controls = [
+    { key: "efcs", label: "EFC", optionsKey: "efcs" },
+    { key: "include_fc1", label: "FC1", optionsKey: "fc1" },
+    { key: "include_fc2", label: "FC2", optionsKey: "fc2" },
+    { key: "bot_actions", label: "Bot action", optionsKey: "bot_actions" },
+  ];
+  if (state.currentDrilldownKind === "category") {
+    controls.splice(1, 0, { key: "products", label: "Product", optionsKey: "products" });
+  }
+  return controls;
+}
+
+function renderDrilldownFilters() {
+  if (!els.drilldownFilters) return;
+  if (!state.currentDrilldownKind || !state.drilldownFilters) {
+    els.drilldownFilters.innerHTML = "";
+    return;
+  }
+  const defs = getDrilldownControlDefinitions();
+  const bounds = state.options.date_bounds || {};
+  const renderSelect = (definition) => {
+    const selected = state.drilldownFilters[definition.key] || [];
+    const options = getControlOptions({ key: definition.key, optionsKey: definition.optionsKey });
+    const shownSelected = selected.length ? selected : options.map((item) => item.label);
+    return `
+      <label class="drilldown-filter-field">
+        <span>${escHtml(definition.label)}</span>
+        <select multiple data-drilldown-filter="${escHtml(definition.key)}">
+          ${options.map((item) => `<option value="${escHtml(item.label)}" ${shownSelected.includes(item.label) ? "selected" : ""}>${escHtml(formatOptionLabel(definition, item.label))}</option>`).join("")}
+        </select>
+      </label>`;
+  };
+  els.drilldownFilters.innerHTML = `
+    <div class="drilldown-filter-grid">
+      <label class="drilldown-filter-field">
+        <span>From</span>
+        <input type="date" data-drilldown-date="date_start" min="${escHtml(bounds.min || "")}" max="${escHtml(bounds.max || "")}" value="${escHtml(state.drilldownFilters.date_start || "")}">
+      </label>
+      <label class="drilldown-filter-field">
+        <span>To</span>
+        <input type="date" data-drilldown-date="date_end" min="${escHtml(bounds.min || "")}" max="${escHtml(bounds.max || "")}" value="${escHtml(state.drilldownFilters.date_end || "")}">
+      </label>
+      ${defs.map(renderSelect).join("")}
+      <div class="drilldown-filter-actions">
+        <button class="ghost-btn" type="button" data-drilldown-filter-reset="true">Reset to board</button>
+        <button class="primary-btn" type="button" data-drilldown-filter-apply="true">Apply in drilldown</button>
+      </div>
+    </div>`;
+  els.drilldownFilters.querySelectorAll("[data-drilldown-date]").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.drilldownFilters[input.dataset.drilldownDate] = input.value;
+    });
+  });
+  els.drilldownFilters.querySelectorAll("[data-drilldown-filter]").forEach((select) => {
+    select.addEventListener("change", () => {
+      state.drilldownFilters[select.dataset.drilldownFilter] = [...select.selectedOptions].map((option) => option.value);
+    });
+  });
+  els.drilldownFilters.querySelector("[data-drilldown-filter-reset]")?.addEventListener("click", async () => {
+    state.drilldownFilters = structuredClone(state.filters);
+    state.categoryDrilldownBucket = recommendedBucketMode(state.drilldownFilters.date_start, state.drilldownFilters.date_end, state.options.date_bounds);
+    renderDrilldownFilters();
+    await refreshCurrentDrilldown();
+  });
+  els.drilldownFilters.querySelector("[data-drilldown-filter-apply]")?.addEventListener("click", async () => {
+    state.categoryDrilldownBucket = recommendedBucketMode(state.drilldownFilters.date_start, state.drilldownFilters.date_end, state.options.date_bounds);
+    await refreshCurrentDrilldown();
+  });
+}
+
+async function refreshCurrentDrilldown() {
+  if (state.currentDrilldownKind === "product") {
+    const params = buildQueryParams(state.drilldownFilters || state.filters);
+    params.set("category", state.currentDrilldownMeta?.category || "");
+    params.set("product_name", state.currentDrilldownMeta?.product_name || "");
+    const response = await fetch(`${apiUrl("/api/drilldown/product")}?${params.toString()}`);
+    const payload = await response.json();
+    state.currentDrilldown = payload.drilldown || {};
+    renderDrilldownPanels(state.currentDrilldown);
+    return;
+  }
+  if (state.currentDrilldownKind === "category") {
+    const params = buildQueryParams(state.drilldownFilters || state.filters);
+    params.set("category", state.currentDrilldownMeta?.category || "");
+    const response = await fetch(`${apiUrl("/api/drilldown/category")}?${params.toString()}`);
+    const payload = await response.json();
+    state.currentCategoryDrilldown = payload.drilldown || {};
+    state.currentDrilldown = state.currentCategoryDrilldown;
+    renderCategoryDrilldownPanels(state.currentCategoryDrilldown);
+    return;
+  }
+  if (state.currentDrilldownKind === "issue") {
+    const params = buildQueryParams(state.drilldownFilters || state.filters);
+    const response = await fetch(`${apiUrl(`/api/drilldown/issue/${encodeURIComponent(state.currentDrilldownMeta?.issue_id || "")}`)}?${params.toString()}`);
+    const payload = await response.json();
+    const issue = payload.issue || {};
+    els.drilldownTitle.textContent = issue.fault_code_level_2 || "Issue detail";
+    els.drilldownSubtitle.textContent = `${issue.product_name || "Other"} · ${issue.executive_fault_code || "Others"} · ${issue.fault_code_level_1 || "Unclassified"}`;
+    state.currentDrilldown = payload.drilldown || {};
+    renderDrilldownPanels(state.currentDrilldown);
+  }
+}
+
 function renderDrilldownPanels(drilldown) {
   const summary = drilldown.summary?.[0] || {};
+  const previousSummary = drilldown.summary_previous?.[0] || {};
   const timeline = bucketTimeline((drilldown.timeline || []).map((row) => ({
     date: row.metric_date,
     tickets: row.tickets,
     installation_tickets: row.installation_tickets,
     bot_resolved_tickets: row.bot_resolved_tickets,
     repeat_tickets: 0,
-  })), "weekly");
+  })), state.categoryDrilldownBucket);
   renderDrilldownTabs();
+  const snapshotCards = state.currentDrilldownKind === "issue"
+    ? [
+        renderSnapshotStat("Tickets", summary.tickets || 0, null, previousSummary.tickets || 0),
+        renderSnapshotStat("Bot resolved", summary.bot_resolved_tickets || 0, ratio(summary.bot_resolved_tickets, summary.tickets), previousSummary.bot_resolved_tickets || 0),
+        renderSnapshotStat("Transferred", summary.bot_transferred_tickets || 0, ratio(summary.bot_transferred_tickets, summary.tickets), previousSummary.bot_transferred_tickets || 0),
+        renderSnapshotStat("Blank chat", summary.blank_chat_tickets || 0, ratio(summary.blank_chat_tickets, summary.tickets), previousSummary.blank_chat_tickets || 0),
+      ]
+    : [
+        renderSnapshotStat("Tickets", summary.tickets || 0, null, previousSummary.tickets || 0),
+        renderSnapshotStat("Installation", summary.installation_tickets || 0, ratio(summary.installation_tickets, summary.tickets), previousSummary.installation_tickets || 0),
+        renderSnapshotStat("Bot resolved", summary.bot_resolved_tickets || 0, ratio(summary.bot_resolved_tickets, summary.tickets), previousSummary.bot_resolved_tickets || 0),
+        renderSnapshotStat("Blank chat", summary.blank_chat_tickets || 0, ratio(summary.blank_chat_tickets, summary.tickets), previousSummary.blank_chat_tickets || 0),
+      ];
   const overview = `
     <section class="drilldown-section">
       <div class="section-label">Snapshot</div>
       <div class="mini-summary-grid">
-        ${renderMiniStat("Tickets", summary.tickets || 0)}
-        ${renderMiniStat("Installation", ratio(summary.installation_tickets, summary.tickets), true)}
-        ${renderMiniStat("Bot resolved", ratio(summary.bot_resolved_tickets, summary.tickets), true)}
-        ${renderMiniStat("Blank chat", ratio(summary.blank_chat_tickets, summary.tickets), true)}
+        ${snapshotCards.join("")}
       </div>
     </section>
     <section class="drilldown-section">
       <div class="section-label">Trend</div>
+      <div class="panel-actions">${renderCategoryBucketTabs()}</div>
       <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline)}</div>
     </section>
     <section class="drilldown-section">
@@ -1244,10 +1413,17 @@ function renderDrilldownPanels(drilldown) {
       </div>
     </section>`;
   els.drilldownBody.innerHTML = state.currentDrilldownTab === "analysis" ? analysis : overview;
+  els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.categoryDrilldownBucket = button.dataset.categoryBucket || "daily";
+      renderDrilldownPanels(state.currentDrilldown || drilldown);
+    });
+  });
 }
 
 function renderCategoryDrilldownPanels(drilldown) {
   const summary = drilldown.summary?.[0] || {};
+  const previousSummary = drilldown.summary_previous?.[0] || {};
   const timeline = bucketTimeline((drilldown.timeline || []).map((row) => ({
     date: row.metric_date,
     tickets: row.tickets,
@@ -1262,10 +1438,10 @@ function renderCategoryDrilldownPanels(drilldown) {
     <section class="drilldown-section">
       <div class="section-label">Snapshot</div>
       <div class="mini-summary-grid">
-        ${renderMiniStat("Tickets", summary.tickets || 0)}
-        ${renderMiniStat("Installation", ratio(summary.installation_tickets, summary.tickets), true)}
-        ${renderMiniStat("Bot resolved", ratio(summary.bot_resolved_tickets, summary.tickets), true)}
-        ${renderMiniStat("Blank chat", ratio(summary.blank_chat_tickets, summary.tickets), true)}
+        ${renderSnapshotStat("Tickets", summary.tickets || 0, null, previousSummary.tickets || 0)}
+        ${renderSnapshotStat("Installation", summary.installation_tickets || 0, ratio(summary.installation_tickets, summary.tickets), previousSummary.installation_tickets || 0)}
+        ${renderSnapshotStat("Bot resolved", summary.bot_resolved_tickets || 0, ratio(summary.bot_resolved_tickets, summary.tickets), previousSummary.bot_resolved_tickets || 0)}
+        ${renderSnapshotStat("Blank chat", summary.blank_chat_tickets || 0, ratio(summary.blank_chat_tickets, summary.tickets), previousSummary.blank_chat_tickets || 0)}
       </div>
     </section>
     <section class="drilldown-section">
@@ -1283,9 +1459,8 @@ function renderCategoryDrilldownPanels(drilldown) {
         ])}</div>
         <div class="mini-panel"><h3>Issue hotspots</h3>${renderMiniTable(drilldown.issues || [], [
           { key: "executive_fault_code", label: "EFC" },
-          { key: "label", label: "FC2" },
           { key: "tickets", label: "Tickets", format: "number" },
-          { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
+          { key: "bot_resolved_tickets", label: "Bot resolved", format: "number" },
         ])}</div>
       </div>
     </section>
@@ -1302,22 +1477,11 @@ function renderCategoryDrilldownPanels(drilldown) {
       <div class="analysis-panel-head">
         <div>
           <h3>Product trend by period</h3>
-          <div class="analysis-caption">Compare week-on-week or month-on-month volume across every product in this category.</div>
+          <div class="analysis-caption">Compare product volume across periods. Expand a row to see the top issues driving that product.</div>
         </div>
         <div class="panel-actions">${renderCategoryBucketTabs()}</div>
       </div>
-      ${renderCategoryProductTrendTable(productTrend)}
-    </div>`;
-  const issuesView = `
-    <div class="mini-panel analysis-panel">
-      <div class="analysis-panel-head">
-        <div>
-          <h3>Fault-code movement by product</h3>
-          <div class="analysis-caption">Top issue buckets for each product across the selected periods.</div>
-        </div>
-        <div class="analysis-chip">${escHtml(productTrend.bucketMode === "monthly" ? "Monthly view" : "Weekly view")}</div>
-      </div>
-      ${renderCategoryFaultMatrices(faultMatrices)}
+      ${renderCategoryProductTrendTable(productTrend, faultMatrices)}
     </div>
     <section class="drilldown-section">
       <div class="drilldown-two-col">
@@ -1325,10 +1489,10 @@ function renderCategoryDrilldownPanels(drilldown) {
         <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
       </div>
     </section>`;
-  els.drilldownBody.innerHTML = state.currentDrilldownTab === "products" ? productsView : state.currentDrilldownTab === "issues" ? issuesView : overview;
+  els.drilldownBody.innerHTML = state.currentDrilldownTab === "products" ? productsView : overview;
   els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.categoryDrilldownBucket = button.dataset.categoryBucket || "auto";
+      state.categoryDrilldownBucket = button.dataset.categoryBucket || "daily";
       renderCategoryDrilldownPanels(state.currentCategoryDrilldown || drilldown);
     });
   });
@@ -1340,6 +1504,9 @@ function closeDrilldown() {
   state.currentDrilldown = null;
   state.currentDrilldownKind = null;
   state.currentDrilldownTab = "overview";
+  state.drilldownFilters = null;
+  state.currentDrilldownMeta = null;
+  if (els.drilldownFilters) els.drilldownFilters.innerHTML = "";
 }
 
 function renderDrilldownTabs() {
@@ -1618,12 +1785,13 @@ function renderMiniChartSvg(points) {
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const max = Math.max(...points.map((point) => Number(point.tickets || 0)), 1);
-  const barW = innerW / Math.max(points.length, 1) * 0.65;
-  const showValueLabels = points.length <= 8;
+  const barW = Math.max(24, Math.min(64, innerW / Math.max(points.length, 1) * 0.72));
+  const baseline = Number(points[0]?.tickets || 0);
+  const showValueLabels = points.length <= 12;
   return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:220px">
     ${[0, 0.5, 1].map((ratio) => {
       const y = pad.top + innerH - innerH * ratio;
-      return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line><text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(max * ratio))}</text>`;
+      return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line>${ratio === 0 || ratio === 1 ? `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(max * ratio))}</text>` : ""}`;
     }).join("")}
     ${points.map((point, index) => {
     const step = innerW / Math.max(points.length, 1);
@@ -1631,7 +1799,8 @@ function renderMiniChartSvg(points) {
     const barH = (value / max) * innerH;
     const x = pad.left + step * index + (step - barW) / 2;
     const y = pad.top + innerH - barH;
-    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="6" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 8)}" text-anchor="middle" font-size="10" font-weight="700" fill="${VISUAL_THEME.text}">${fmtNum(value)}</text>` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
+    const delta = index === 0 ? 0 : baseline > 0 ? (value - baseline) / baseline : 0;
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 8)}" text-anchor="middle" font-size="10" font-weight="800" fill="${VISUAL_THEME.text}">${fmtNum(value)}</text>${index > 0 ? `<text x="${x + barW / 2}" y="${Math.max(24, y + 10)}" text-anchor="middle" font-size="9" font-weight="700" fill="${delta >= 0 ? VISUAL_THEME.green : VISUAL_THEME.red}">${formatSignedPct(delta)}</text>` : ""}` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
   }).join("")}</svg>`;
 }
 
@@ -1667,8 +1836,8 @@ function renderBarChart(container, { points, color, yLabel }) {
   const innerH = height - pad.top - pad.bottom;
   const max = Math.max(...points.map((point) => Number(point.value || 0)), 1);
   const step = innerW / Math.max(points.length, 1);
-  const barW = Math.min(42, step * 0.65);
-  const showValueLabels = points.length <= 10;
+  const barW = Math.max(36, Math.min(96, step * 0.78));
+  const showValueLabels = points.length <= 14;
   container.innerHTML = `
       <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:290px">
       ${[0.25, 0.5, 0.75].map((ratio) => {
@@ -1677,14 +1846,14 @@ function renderBarChart(container, { points, color, yLabel }) {
       }).join("")}
       ${[0, 0.5, 1].map((ratio) => {
         const y = pad.top + innerH - innerH * ratio;
-        return `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(max * ratio))}</text>`;
+        return ratio === 0 || ratio === 1 ? `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(max * ratio))}</text>` : "";
       }).join("")}
       ${points.map((point, index) => {
         const value = Number(point.value || 0);
         const barH = (value / max) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${color}" opacity="0.84"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 8)}" text-anchor="middle" font-size="10" font-weight="700" fill="${VISUAL_THEME.text}">${fmtNum(value)}</text>` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="10" fill="${color}" opacity="0.9"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 10)}" text-anchor="middle" font-size="11" font-weight="800" fill="${VISUAL_THEME.text}">${fmtNum(value)}</text>${index > 0 ? `<text x="${x + barW / 2}" y="${Math.max(26, y + 10)}" text-anchor="middle" font-size="10" font-weight="700" fill="${Number(point.baseline_delta || 0) >= 0 ? VISUAL_THEME.green : VISUAL_THEME.red}">${formatSignedPct(point.baseline_delta || 0)}</text>` : ""}` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
       }).join("")}
       <text x="12" y="${pad.top + 12}" font-size="11" fill="${VISUAL_THEME.muted}">${escHtml(yLabel)}</text>
     </svg>`;
@@ -1715,6 +1884,7 @@ function reconcileFilterState() {
     const valid = new Set(getControlOptions(control).map((item) => item.label));
     state.filters[control.key] = (state.filters[control.key] || []).filter((value) => valid.has(value));
   });
+  if (state.filters.exclude_unclassified_blank) applyBlankUnclassifiedShortcut(true);
 }
 
 function reconcileIssueWidgetFilters() {
@@ -1768,10 +1938,16 @@ function bucketTimeline(points, mode) {
   points.forEach((point) => {
     const rawDate = toDate(point.date || point.metric_date);
     if (!rawDate) return;
-    const key = bucketMode === "monthly" ? `${rawDate.getFullYear()}-${String(rawDate.getMonth() + 1).padStart(2, "0")}` : isoDate(startOfWeek(rawDate));
+    const key = bucketMode === "monthly"
+      ? `${rawDate.getFullYear()}-${String(rawDate.getMonth() + 1).padStart(2, "0")}`
+      : bucketMode === "weekly"
+        ? isoDate(startOfWeek(rawDate))
+        : isoDate(rawDate);
     const label = bucketMode === "monthly"
       ? rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", month: "short", year: "2-digit" })
-      : rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
+      : bucketMode === "weekly"
+        ? startOfWeek(rawDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })
+        : rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
     if (!grouped.has(key)) grouped.set(key, { label, tickets: 0, installation_tickets: 0, bot_resolved_tickets: 0, repeat_tickets: 0 });
     const current = grouped.get(key);
     current.tickets += Number(point.tickets || 0);
@@ -1783,12 +1959,12 @@ function bucketTimeline(points, mode) {
 }
 
 function resolveBucketMode(points, mode) {
-  if (mode !== "auto") return mode;
+  if (mode === "daily" || mode === "weekly" || mode === "monthly") return mode;
   const dates = points.map((point) => toDate(point.date || point.metric_date)).filter(Boolean);
   if (!dates.length) return "weekly";
   const min = dates.reduce((acc, value) => value < acc ? value : acc, dates[0]);
   const max = dates.reduce((acc, value) => value > acc ? value : acc, dates[0]);
-  return Math.round((max - min) / 86400000) > 45 ? "monthly" : "weekly";
+  return recommendedBucketMode(isoDate(min), isoDate(max));
 }
 
 function renderLoading() {
@@ -1908,6 +2084,22 @@ function fmtPct(value) {
   return `${(Number(value || 0) * 100).toFixed(1)}%`;
 }
 
+function formatSignedPct(value) {
+  const numeric = Number(value || 0);
+  const prefix = numeric > 0 ? "+" : "";
+  return `${prefix}${fmtPct(numeric)}`;
+}
+
+function addBaselineDelta(points, valueKey = "value") {
+  if (!points.length) return [];
+  const baseline = Number(points[0]?.[valueKey] || 0);
+  return points.map((point, index) => {
+    const value = Number(point?.[valueKey] || 0);
+    const delta = index === 0 ? 0 : baseline > 0 ? (value - baseline) / baseline : 0;
+    return { ...point, baseline_delta: delta };
+  });
+}
+
 function fmtDateTime(value) {
   const date = toDate(value);
   if (!date) return "—";
@@ -2007,4 +2199,127 @@ function ratio(numerator, denominator) {
   const n = Number(numerator || 0);
   const d = Number(denominator || 0);
   return d ? n / d : 0;
+}
+
+function getBucketDescriptor(value, mode) {
+  const rawDate = toDate(value);
+  if (!rawDate) return { key: "unknown", label: "Unknown" };
+  if (mode === "monthly") {
+    return {
+      key: `${rawDate.getFullYear()}-${String(rawDate.getMonth() + 1).padStart(2, "0")}`,
+      label: rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", month: "short", year: "2-digit" }),
+    };
+  }
+  if (mode === "daily") {
+    return {
+      key: isoDate(rawDate),
+      label: rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }),
+    };
+  }
+  const weekStart = startOfWeek(rawDate);
+  return {
+    key: isoDate(weekStart),
+    label: weekStart.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" }),
+  };
+}
+
+function renderSnapshotStat(label, count, rate = null, previousCount = 0) {
+  const delta = previousCount > 0 ? (Number(count || 0) - Number(previousCount || 0)) / Number(previousCount || 0) : 0;
+  return `
+    <div class="mini-stat">
+      <div class="mini-stat-key">${escHtml(label)}</div>
+      <div class="mini-stat-value">${fmtNum(count || 0)}</div>
+      ${rate !== null ? `<div class="mini-stat-sub">${escHtml(fmtPct(rate))} of tickets</div>` : ""}
+      <div class="mini-stat-delta ${delta >= 0 ? "up" : "down"}">${escHtml(formatSignedPct(delta))} vs previous period</div>
+    </div>`;
+}
+
+function renderCategoryProductTrendTable(model, faultModel = { products: [] }) {
+  if (!model.rows.length) return '<div class="empty-state">No product trend available in the selected range.</div>';
+  const faultByProduct = new Map((faultModel.products || []).map((product) => [product.product_name, product.faults || []]));
+  return `
+    <div class="drilldown-accordion">
+      ${model.rows.map((row) => {
+        const baseline = Number(row.cells[0]?.tickets || 0);
+        const faults = faultByProduct.get(row.product_name) || [];
+        return `
+          <details class="drilldown-detail">
+            <summary class="drilldown-detail-summary">
+              <div class="drilldown-detail-title">${escHtml(row.product_name)}</div>
+              <div class="drilldown-detail-meta">${escHtml(fmtNum(row.total))} tickets</div>
+            </summary>
+            <div class="heatmap-wrap">
+              <table class="heatmap-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    ${model.periods.map((period) => `<th>${escHtml(period.label)}</th>`).join("")}
+                    <th class="num">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="heatmap-row-label">${escHtml(row.product_name)}</td>
+                    ${row.cells.map((cell, index) => {
+                      const delta = index === 0 ? 0 : baseline > 0 ? (cell.tickets - baseline) / baseline : 0;
+                      return `
+                        <td>
+                          <div class="heat-cell" style="background: rgba(77, 142, 244, ${0.12 + cell.intensity * 0.42})">
+                            <strong>${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}</strong>
+                            ${index > 0 && cell.tickets ? `<span class="heat-cell-delta ${delta >= 0 ? "up" : "down"}">${escHtml(formatSignedPct(delta))}</span>` : ""}
+                          </div>
+                        </td>`;
+                    }).join("")}
+                    <td class="num"><strong>${escHtml(fmtNum(row.total))}</strong></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="drilldown-detail-body">
+              <div class="mini-title">Top issues in this product</div>
+              ${faults.length ? renderCategoryFaultRows(faults) : '<div class="empty-state">No issue movement available.</div>'}
+            </div>
+          </details>`;
+      }).join("")}
+    </div>`;
+}
+
+function renderCategoryFaultRows(faults) {
+  if (!faults.length) return '<div class="empty-state">No issue movement available in the selected range.</div>';
+  return `
+    <div class="heatmap-wrap">
+      <table class="heatmap-table compact">
+        <thead>
+          <tr>
+            <th>Issue bucket</th>
+            ${faults[0].cells.map((cell) => `<th>${escHtml(cell.label)}</th>`).join("")}
+            <th class="num">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${faults.map((fault) => `
+            <tr>
+              <td class="heatmap-row-label">
+                <div class="fault-label-stack">
+                  <strong>${escHtml(fault.primary)}</strong>
+                  ${fault.secondary ? `<span>${escHtml(fault.secondary)}</span>` : ""}
+                </div>
+              </td>
+              ${fault.cells.map((cell, index) => {
+                const baseline = Number(fault.cells[0]?.tickets || 0);
+                const delta = index === 0 ? 0 : baseline > 0 ? (cell.tickets - baseline) / baseline : 0;
+                return `
+                  <td>
+                    <div class="heat-cell issue" style="background: rgba(30, 197, 90, ${0.10 + cell.intensity * 0.38})">
+                      <strong>${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}</strong>
+                      ${index > 0 && cell.tickets ? `<span class="heat-cell-delta ${delta >= 0 ? "up" : "down"}">${escHtml(formatSignedPct(delta))}</span>` : ""}
+                    </div>
+                  </td>`;
+              }).join("")}
+              <td class="num"><strong>${escHtml(fmtNum(fault.total))}</strong></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>`;
 }
