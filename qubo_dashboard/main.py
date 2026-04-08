@@ -501,7 +501,7 @@ def tickets(
     return {"tickets": service.search_tickets(filters, query)}
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def index():
     if settings.serve_frontend:
         return FileResponse(FRONTEND_DIR / "index.html")
@@ -514,28 +514,28 @@ def index():
     }
 
 
-@app.get("/admin")
+@app.api_route("/admin", methods=["GET", "HEAD"])
 def admin_index():
     if not settings.serve_frontend:
         raise HTTPException(status_code=404, detail="Not Found")
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
-@app.get("/styles.css")
+@app.api_route("/styles.css", methods=["GET", "HEAD"])
 def frontend_styles():
     if not settings.serve_frontend:
         raise HTTPException(status_code=404, detail="Not Found")
     return FileResponse(FRONTEND_DIR / "styles.css")
 
 
-@app.get("/app.js")
+@app.api_route("/app.js", methods=["GET", "HEAD"])
 def frontend_app():
     if not settings.serve_frontend:
         raise HTTPException(status_code=404, detail="Not Found")
     return FileResponse(FRONTEND_DIR / "app.js")
 
 
-@app.get("/config.js")
+@app.api_route("/config.js", methods=["GET", "HEAD"])
 def frontend_config():
     if not settings.serve_frontend:
         raise HTTPException(status_code=404, detail="Not Found")
@@ -552,7 +552,7 @@ def pipeline_run() -> dict:
     return pipeline_manager.start(requested_by="dashboard")
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def health() -> dict:
     repo_status = repository.get_connection_status()
     return {
