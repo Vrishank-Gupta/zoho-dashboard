@@ -1,25 +1,25 @@
 :root {
-  --bg: #080a10;
-  --surface: #111520;
-  --surface-soft: #171c29;
-  --surface-strong: #1c2232;
-  --text: #e4e7f0;
-  --muted: #98a0bd;
-  --muted-strong: #c0c7de;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.15);
-  --blue: #4d8ef4;
-  --green: #1ec55a;
-  --amber: #f5a010;
-  --red: #f03c3c;
-  --purple: #9b6dff;
-  --teal: #05b6d4;
-  --orange: #f97316;
-  --slate: #0f1523;
-  --ink-soft: #b7c0da;
-  --radius: 16px;
-  --radius-sm: 10px;
-  --shadow: 0 22px 60px rgba(0, 0, 0, 0.32);
+  --bg: #05070c;
+  --surface: #0d1118;
+  --surface-soft: #121823;
+  --surface-strong: #182131;
+  --text: #eef4ff;
+  --muted: #8191ad;
+  --muted-strong: #b6c3da;
+  --line: rgba(148, 170, 204, 0.16);
+  --line-strong: rgba(148, 170, 204, 0.28);
+  --blue: #6ea8ff;
+  --green: #23d07a;
+  --amber: #f2aa3c;
+  --red: #ff5f6d;
+  --purple: #8d7dff;
+  --teal: #31c6d4;
+  --orange: #ff8f3d;
+  --slate: #0b1017;
+  --ink-soft: #c7d2e6;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
 }
 
 * { box-sizing: border-box; }
@@ -27,12 +27,12 @@
 html, body {
   margin: 0;
   padding: 0;
-  font-family: "DM Sans", system-ui, sans-serif;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(77, 142, 244, 0.12), transparent 22%),
-    radial-gradient(circle at top right, rgba(155, 109, 255, 0.10), transparent 20%),
-    linear-gradient(180deg, #0a0d15 0%, var(--bg) 100%);
+    radial-gradient(circle at top left, rgba(110, 168, 255, 0.10), transparent 18%),
+    radial-gradient(circle at top right, rgba(141, 125, 255, 0.08), transparent 16%),
+    linear-gradient(180deg, #06080d 0%, var(--bg) 100%);
 }
 
 button, input { font: inherit; }
@@ -139,7 +139,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .panel,
 .kpi-card {
-  background: linear-gradient(180deg, rgba(20, 24, 35, 0.98) 0%, rgba(14, 18, 28, 0.98) 100%);
+  background: linear-gradient(180deg, rgba(14, 18, 26, 0.98) 0%, rgba(10, 14, 21, 0.98) 100%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -159,7 +159,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .panel-title {
   margin: 6px 0 0;
-  font-size: 23px;
+  font-size: 24px;
   line-height: 1.1;
   letter-spacing: -0.04em;
 }
@@ -259,9 +259,9 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .shortcut-pill,
 .segment-btn,
 .control-tools button {
-  height: 38px;
-  padding: 0 14px;
-  border-radius: 10px;
+  height: 36px;
+  padding: 0 13px;
+  border-radius: 8px;
   border: 1px solid var(--line);
   background: rgba(255,255,255,0.03);
   font-weight: 700;
@@ -466,7 +466,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 }
 
 .kpi-card {
-  padding: 20px 22px 22px;
+  padding: 18px 20px 20px;
   position: relative;
   overflow: hidden;
 }
@@ -477,24 +477,13 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   left: 0;
   right: 0;
   top: 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--blue), var(--purple));
-}
-
-.kpi-card::after {
-  content: "";
-  position: absolute;
-  inset: auto -20% -40% auto;
-  width: 140px;
-  height: 140px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(77, 142, 244, 0.14) 0%, rgba(77, 142, 244, 0) 70%);
-  pointer-events: none;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(110, 168, 255, 0.95), rgba(141, 125, 255, 0.6));
 }
 
 .kpi-value {
-  font-family: "DM Sans", system-ui, sans-serif;
-  font-size: 34px;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 38px;
   font-weight: 800;
   letter-spacing: -0.05em;
   line-height: 1;
@@ -555,8 +544,8 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .chart-area.compact { min-height: 260px; }
 .chart-area,
 .feature-panel {
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.01) 100%);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.008) 100%);
 }
 
 .spotlight-list,
@@ -573,8 +562,8 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .mini-panel,
 .mini-stat,
 .pipeline-run {
-  padding: 16px 18px;
-  border-radius: 14px;
+  padding: 14px 16px;
+  border-radius: 10px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
 }
@@ -673,12 +662,12 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 }
 
 .issue-card {
-  padding: 22px;
-  border-radius: 18px;
+  padding: 20px;
+  border-radius: 12px;
   border: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(25, 30, 42, 0.98) 0%, rgba(18, 23, 34, 0.98) 100%);
+  background: linear-gradient(180deg, rgba(18, 24, 35, 0.98) 0%, rgba(13, 18, 27, 0.98) 100%);
   display: grid;
-  gap: 18px;
+  gap: 16px;
   text-align: left;
 }
 
@@ -699,8 +688,8 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 }
 
 .issue-metric {
-  padding: 14px 16px;
-  border-radius: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--line);
 }
@@ -1069,9 +1058,9 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   overflow: auto;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 22px;
-  box-shadow: 0 36px 90px rgba(0, 0, 0, 0.42);
-  padding: 28px;
+  border-radius: 12px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.48);
+  padding: 24px;
 }
 
 .drilldown-subtitle {
@@ -1089,8 +1078,8 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
-  padding: 14px;
-  border-radius: 16px;
+  padding: 12px;
+  border-radius: 10px;
   background: rgba(255,255,255,0.02);
   border: 1px solid var(--line);
 }
@@ -1161,8 +1150,8 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .drilldown-section {
   display: grid;
   gap: 16px;
-  padding: 18px;
-  border-radius: 18px;
+  padding: 16px;
+  border-radius: 10px;
   background: linear-gradient(180deg, rgba(255,255,255,0.025) 0%, rgba(255,255,255,0.012) 100%);
   border: 1px solid rgba(255,255,255,0.05);
 }
@@ -1214,7 +1203,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 }
 
 .feature-panel {
-  padding: 22px;
+  padding: 18px;
 }
 
 .feature-panel svg,
@@ -1263,7 +1252,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .heatmap-wrap {
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 10px;
   background: rgba(255,255,255,0.02);
 }
 
@@ -1348,7 +1337,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .drilldown-detail {
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 10px;
   background: rgba(255,255,255,0.02);
   overflow: hidden;
 }
@@ -1389,12 +1378,18 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 }
 
 .fault-product-card {
-  padding: 16px;
-  border-radius: 16px;
+  padding: 14px;
+  border-radius: 10px;
   background: linear-gradient(180deg, rgba(24, 30, 43, 0.98) 0%, rgba(18, 22, 33, 0.98) 100%);
   border: 1px solid var(--line);
   display: grid;
   gap: 12px;
+}
+
+.chart-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 6px;
 }
 
 .fault-product-card h4 {

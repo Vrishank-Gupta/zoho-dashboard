@@ -54,10 +54,7 @@ const PRODUCT_VIEWS = [
   { key: "category", label: "By category" },
 ];
 
-const VIEW_TABS = [
-  { key: "dashboard", label: "Dashboard" },
-  { key: "mapping", label: "Mapping Studio" },
-];
+const IS_ADMIN_MODE = window.location.pathname.replace(/\/+$/, "") === "/admin";
 
 const DEFAULT_EXCLUDED_SELECTIONS = {
   products: new Set(),
@@ -105,20 +102,20 @@ const QUICK_PRESETS = [
 ];
 
 const VISUAL_THEME = {
-  blue: "#4d8ef4",
-  green: "#1ec55a",
-  amber: "#f5a010",
-  red: "#f03c3c",
-  purple: "#9b6dff",
-  teal: "#05b6d4",
-  orange: "#f97316",
-  slate: "#98a0bd",
-  text: "#e4e7f0",
-  muted: "#98a0bd",
-  grid: "rgba(255,255,255,0.10)",
-  donutTrack: "rgba(255,255,255,0.08)",
-  barFill: "rgba(77, 142, 244, 0.42)",
-  barStroke: "rgba(77, 142, 244, 0.9)",
+  blue: "#6ea8ff",
+  green: "#23d07a",
+  amber: "#f2aa3c",
+  red: "#ff5f6d",
+  purple: "#8d7dff",
+  teal: "#31c6d4",
+  orange: "#ff8f3d",
+  slate: "#8191ad",
+  text: "#eef4ff",
+  muted: "#8191ad",
+  grid: "rgba(148,170,204,0.16)",
+  donutTrack: "rgba(255,255,255,0.06)",
+  barFill: "rgba(110, 168, 255, 0.58)",
+  barStroke: "rgba(166, 204, 255, 0.92)",
 };
 
 function shouldShowAxisLabel(index, total) {
@@ -145,8 +142,8 @@ const state = {
   activePreset: "60d",
   advancedFiltersOpen: false,
   defaultSelectionsApplied: false,
-  activeView: loadSessionJson("quboActiveView", "dashboard"),
-  mappingOverrides: loadSessionJson("quboMappingOverrides", { product_category_overrides: {}, efc_overrides: {} }),
+  activeView: IS_ADMIN_MODE ? "mapping" : "dashboard",
+  mappingOverrides: { product_category_overrides: {}, efc_overrides: {} },
   mappingDraft: { product_category_overrides: {}, efc_overrides: {} },
   mappingSearches: { global: "", products: "", fc2: "" },
   mappingShowOverriddenOnly: loadSessionJson("quboMappingShowOverriddenOnly", false),
@@ -188,6 +185,8 @@ const els = {
   applyMappingOverrides: document.getElementById("applyMappingOverrides"),
   resetMappingOverrides: document.getElementById("resetMappingOverrides"),
   exportMappingOverrides: document.getElementById("exportMappingOverrides"),
+  uploadMappingButton: document.getElementById("uploadMappingButton"),
+  uploadMappingInput: document.getElementById("uploadMappingInput"),
   dateStart: document.getElementById("dateStart"),
   dateEnd: document.getElementById("dateEnd"),
   quickPresets: document.getElementById("quickPresets"),
@@ -230,11 +229,7 @@ boot();
 
 function boot() {
   bindEvents();
-  renderSegmented(els.viewTabs, VIEW_TABS, state.activeView, (value) => {
-    state.activeView = value;
-    saveSessionJson("quboActiveView", value);
-    renderActiveView();
-  });
+  els.viewTabs?.classList.add("hidden");
   renderSegmented(els.mappingStudioTabs, MAPPING_STUDIO_TABS, state.mappingStudioTab, (value) => {
     state.mappingStudioTab = value;
     saveSessionJson("quboMappingStudioTab", value);
@@ -252,14 +247,11 @@ function boot() {
     state.timelineMetric = value;
     renderTimeline(state.payload?.timeline || []);
   });
-  renderSegmented(els.timelineBucketTabs, BUCKET_MODES, state.timelineBucket, (value) => {
-    state.timelineBucket = value;
-    renderTimeline(state.payload?.timeline || []);
-  });
-  renderSegmented(els.botBucketTabs, BUCKET_MODES, state.botBucket, (value) => {
-    state.botBucket = value;
-    renderBotTrend(state.payload?.timeline || []);
-  });
+  renderTimeBucketControls();
+  if (IS_ADMIN_MODE) {
+    renderActiveView();
+    return;
+  }
   loadDashboard();
 }
 
@@ -359,26 +351,19 @@ function bindEvents() {
     saveSessionJson("quboMappingShowOverriddenOnly", state.mappingShowOverriddenOnly);
     renderMappingStudio(state.mappingStudioData || {});
   });
-  els.applyMappingOverrides?.addEventListener("click", () => {
-    state.mappingOverrides = normalizeMappingOverrides(state.mappingDraft);
-    saveSessionJson("quboMappingOverrides", state.mappingOverrides);
-    state.mappingStudioData = null;
-    loadDashboard();
-  });
+  els.applyMappingOverrides?.addEventListener("click", saveMappingWorkbook);
   els.resetMappingOverrides?.addEventListener("click", () => {
-    state.mappingOverrides = { product_category_overrides: {}, efc_overrides: {} };
-    state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
-    saveSessionJson("quboMappingOverrides", state.mappingOverrides);
-    state.mappingStudioData = null;
+    state.mappingDraft = { product_category_overrides: {}, efc_overrides: {} };
     renderMappingStudio(state.mappingStudioData || {});
-    loadDashboard();
   });
-  els.exportMappingOverrides?.addEventListener("click", exportMappingOverrides);
+  els.exportMappingOverrides?.addEventListener("click", downloadActiveMappingCsv);
+  els.uploadMappingButton?.addEventListener("click", () => els.uploadMappingInput?.click());
+  els.uploadMappingInput?.addEventListener("change", uploadActiveMappingCsv);
 }
 
 async function loadDashboard() {
   renderLoading();
-  const params = buildQueryParams(state.filters);
+  const params = buildQueryParams(state.filters, { includeOverrides: false });
   try {
     const response = await fetch(`${apiUrl("/api/dashboard")}?${params.toString()}`);
     if (!response.ok) throw new Error(`API ${response.status}`);
@@ -398,6 +383,7 @@ async function loadDashboard() {
     syncDashboardBucketModes();
     reconcileIssueWidgetFilters();
     renderDateToolbar();
+    renderTimeBucketControls();
     renderFilterControls();
     renderDashboard(payload);
   } catch (error) {
@@ -666,7 +652,7 @@ function renderTimeline(points) {
       : metricKey === "repeat_tickets"
         ? VISUAL_THEME.purple
         : VISUAL_THEME.blue;
-  const chartPoints = addBaselineDelta(bucketed.map((item) => ({ label: item.label, value: item[metricKey] || 0 })));
+  const chartPoints = addPreviousDelta(bucketed.map((item) => ({ label: item.label, value: item[metricKey] || 0 })));
   renderBarChart(els.timelineChart, {
     points: chartPoints,
     color,
@@ -770,7 +756,7 @@ function renderIssueBoard(issueViews) {
         <div class="issue-metric"><div class="issue-metric-label">Tickets</div><div class="issue-metric-value">${fmtNum(issue.volume)}</div></div>
         <div class="issue-metric"><div class="issue-metric-label">Bot resolved %</div><div class="issue-metric-value">${fmtPct(issue.bot_resolved_rate)}</div></div>
         <div class="issue-metric"><div class="issue-metric-label">Transfer %</div><div class="issue-metric-value">${fmtPct(issue.bot_transfer_rate)}</div></div>
-        <div class="issue-metric"><div class="issue-metric-label">Change vs first period</div><div class="issue-metric-value">${formatSignedPct(issue.delta_rate || 0)}</div></div>
+        <div class="issue-metric"><div class="issue-metric-label">Change vs prior window</div><div class="issue-metric-value">${formatSignedPct(issue.delta_rate || 0)}</div></div>
       </div>
     </button>`).join("");
   els.issueBoard.querySelectorAll("[data-issue-id]").forEach((button) => {
@@ -895,29 +881,33 @@ function renderBotTrend(points) {
     els.botTrendChart.innerHTML = '<div class="empty-state">No bot trend data in the selected range.</div>';
     return;
   }
-  const width = 900;
+  const width = Math.max(960, bucketed.length * 52);
   const height = 250;
-  const pad = { top: 18, right: 50, bottom: 34, left: 48 };
+  const pad = { top: 22, right: 56, bottom: 34, left: 48 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const maxTickets = Math.max(...bucketed.map((item) => item.tickets || 0), 1);
   const step = innerW / Math.max(bucketed.length, 1);
-  const barW = Math.max(34, Math.min(94, step * 0.78));
-  const showValueLabels = bucketed.length <= 14;
-  const baselineTickets = Number(bucketed[0]?.tickets || 0);
+  const barW = Math.max(18, Math.min(34, step * 0.68));
+  const showValueLabels = bucketed.length <= 18;
   const linePoints = bucketed.map((item, index) => {
     const pct = item.tickets ? (item.bot_resolved_tickets || 0) / item.tickets : 0;
     return {
       x: pad.left + step * index + step / 2,
       y: pad.top + innerH - pct * innerH,
       pct,
-      delta: index === 0 ? 0 : baselineTickets > 0 ? ((item.tickets || 0) - baselineTickets) / baselineTickets : 0,
+      delta: 0,
       label: item.label,
     };
   });
+  for (let index = 1; index < linePoints.length; index += 1) {
+    const previousTickets = Number(bucketed[index - 1]?.tickets || 0);
+    const currentTickets = Number(bucketed[index]?.tickets || 0);
+    linePoints[index].delta = previousTickets > 0 ? (currentTickets - previousTickets) / previousTickets : 0;
+  }
   const linePath = linePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
   els.botTrendChart.innerHTML = `
-    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:250px">
+    <div class="chart-scroll"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMinYMid meet" style="width:${width}px;height:250px">
       ${[0, 0.5, 1].map((ratio) => {
         const y = pad.top + innerH - ratio * innerH;
         return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line><text x="${width - pad.right + 8}" y="${y + 4}" font-size="10" fill="${VISUAL_THEME.muted}">${Math.round(ratio * 100)}%</text>`;
@@ -930,11 +920,11 @@ function renderBotTrend(points) {
         const barH = ((item.tickets || 0) / maxTickets) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="10" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 10)}" text-anchor="middle" font-size="11" font-weight="800" fill="${VISUAL_THEME.text}">${fmtNum(item.tickets || 0)}</text>${index > 0 ? `<text x="${x + barW / 2}" y="${Math.max(26, y + 10)}" text-anchor="middle" font-size="10" font-weight="700" fill="${item.tickets >= baselineTickets ? VISUAL_THEME.green : VISUAL_THEME.red}">${formatSignedPct(linePoints[index].delta)}</text>` : ""}` : ""}${shouldShowAxisLabel(index, bucketed.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>` : ""}`;
+        return `${renderChartBar({ x, y, barW, barH, color: VISUAL_THEME.barFill, stroke: VISUAL_THEME.barStroke, radius: 6 })}${showValueLabels ? `${renderChartValueLabel(x + barW / 2, y - 10, fmtNum(item.tickets || 0))}${index > 0 ? renderChartDeltaLabel(x + barW / 2, y + 12, linePoints[index].delta) : ""}` : ""}${shouldShowAxisLabel(index, bucketed.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>` : ""}`;
       }).join("")}
       <path d="${linePath}" fill="none" stroke="${VISUAL_THEME.green}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
       ${linePoints.map((point, index) => `<circle cx="${point.x}" cy="${point.y}" r="4.5" fill="${VISUAL_THEME.green}"></circle>${bucketed.length <= 8 || shouldShowAxisLabel(index, bucketed.length) ? `<text x="${point.x}" y="${Math.max(14, point.y - 10)}" text-anchor="middle" font-size="10" font-weight="700" fill="${VISUAL_THEME.green}">${(point.pct * 100).toFixed(0)}%</text>` : ""}`).join("")}
-    </svg>`;
+    </svg></div>`;
 }
 
 function renderMixList(container, rows) {
@@ -1010,13 +1000,24 @@ function renderPipeline(pipeline) {
 
 function renderActiveView() {
   const dashboardPanels = document.querySelectorAll("[data-dashboard-panel='true']");
-  const mappingOpen = state.activeView === "mapping";
+  const mappingOpen = IS_ADMIN_MODE;
   dashboardPanels.forEach((panel) => panel.classList.toggle("hidden", mappingOpen));
   els.mappingStudioView?.classList.toggle("hidden", !mappingOpen);
   if (mappingOpen) {
     if (state.mappingStudioData) renderMappingStudio(state.mappingStudioData);
     else if (!state.mappingStudioLoading) loadMappingStudio();
   }
+}
+
+function renderTimeBucketControls() {
+  renderSegmented(els.timelineBucketTabs, BUCKET_MODES, state.timelineBucket, (value) => {
+    state.timelineBucket = value;
+    renderTimeline(state.payload?.timeline || []);
+  });
+  renderSegmented(els.botBucketTabs, BUCKET_MODES, state.botBucket, (value) => {
+    state.botBucket = value;
+    renderBotTrend(state.payload?.timeline || []);
+  });
 }
 
 function renderMappingStudioLayout() {
@@ -1161,7 +1162,7 @@ async function loadMappingStudio() {
   state.mappingStudioLoading = true;
   renderMappingStudio(state.mappingStudioData || {});
   try {
-    const params = buildQueryParams(state.filters);
+    const params = buildQueryParams(state.filters, { includeOverrides: false });
     const response = await fetch(`${apiUrl("/api/mapping-studio")}?${params.toString()}`);
     if (!response.ok) throw new Error(`API ${response.status}`);
     const payload = await response.json();
@@ -1319,8 +1320,7 @@ function renderDrilldownFilters() {
       </label>
       ${defs.map(renderSelect).join("")}
       <div class="drilldown-filter-actions">
-        <button class="ghost-btn" type="button" data-drilldown-filter-reset="true">Reset to board</button>
-        <button class="primary-btn" type="button" data-drilldown-filter-apply="true">Apply in drilldown</button>
+        <button class="primary-btn" type="button" data-drilldown-filter-apply="true">Apply filters</button>
       </div>
     </div>`;
   els.drilldownFilters.querySelectorAll("[data-drilldown-date]").forEach((input) => {
@@ -1350,14 +1350,6 @@ function renderDrilldownFilters() {
       state.drilldownFilters[key] = [...next];
       renderDrilldownFilters();
     });
-  });
-  els.drilldownFilters.querySelector("[data-drilldown-filter-reset]")?.addEventListener("click", async () => {
-    state.drilldownFilters = structuredClone(state.filters);
-    state.drilldownSearches = {};
-    state.drilldownOpenFilter = null;
-    state.categoryDrilldownBucket = recommendedBucketMode(state.drilldownFilters.date_start, state.drilldownFilters.date_end, state.options.date_bounds);
-    renderDrilldownFilters();
-    await refreshCurrentDrilldown();
   });
   els.drilldownFilters.querySelector("[data-drilldown-filter-apply]")?.addEventListener("click", async () => {
     state.drilldownOpenFilter = null;
@@ -1416,6 +1408,7 @@ function renderDrilldownPanels(drilldown) {
     bot_resolved_tickets: row.bot_resolved_tickets,
     repeat_tickets: 0,
   })), state.categoryDrilldownBucket);
+  const productPeriodModel = buildProductPeriodModel(drilldown.timeline || [], drilldown.issue_daily || [], state.categoryDrilldownBucket);
   renderDrilldownTabs();
   const snapshotCards = state.currentDrilldownKind === "issue"
     ? [
@@ -1426,9 +1419,9 @@ function renderDrilldownPanels(drilldown) {
       ]
     : [
         renderSnapshotStat("Tickets", summary.tickets || 0, null, previousSummary.tickets || 0),
-        renderSnapshotStat("Installation", summary.installation_tickets || 0, ratio(summary.installation_tickets, summary.tickets), previousSummary.installation_tickets || 0),
         renderSnapshotStat("Bot resolved", summary.bot_resolved_tickets || 0, ratio(summary.bot_resolved_tickets, summary.tickets), previousSummary.bot_resolved_tickets || 0),
         renderSnapshotStat("Blank chat", summary.blank_chat_tickets || 0, ratio(summary.blank_chat_tickets, summary.tickets), previousSummary.blank_chat_tickets || 0),
+        renderSnapshotStat("Transferred", summary.bot_transferred_tickets || 0, ratio(summary.bot_transferred_tickets, summary.tickets), previousSummary.bot_transferred_tickets || 0),
       ];
   const overview = `
     <section class="drilldown-section">
@@ -1466,7 +1459,21 @@ function renderDrilldownPanels(drilldown) {
           <div class="mini-panel"><h3>Issue buckets</h3>${renderMiniBars(drilldown.efcs || drilldown.fc1 || drilldown.fc2 || [])}</div>
         </div>
       </div>
-    </section>`;
+    </section>
+    ${state.currentDrilldownKind === "product" ? `
+    <section class="drilldown-section">
+      <div class="section-label">Volume by period</div>
+      <div class="mini-panel analysis-panel">
+        <div class="analysis-panel-head">
+          <div>
+            <h3>Period view</h3>
+            <div class="analysis-caption">Expand a period to see the top issues contributing within that window.</div>
+          </div>
+          <div class="panel-actions">${renderCategoryBucketTabs()}</div>
+        </div>
+        ${renderProductPeriodTable(productPeriodModel)}
+      </div>
+    </section>` : ""}`;
   els.drilldownBody.innerHTML = state.currentDrilldownTab === "analysis" ? analysis : overview;
   els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1488,15 +1495,16 @@ function renderCategoryDrilldownPanels(drilldown) {
   })), state.categoryDrilldownBucket);
   const productTrend = buildCategoryProductTrendModel(drilldown.product_daily || [], state.categoryDrilldownBucket);
   const faultMatrices = buildCategoryFaultMatrixModel(drilldown.product_fault_daily || [], state.categoryDrilldownBucket);
+  const productDeltaMap = new Map(productTrend.rows.map((row) => [row.product_name, row.delta_vs_previous || 0]));
   renderDrilldownTabs();
   const overview = `
     <section class="drilldown-section">
       <div class="section-label">Snapshot</div>
       <div class="mini-summary-grid">
         ${renderSnapshotStat("Tickets", summary.tickets || 0, null, previousSummary.tickets || 0)}
-        ${renderSnapshotStat("Installation", summary.installation_tickets || 0, ratio(summary.installation_tickets, summary.tickets), previousSummary.installation_tickets || 0)}
         ${renderSnapshotStat("Bot resolved", summary.bot_resolved_tickets || 0, ratio(summary.bot_resolved_tickets, summary.tickets), previousSummary.bot_resolved_tickets || 0)}
         ${renderSnapshotStat("Blank chat", summary.blank_chat_tickets || 0, ratio(summary.blank_chat_tickets, summary.tickets), previousSummary.blank_chat_tickets || 0)}
+        ${renderSnapshotStat("Transferred", summary.bot_transferred_tickets || 0, ratio(summary.bot_transferred_tickets, summary.tickets), previousSummary.bot_transferred_tickets || 0)}
       </div>
     </section>
     <section class="drilldown-section">
@@ -1506,11 +1514,11 @@ function renderCategoryDrilldownPanels(drilldown) {
     <section class="drilldown-section">
       <div class="section-label">Product and issue mix</div>
       <div class="drilldown-two-col">
-        <div class="mini-panel"><h3>Products in category</h3>${renderMiniTable(drilldown.products || [], [
+        <div class="mini-panel"><h3>Products in category</h3>${renderMiniTable((drilldown.products || []).map((row) => ({ ...row, delta_vs_previous: productDeltaMap.get(row.label) || 0 })), [
           { key: "label", label: "Product" },
           { key: "tickets", label: "Tickets", format: "number" },
-          { key: "installation_tickets", label: "Installation", format: "percentOfTickets" },
           { key: "bot_resolved_tickets", label: "Bot resolved", format: "percentOfTickets" },
+          { key: "delta_vs_previous", label: "Change", format: "signedPercent" },
         ])}</div>
         <div class="mini-panel"><h3>Issue hotspots</h3>${renderMiniTable(drilldown.issues || [], [
           { key: "executive_fault_code", label: "EFC" },
@@ -1621,6 +1629,9 @@ function buildCategoryProductTrendModel(rows, mode) {
     .sort((a, b) => b.total - a.total || a.product_name.localeCompare(b.product_name))
     .map((row) => ({
       ...row,
+      delta_vs_previous: row.cells.length > 1 && Number(row.cells[row.cells.length - 2]?.tickets || 0) > 0
+        ? (Number(row.cells[row.cells.length - 1]?.tickets || 0) - Number(row.cells[row.cells.length - 2]?.tickets || 0)) / Number(row.cells[row.cells.length - 2]?.tickets || 0)
+        : 0,
       cells: row.cells.map((cell) => ({ ...cell, intensity: cell.tickets / max })),
     }));
   return { bucketMode, periods, rows: rowsOut };
@@ -1827,6 +1838,7 @@ function formatMiniCell(row, column) {
   const value = row[column.key];
   if (column.format === "number") return escHtml(fmtNum(value || 0));
   if (column.format === "percentOfTickets") return escHtml(fmtPct(ratio(value, row.tickets)));
+  if (column.format === "signedPercent") return escHtml(formatSignedPct(value || 0));
   return escHtml(formatBotActionLabelIfNeeded(column.key, value));
 }
 
@@ -1836,29 +1848,29 @@ function renderMiniStat(label, value, isPercent = false) {
 
 function renderMiniChartSvg(points) {
   if (!points.length) return '<div class="empty-state">No trend available.</div>';
-  const width = 520;
+  const width = Math.max(620, points.length * 46);
   const height = 220;
-  const pad = { top: 16, right: 10, bottom: 28, left: 40 };
+  const pad = { top: 18, right: 14, bottom: 30, left: 44 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const max = Math.max(...points.map((point) => Number(point.tickets || 0)), 1);
-  const barW = Math.max(24, Math.min(64, innerW / Math.max(points.length, 1) * 0.72));
-  const baseline = Number(points[0]?.tickets || 0);
-  const showValueLabels = points.length <= 12;
-  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:220px">
+  const barW = Math.max(18, Math.min(34, innerW / Math.max(points.length, 1) * 0.68));
+  const showValueLabels = points.length <= 18;
+  return `<div class="chart-scroll"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMinYMid meet" style="width:${width}px;height:220px">
     ${[0, 0.5, 1].map((ratio) => {
       const y = pad.top + innerH - innerH * ratio;
       return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line>${ratio === 0 || ratio === 1 ? `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(max * ratio))}</text>` : ""}`;
     }).join("")}
     ${points.map((point, index) => {
-    const step = innerW / Math.max(points.length, 1);
-    const value = Number(point.tickets || 0);
-    const barH = (value / max) * innerH;
-    const x = pad.left + step * index + (step - barW) / 2;
-    const y = pad.top + innerH - barH;
-    const delta = index === 0 ? 0 : baseline > 0 ? (value - baseline) / baseline : 0;
-    return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="8" fill="${VISUAL_THEME.barFill}" stroke="${VISUAL_THEME.barStroke}"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 8)}" text-anchor="middle" font-size="10" font-weight="800" fill="${VISUAL_THEME.text}">${fmtNum(value)}</text>${index > 0 ? `<text x="${x + barW / 2}" y="${Math.max(24, y + 10)}" text-anchor="middle" font-size="9" font-weight="700" fill="${delta >= 0 ? VISUAL_THEME.green : VISUAL_THEME.red}">${formatSignedPct(delta)}</text>` : ""}` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
-  }).join("")}</svg>`;
+      const step = innerW / Math.max(points.length, 1);
+      const value = Number(point.tickets || 0);
+      const previous = Number(points[index - 1]?.tickets || 0);
+      const barH = (value / max) * innerH;
+      const x = pad.left + step * index + (step - barW) / 2;
+      const y = pad.top + innerH - barH;
+      const delta = index === 0 ? 0 : previous > 0 ? (value - previous) / previous : 0;
+      return `${renderChartBar({ x, y, barW, barH, color: VISUAL_THEME.barFill, stroke: VISUAL_THEME.barStroke, radius: 5 })}${showValueLabels ? `${renderChartValueLabel(x + barW / 2, y - 8, fmtNum(value))}${index > 0 ? renderChartDeltaLabel(x + barW / 2, y + 10, delta) : ""}` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
+    }).join("")}</svg></div>`;
 }
 
 function renderIssueList(container, issues, emptyMessage) {
@@ -1886,44 +1898,59 @@ function renderBarChart(container, { points, color, yLabel }) {
     container.innerHTML = '<div class="empty-state">No trend data in the selected range.</div>';
     return;
   }
-  const width = 900;
+  const width = Math.max(960, points.length * 52);
   const height = 290;
-  const pad = { top: 18, right: 16, bottom: 34, left: 46 };
+  const pad = { top: 24, right: 20, bottom: 38, left: 54 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const max = Math.max(...points.map((point) => Number(point.value || 0)), 1);
   const step = innerW / Math.max(points.length, 1);
-  const barW = Math.max(36, Math.min(96, step * 0.78));
-  const showValueLabels = points.length <= 14;
+  const barW = Math.max(18, Math.min(42, step * 0.68));
+  const showValueLabels = points.length <= 18;
   container.innerHTML = `
-      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:290px">
+    <div class="chart-scroll">
+      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMinYMid meet" style="width:${width}px;height:290px">
       ${[0.25, 0.5, 0.75].map((ratio) => {
         const y = pad.top + innerH - innerH * ratio;
         return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line>`;
       }).join("")}
       ${[0, 0.5, 1].map((ratio) => {
         const y = pad.top + innerH - innerH * ratio;
-        return ratio === 0 || ratio === 1 ? `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(max * ratio))}</text>` : "";
+        return ratio === 0 || ratio === 1 ? `<text x="${pad.left - 10}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(max * ratio))}</text>` : "";
       }).join("")}
       ${points.map((point, index) => {
         const value = Number(point.value || 0);
         const barH = (value / max) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="10" fill="${color}" opacity="0.9"></rect>${showValueLabels ? `<text x="${x + barW / 2}" y="${Math.max(14, y - 10)}" text-anchor="middle" font-size="11" font-weight="800" fill="${VISUAL_THEME.text}">${fmtNum(value)}</text>${index > 0 ? `<text x="${x + barW / 2}" y="${Math.max(26, y + 10)}" text-anchor="middle" font-size="10" font-weight="700" fill="${Number(point.baseline_delta || 0) >= 0 ? VISUAL_THEME.green : VISUAL_THEME.red}">${formatSignedPct(point.baseline_delta || 0)}</text>` : ""}` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
+        return `${renderChartBar({ x, y, barW, barH, color, stroke: VISUAL_THEME.barStroke, radius: 5 })}${showValueLabels ? `${renderChartValueLabel(x + barW / 2, y - 12, fmtNum(value))}${index > 0 ? renderChartDeltaLabel(x + barW / 2, y + 12, point.previous_delta || 0) : ""}` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
       }).join("")}
       <text x="12" y="${pad.top + 12}" font-size="11" fill="${VISUAL_THEME.muted}">${escHtml(yLabel)}</text>
-    </svg>`;
+    </svg>
+    </div>`;
 }
 
-function buildQueryParams(filters) {
+function renderChartBar({ x, y, barW, barH, color, stroke, radius }) {
+  return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="${radius}" fill="${color}" stroke="${stroke}" stroke-width="1"></rect>`;
+}
+
+function renderChartValueLabel(x, y, text) {
+  return `<text x="${x}" y="${Math.max(14, y)}" text-anchor="middle" font-size="11" font-weight="800" fill="${VISUAL_THEME.text}">${escHtml(text)}</text>`;
+}
+
+function renderChartDeltaLabel(x, y, delta) {
+  const fill = Number(delta || 0) >= 0 ? VISUAL_THEME.green : VISUAL_THEME.red;
+  return `<text x="${x}" y="${y}" text-anchor="middle" font-size="10" font-weight="700" fill="${fill}">${escHtml(formatSignedPct(delta || 0))}</text>`;
+}
+
+function buildQueryParams(filters, options = {}) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
     if (Array.isArray(value)) value.forEach((item) => params.append(key, item));
     else if (value) params.set(key, value);
   });
   const overrides = normalizeMappingOverrides(state.mappingOverrides);
-  if (Object.keys(overrides.product_category_overrides).length || Object.keys(overrides.efc_overrides).length) {
+  if ((options.includeOverrides ?? false) && (Object.keys(overrides.product_category_overrides).length || Object.keys(overrides.efc_overrides).length)) {
     params.set("mapping_overrides", JSON.stringify(overrides));
   }
   return params;
@@ -2116,17 +2143,47 @@ function hasDraftOverride(scope, key, baseValue) {
   return Boolean(overrideValue && overrideValue !== baseValue);
 }
 
-function exportMappingOverrides() {
-  const payload = normalizeMappingOverrides(state.mappingDraft);
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = "qubo-mapping-overrides-session.json";
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+async function saveMappingWorkbook() {
+  if (!state.mappingStudioData) return;
+  const productRows = (state.mappingStudioData.product_rows || []).map((row) => ({
+    product_name: row.product_name,
+    effective_category: state.mappingDraft.product_category_overrides[String(row.product_name).toLowerCase()] || row.base_category,
+  }));
+  const fc2Rows = (state.mappingStudioData.fc2_rows || []).map((row) => ({
+    fault_code_level_2: row.fault_code_level_2,
+    effective_efc: state.mappingDraft.efc_overrides[String(row.fault_code_level_2).toLowerCase()] || row.base_efc,
+  }));
+  const response = await fetch(apiUrl("/api/admin/mapping/save"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ product_rows: productRows, fc2_rows: fc2Rows }),
+  });
+  if (!response.ok) throw new Error(`Mapping save failed: ${response.status}`);
+  state.mappingDraft = { product_category_overrides: {}, efc_overrides: {} };
+  state.mappingStudioData = null;
+  await loadMappingStudio();
+}
+
+function downloadActiveMappingCsv() {
+  const path = state.mappingStudioTab === "fc2" ? "/api/admin/mapping/efc.csv" : "/api/admin/mapping/product.csv";
+  window.open(apiUrl(path), "_blank", "noopener");
+}
+
+async function uploadActiveMappingCsv(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const content = await file.text();
+  const path = state.mappingStudioTab === "fc2" ? "/api/admin/mapping/efc.csv" : "/api/admin/mapping/product.csv";
+  const response = await fetch(apiUrl(path), {
+    method: "POST",
+    headers: { "Content-Type": "text/csv; charset=utf-8" },
+    body: content,
+  });
+  event.target.value = "";
+  if (!response.ok) throw new Error(`Mapping upload failed: ${response.status}`);
+  state.mappingDraft = { product_category_overrides: {}, efc_overrides: {} };
+  state.mappingStudioData = null;
+  await loadMappingStudio();
 }
 
 function apiUrl(path) {
@@ -2147,13 +2204,13 @@ function formatSignedPct(value) {
   return `${prefix}${fmtPct(numeric)}`;
 }
 
-function addBaselineDelta(points, valueKey = "value") {
+function addPreviousDelta(points, valueKey = "value") {
   if (!points.length) return [];
-  const baseline = Number(points[0]?.[valueKey] || 0);
   return points.map((point, index) => {
     const value = Number(point?.[valueKey] || 0);
-    const delta = index === 0 ? 0 : baseline > 0 ? (value - baseline) / baseline : 0;
-    return { ...point, baseline_delta: delta };
+    const previous = Number(points[index - 1]?.[valueKey] || 0);
+    const delta = index === 0 ? 0 : previous > 0 ? (value - previous) / previous : 0;
+    return { ...point, previous_delta: delta };
   });
 }
 
@@ -2297,7 +2354,6 @@ function renderCategoryProductTrendTable(model, faultModel = { products: [] }) {
   return `
     <div class="drilldown-accordion">
       ${model.rows.map((row) => {
-        const baseline = Number(row.cells[0]?.tickets || 0);
         const faults = faultByProduct.get(row.product_name) || [];
         return `
           <details class="drilldown-detail">
@@ -2318,7 +2374,8 @@ function renderCategoryProductTrendTable(model, faultModel = { products: [] }) {
                   <tr>
                     <td class="heatmap-row-label">${escHtml(row.product_name)}</td>
                     ${row.cells.map((cell, index) => {
-                      const delta = index === 0 ? 0 : baseline > 0 ? (cell.tickets - baseline) / baseline : 0;
+                      const previous = Number(row.cells[index - 1]?.tickets || 0);
+                      const delta = index === 0 ? 0 : previous > 0 ? (cell.tickets - previous) / previous : 0;
                       return `
                         <td>
                           <div class="heat-cell" style="background: rgba(77, 142, 244, ${0.12 + cell.intensity * 0.42})">
@@ -2363,8 +2420,8 @@ function renderCategoryFaultRows(faults) {
                 </div>
               </td>
               ${fault.cells.map((cell, index) => {
-                const baseline = Number(fault.cells[0]?.tickets || 0);
-                const delta = index === 0 ? 0 : baseline > 0 ? (cell.tickets - baseline) / baseline : 0;
+                const previous = Number(fault.cells[index - 1]?.tickets || 0);
+                const delta = index === 0 ? 0 : previous > 0 ? (cell.tickets - previous) / previous : 0;
                 return `
                   <td>
                     <div class="heat-cell issue" style="background: rgba(30, 197, 90, ${0.10 + cell.intensity * 0.38})">
@@ -2378,5 +2435,74 @@ function renderCategoryFaultRows(faults) {
           `).join("")}
         </tbody>
       </table>
+    </div>`;
+}
+
+function buildProductPeriodModel(timelineRows, issueDailyRows, mode) {
+  const bucketMode = resolveBucketMode((timelineRows || []).map((row) => ({ metric_date: row.metric_date })), mode);
+  const periodMap = new Map();
+  (timelineRows || []).forEach((row) => {
+    const bucket = getBucketDescriptor(row.metric_date, bucketMode);
+    if (!periodMap.has(bucket.key)) {
+      periodMap.set(bucket.key, {
+        key: bucket.key,
+        label: bucket.label,
+        tickets: 0,
+        bot_resolved_tickets: 0,
+        bot_transferred_tickets: 0,
+        blank_chat_tickets: 0,
+        issues: new Map(),
+      });
+    }
+    const current = periodMap.get(bucket.key);
+    current.tickets += Number(row.tickets || 0);
+    current.bot_resolved_tickets += Number(row.bot_resolved_tickets || 0);
+    current.bot_transferred_tickets += Number(row.bot_transferred_tickets || 0);
+    current.blank_chat_tickets += Number(row.blank_chat_tickets || 0);
+  });
+  (issueDailyRows || []).forEach((row) => {
+    const bucket = getBucketDescriptor(row.metric_date, bucketMode);
+    const current = periodMap.get(bucket.key);
+    if (!current) return;
+    const issueKey = `${row.executive_fault_code || "Others"}||${row.issue_detail || "Unclassified"}`;
+    if (!current.issues.has(issueKey)) {
+      current.issues.set(issueKey, {
+        executive_fault_code: row.executive_fault_code || "Others",
+        issue_detail: row.issue_detail || "Unclassified",
+        tickets: 0,
+      });
+    }
+    current.issues.get(issueKey).tickets += Number(row.tickets || 0);
+  });
+  const periods = [...periodMap.values()].sort((a, b) => a.key.localeCompare(b.key));
+  return periods.map((period, index) => {
+    const previousTickets = Number(periods[index - 1]?.tickets || 0);
+    return {
+      ...period,
+      delta_vs_previous: index === 0 ? 0 : previousTickets > 0 ? (period.tickets - previousTickets) / previousTickets : 0,
+      issues: [...period.issues.values()].sort((a, b) => b.tickets - a.tickets).slice(0, 8),
+    };
+  });
+}
+
+function renderProductPeriodTable(periods) {
+  if (!periods.length) return '<div class="empty-state">No period analysis available in the selected range.</div>';
+  return `
+    <div class="drilldown-accordion">
+      ${periods.map((period) => `
+        <details class="drilldown-detail">
+          <summary class="drilldown-detail-summary">
+            <div class="drilldown-detail-title">${escHtml(period.label)}</div>
+            <div class="drilldown-detail-meta">${escHtml(fmtNum(period.tickets))} tickets · ${escHtml(formatSignedPct(period.delta_vs_previous || 0))} vs previous</div>
+          </summary>
+          <div class="drilldown-detail-body">
+            ${renderMiniTable(period.issues, [
+              { key: "executive_fault_code", label: "EFC" },
+              { key: "issue_detail", label: "FC2" },
+              { key: "tickets", label: "Tickets", format: "number" },
+            ])}
+          </div>
+        </details>
+      `).join("")}
     </div>`;
 }

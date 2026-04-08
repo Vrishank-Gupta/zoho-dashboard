@@ -3,15 +3,24 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from .analytics import AnalyticsService
 from .models import DashboardFilters
 from .pipeline.service import PipelineManager
 from .repository import TicketRepository
 from .config import settings
+from .mapping import (
+    clear_mapping_cache,
+    export_efc_mapping_csv,
+    export_product_mapping_csv,
+    parse_efc_mapping_csv,
+    parse_product_mapping_csv,
+    replace_efc_mapping,
+    replace_product_mapping,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -186,6 +195,74 @@ def mapping_studio(
         mapping_overrides=mapping_overrides,
     )
     return service.get_mapping_studio(filters)
+
+
+@app.post("/api/admin/mapping/save")
+async def save_mapping_overrides(request: Request) -> dict:
+    payload = await request.json()
+    product_rows = payload.get("product_rows") or []
+    fc2_rows = payload.get("fc2_rows") or []
+    replace_product_mapping(
+        [
+            {
+                "product_name": str(row.get("product_name") or "").strip(),
+                "category": str(row.get("effective_category") or row.get("category") or "").strip(),
+            }
+            for row in product_rows
+            if str(row.get("product_name") or "").strip() and str(row.get("effective_category") or row.get("category") or "").strip()
+        ]
+    )
+    replace_efc_mapping(
+        [
+            {
+                "fault_code_level_2": str(row.get("fault_code_level_2") or "").strip(),
+                "executive_fault_code": str(row.get("effective_efc") or row.get("executive_fault_code") or "").strip(),
+            }
+            for row in fc2_rows
+            if str(row.get("fault_code_level_2") or "").strip() and str(row.get("effective_efc") or row.get("executive_fault_code") or "").strip()
+        ]
+    )
+    clear_mapping_cache()
+    service.invalidate_cache()
+    return {"status": "ok"}
+
+
+@app.get("/api/admin/mapping/product.csv")
+def download_product_mapping_csv() -> Response:
+    return Response(
+        content=export_product_mapping_csv(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="product-category-mapping.csv"'},
+    )
+
+
+@app.get("/api/admin/mapping/efc.csv")
+def download_efc_mapping_csv() -> Response:
+    return Response(
+        content=export_efc_mapping_csv(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="fc2-efc-mapping.csv"'},
+    )
+
+
+@app.post("/api/admin/mapping/product.csv")
+async def upload_product_mapping_csv(request: Request) -> dict:
+    content = (await request.body()).decode("utf-8-sig")
+    rows = parse_product_mapping_csv(content)
+    replace_product_mapping(rows)
+    clear_mapping_cache()
+    service.invalidate_cache()
+    return {"status": "ok", "rows": len(rows)}
+
+
+@app.post("/api/admin/mapping/efc.csv")
+async def upload_efc_mapping_csv(request: Request) -> dict:
+    content = (await request.body()).decode("utf-8-sig")
+    rows = parse_efc_mapping_csv(content)
+    replace_efc_mapping(rows)
+    clear_mapping_cache()
+    service.invalidate_cache()
+    return {"status": "ok", "rows": len(rows)}
 
 
 @app.get("/api/issues/{issue_id}")
@@ -435,6 +512,13 @@ def index():
         "health_url": "/api/health",
         "dashboard_url": "/api/dashboard",
     }
+
+
+@app.get("/admin")
+def admin_index():
+    if not settings.serve_frontend:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(FRONTEND_DIR / "index.html")
 
 
 @app.get("/styles.css")

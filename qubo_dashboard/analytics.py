@@ -66,6 +66,10 @@ class AnalyticsService:
         self._freshness_ttl_seconds = 300
         self._freshness_cache: tuple[float, dict[str, str]] | None = None
 
+    def invalidate_cache(self) -> None:
+        self._cache.clear()
+        self._freshness_cache = None
+
     def build_dashboard(self, filters: DashboardFilters) -> dict[str, Any]:
         cached = self._cache_get("dashboard", filters)
         if cached is not None:
@@ -748,8 +752,8 @@ class AnalyticsService:
             "category_options": [item for item in category_options if item],
             "efc_options": [item for item in efc_options if item],
             "active_overrides": {
-                "products": len(filters.product_category_overrides),
-                "efcs": len(filters.efc_overrides),
+                "products": len(product_rows),
+                "efcs": len(fc2_rows),
             },
         }
 

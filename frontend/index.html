@@ -6,8 +6,8 @@
   <title>Qubo Support Board</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=restyle6">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css?v=restyle7">
 </head>
 <body>
   <main class="board-shell">
@@ -31,14 +31,16 @@
     <section class="panel hidden" id="mappingStudioView">
       <div class="panel-top">
         <div>
-          <div class="section-label">Mapping studio</div>
-          <h2 class="panel-title">Session-only mapping overrides</h2>
-          <p class="hero-subtitle">Use the workbook mapping as the base, then override Product -> Category and FC2 -> EFC for this browser session only.</p>
+          <div class="section-label">Admin</div>
+          <h2 class="panel-title">Mapping administration</h2>
+          <p class="hero-subtitle">Update the workbook-backed Product -> Category and FC2 -> EFC mappings. Changes persist and affect the dashboard globally.</p>
         </div>
         <div class="panel-actions">
-          <button class="ghost-btn" id="exportMappingOverrides" type="button">Export session overrides</button>
-          <button class="ghost-btn" id="resetMappingOverrides" type="button">Reset session overrides</button>
-          <button class="primary-btn" id="applyMappingOverrides" type="button">Apply to session</button>
+          <button class="ghost-btn" id="exportMappingOverrides" type="button">Download CSV</button>
+          <button class="ghost-btn" id="uploadMappingButton" type="button">Upload CSV</button>
+          <input id="uploadMappingInput" type="file" accept=".csv,text/csv" class="hidden">
+          <button class="ghost-btn" id="resetMappingOverrides" type="button">Discard edits</button>
+          <button class="primary-btn" id="applyMappingOverrides" type="button">Save workbook</button>
         </div>
       </div>
       <div class="mapping-summary" id="mappingStudioSummary"></div>
@@ -46,7 +48,7 @@
         <div class="mapping-guide">
           <span class="mapping-step">1. Choose mapping type</span>
           <span class="mapping-step">2. Search and adjust</span>
-          <span class="mapping-step">3. Apply to session</span>
+          <span class="mapping-step">3. Save to workbook</span>
         </div>
         <label class="mapping-toggle"><input type="checkbox" id="mappingShowOverriddenOnly"> <span>Show only overridden rows</span></label>
       </div>
@@ -234,7 +236,7 @@
     </div>
   </div>
 
-  <script src="./config.js?v=restyle6"></script>
-  <script src="./app.js?v=restyle6"></script>
+  <script src="./config.js?v=restyle7"></script>
+  <script src="./app.js?v=restyle7"></script>
 </body>
 </html>
