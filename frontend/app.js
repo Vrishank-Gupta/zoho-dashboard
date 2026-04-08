@@ -162,6 +162,7 @@ const state = {
   currentCategoryDrilldown: null,
   drilldownFilters: null,
   drilldownOpenFilter: null,
+  drilldownSearches: {},
   currentDrilldownMeta: null,
 };
 state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
@@ -328,15 +329,18 @@ function bindEvents() {
 
     const insideMainFilter = target.closest("[data-filter-panel]") || target.closest("[data-filter-trigger]");
     const insideWidgetFilter = target.closest("[data-widget-filter-panel]") || target.closest("[data-widget-filter-trigger]");
-    if (!insideMainFilter || !insideWidgetFilter) {
-      if (!insideMainFilter) {
-        state.openFilter = null;
-        renderFilterControls();
-      }
-      if (!insideWidgetFilter) {
-        state.issueWidgetOpenFilter = null;
-        renderIssueWidgetFilters();
-      }
+    const insideDrilldownFilter = target.closest("[data-drilldown-filter-panel]") || target.closest("[data-drilldown-filter-trigger]");
+    if (!insideMainFilter) {
+      state.openFilter = null;
+      renderFilterControls();
+    }
+    if (!insideWidgetFilter) {
+      state.issueWidgetOpenFilter = null;
+      renderIssueWidgetFilters();
+    }
+    if (!insideDrilldownFilter) {
+      state.drilldownOpenFilter = null;
+      renderDrilldownFilters();
     }
   });
 
@@ -1266,19 +1270,42 @@ function renderDrilldownFilters() {
     els.drilldownFilters.innerHTML = "";
     return;
   }
+  const activeElement = document.activeElement;
+  const activeFilterKey = activeElement instanceof HTMLInputElement ? activeElement.dataset.drilldownFilterSearch || "" : "";
+  const activeSelectionStart = activeElement instanceof HTMLInputElement ? activeElement.selectionStart ?? null : null;
   const defs = getDrilldownControlDefinitions();
   const bounds = state.options.date_bounds || {};
   const renderSelect = (definition) => {
     const selected = state.drilldownFilters[definition.key] || [];
     const options = getControlOptions({ key: definition.key, optionsKey: definition.optionsKey });
-    const shownSelected = selected.length ? selected : options.map((item) => item.label);
+    const summary = summarizeSelection(definition, options, selected);
+    const search = state.drilldownSearches[definition.key] || "";
+    const filteredOptions = options.filter((item) => item.label.toLowerCase().includes(search.toLowerCase()));
     return `
-      <label class="drilldown-filter-field">
-        <span>${escHtml(definition.label)}</span>
-        <select multiple data-drilldown-filter="${escHtml(definition.key)}">
-          ${options.map((item) => `<option value="${escHtml(item.label)}" ${shownSelected.includes(item.label) ? "selected" : ""}>${escHtml(formatOptionLabel(definition, item.label))}</option>`).join("")}
-        </select>
-      </label>`;
+      <div class="filter-control drilldown-filter-control ${state.drilldownOpenFilter === definition.key ? "open" : ""}">
+        <div class="control-label">${escHtml(definition.label)}</div>
+        <button class="control-trigger drilldown-control-trigger" type="button" data-drilldown-filter-trigger="${escHtml(definition.key)}">
+          <span class="control-summary">
+            <span class="control-main">${escHtml(summary.main)}</span>
+            ${summary.count ? `<span class="control-count">${escHtml(summary.count)}</span>` : ""}
+          </span>
+          <span class="control-caret">${state.drilldownOpenFilter === definition.key ? "▲" : "▼"}</span>
+        </button>
+        <div class="control-panel drilldown-control-panel" data-drilldown-filter-panel="${escHtml(definition.key)}">
+          <div class="control-tools">
+            <input type="search" placeholder="Search ${escHtml(definition.label.toLowerCase())}" value="${escHtml(search)}" data-drilldown-filter-search="${escHtml(definition.key)}">
+          </div>
+          <div class="option-list">
+            ${filteredOptions.length ? filteredOptions.map((item) => `
+              <label class="option-item">
+                <input type="checkbox" data-drilldown-filter-option="${escHtml(definition.key)}" value="${escHtml(item.label)}" ${selected.includes(item.label) ? "checked" : ""}>
+                <span>${escHtml(formatOptionLabel(definition, item.label))}</span>
+                <span class="option-count">${fmtNum(item.count)}</span>
+              </label>
+            `).join("") : '<div class="empty-state">No values match the current search.</div>'}
+          </div>
+        </div>
+      </div>`;
   };
   els.drilldownFilters.innerHTML = `
     <div class="drilldown-filter-grid">
@@ -1301,21 +1328,49 @@ function renderDrilldownFilters() {
       state.drilldownFilters[input.dataset.drilldownDate] = input.value;
     });
   });
-  els.drilldownFilters.querySelectorAll("[data-drilldown-filter]").forEach((select) => {
-    select.addEventListener("change", () => {
-      state.drilldownFilters[select.dataset.drilldownFilter] = [...select.selectedOptions].map((option) => option.value);
+  els.drilldownFilters.querySelectorAll("[data-drilldown-filter-trigger]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.drilldownFilterTrigger;
+      state.drilldownOpenFilter = state.drilldownOpenFilter === key ? null : key;
+      renderDrilldownFilters();
+    });
+  });
+  els.drilldownFilters.querySelectorAll("[data-drilldown-filter-search]").forEach((input) => {
+    input.addEventListener("input", () => {
+      state.drilldownSearches[input.dataset.drilldownFilterSearch] = input.value;
+      renderDrilldownFilters();
+    });
+  });
+  els.drilldownFilters.querySelectorAll("[data-drilldown-filter-option]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const key = input.dataset.drilldownFilterOption;
+      const next = new Set(state.drilldownFilters[key] || []);
+      if (input.checked) next.add(input.value);
+      else next.delete(input.value);
+      state.drilldownFilters[key] = [...next];
+      renderDrilldownFilters();
     });
   });
   els.drilldownFilters.querySelector("[data-drilldown-filter-reset]")?.addEventListener("click", async () => {
     state.drilldownFilters = structuredClone(state.filters);
+    state.drilldownSearches = {};
+    state.drilldownOpenFilter = null;
     state.categoryDrilldownBucket = recommendedBucketMode(state.drilldownFilters.date_start, state.drilldownFilters.date_end, state.options.date_bounds);
     renderDrilldownFilters();
     await refreshCurrentDrilldown();
   });
   els.drilldownFilters.querySelector("[data-drilldown-filter-apply]")?.addEventListener("click", async () => {
+    state.drilldownOpenFilter = null;
     state.categoryDrilldownBucket = recommendedBucketMode(state.drilldownFilters.date_start, state.drilldownFilters.date_end, state.options.date_bounds);
     await refreshCurrentDrilldown();
   });
+  if (activeFilterKey) {
+    const nextInput = els.drilldownFilters.querySelector(`[data-drilldown-filter-search="${CSS.escape(activeFilterKey)}"]`);
+    if (nextInput instanceof HTMLInputElement) {
+      nextInput.focus();
+      if (activeSelectionStart !== null) nextInput.setSelectionRange(activeSelectionStart, activeSelectionStart);
+    }
+  }
 }
 
 async function refreshCurrentDrilldown() {
@@ -1505,6 +1560,8 @@ function closeDrilldown() {
   state.currentDrilldownKind = null;
   state.currentDrilldownTab = "overview";
   state.drilldownFilters = null;
+  state.drilldownOpenFilter = null;
+  state.drilldownSearches = {};
   state.currentDrilldownMeta = null;
   if (els.drilldownFilters) els.drilldownFilters.innerHTML = "";
 }

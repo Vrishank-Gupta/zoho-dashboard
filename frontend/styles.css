@@ -1108,8 +1108,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   font-weight: 800;
 }
 
-.drilldown-filter-field input,
-.drilldown-filter-field select {
+.drilldown-filter-field input {
   min-width: 0;
   border-radius: 10px;
   border: 1px solid var(--line);
@@ -1119,8 +1118,22 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   padding: 10px 12px;
 }
 
-.drilldown-filter-field select {
-  min-height: 120px;
+.drilldown-filter-control {
+  min-width: 0;
+}
+
+.drilldown-control-trigger {
+  min-height: 46px;
+  background: rgba(255,255,255,0.04);
+}
+
+.drilldown-control-panel {
+  width: 100%;
+  min-width: 0;
+}
+
+.drilldown-control-panel .option-list {
+  max-height: 220px;
 }
 
 .drilldown-filter-actions {
