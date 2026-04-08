@@ -6,8 +6,8 @@
   <title>Qubo Support Board</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=restyle7">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css?v=restyle8">
 </head>
 <body>
   <main class="board-shell">
@@ -58,7 +58,7 @@
           <div class="mapping-panel-head">
             <div>
               <div class="mini-title">Product -> Category</div>
-              <div class="mapping-caption">Base category comes from `mapping.xlsx`. Override only when you want a different analytical grouping for this session.</div>
+              <div class="mapping-caption">Base category comes from `mapping.xlsx`. Edit it here when you want to update the live analytical grouping.</div>
             </div>
             <input class="mapping-search" id="mappingProductSearch" type="search" placeholder="Search product">
           </div>
@@ -117,9 +117,13 @@
           <div class="section-label">Volume</div>
           <h2 class="panel-title">Ticket volume trend</h2>
         </div>
-        <div class="panel-actions">
-          <div class="segmented" id="timelineMetricTabs"></div>
-          <div class="segmented" id="timelineBucketTabs"></div>
+        <div class="chart-toolbar">
+          <div class="toolbar-cluster toolbar-cluster-metric">
+            <div class="segmented" id="timelineMetricTabs"></div>
+          </div>
+          <div class="toolbar-cluster toolbar-cluster-grain">
+            <div class="segmented" id="timelineBucketTabs"></div>
+          </div>
         </div>
       </div>
       <div class="chart-area" id="timelineChart"></div>
@@ -154,13 +158,17 @@
 
     <section class="dashboard-grid dashboard-grid-split" data-dashboard-panel="true">
       <div class="panel">
-        <div class="panel-top">
-          <div>
-            <div class="section-label">Bot</div>
-            <h2 class="panel-title">Bot performance</h2>
-          </div>
-          <div class="segmented" id="botBucketTabs"></div>
+      <div class="panel-top">
+        <div>
+          <div class="section-label">Bot</div>
+          <h2 class="panel-title">Bot performance</h2>
         </div>
+        <div class="chart-toolbar">
+          <div class="toolbar-cluster toolbar-cluster-grain">
+            <div class="segmented" id="botBucketTabs"></div>
+          </div>
+        </div>
+      </div>
         <div class="bot-overview" id="botOverview"></div>
         <div class="chart-area compact" id="botTrendChart"></div>
         <div class="two-col">
@@ -236,7 +244,7 @@
     </div>
   </div>
 
-  <script src="./config.js?v=restyle7"></script>
-  <script src="./app.js?v=restyle7"></script>
+  <script src="./config.js?v=restyle8"></script>
+  <script src="./app.js?v=restyle8"></script>
 </body>
 </html>

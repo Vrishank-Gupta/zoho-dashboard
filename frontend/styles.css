@@ -1,25 +1,25 @@
 :root {
-  --bg: #05070c;
-  --surface: #0d1118;
-  --surface-soft: #121823;
-  --surface-strong: #182131;
-  --text: #eef4ff;
-  --muted: #8191ad;
-  --muted-strong: #b6c3da;
-  --line: rgba(148, 170, 204, 0.16);
-  --line-strong: rgba(148, 170, 204, 0.28);
-  --blue: #6ea8ff;
-  --green: #23d07a;
-  --amber: #f2aa3c;
-  --red: #ff5f6d;
-  --purple: #8d7dff;
-  --teal: #31c6d4;
-  --orange: #ff8f3d;
-  --slate: #0b1017;
-  --ink-soft: #c7d2e6;
-  --radius: 10px;
-  --radius-sm: 6px;
-  --shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+  --bg: #06070b;
+  --surface: #10131a;
+  --surface-soft: #161b24;
+  --surface-strong: #1c2330;
+  --text: #f7f8fc;
+  --muted: #8b97ab;
+  --muted-strong: #c3cad7;
+  --line: rgba(173, 183, 204, 0.12);
+  --line-strong: rgba(173, 183, 204, 0.24);
+  --blue: #5d73ff;
+  --green: #2bd487;
+  --amber: #ffb347;
+  --red: #ff6b6b;
+  --purple: #8d6bff;
+  --teal: #26c6da;
+  --orange: #ff8f4d;
+  --slate: #0a0d13;
+  --ink-soft: #d4daea;
+  --radius: 8px;
+  --radius-sm: 4px;
+  --shadow: 0 22px 60px rgba(0, 0, 0, 0.38);
 }
 
 * { box-sizing: border-box; }
@@ -27,12 +27,12 @@
 html, body {
   margin: 0;
   padding: 0;
-  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-family: "Sora", system-ui, sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(110, 168, 255, 0.10), transparent 18%),
-    radial-gradient(circle at top right, rgba(141, 125, 255, 0.08), transparent 16%),
-    linear-gradient(180deg, #06080d 0%, var(--bg) 100%);
+    radial-gradient(circle at top left, rgba(93, 115, 255, 0.08), transparent 16%),
+    radial-gradient(circle at top right, rgba(38, 198, 218, 0.05), transparent 14%),
+    linear-gradient(180deg, #05060a 0%, var(--bg) 100%);
 }
 
 button, input { font: inherit; }
@@ -43,7 +43,8 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   margin: 0 auto;
   padding: 24px 22px 48px;
   display: grid;
-  gap: 16px;
+  gap: 18px;
+  overflow-x: clip;
 }
 
 .view-tabs {
@@ -71,9 +72,9 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .hero-title {
   margin: 8px 0 0;
-  font-size: 40px;
+  font-size: 38px;
   line-height: 0.98;
-  letter-spacing: -0.045em;
+  letter-spacing: -0.055em;
 }
 
 .hero-subtitle {
@@ -139,7 +140,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .panel,
 .kpi-card {
-  background: linear-gradient(180deg, rgba(14, 18, 26, 0.98) 0%, rgba(10, 14, 21, 0.98) 100%);
+  background: linear-gradient(180deg, rgba(16, 19, 26, 0.99) 0%, rgba(10, 13, 19, 0.99) 100%);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -172,6 +173,31 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   justify-content: flex-end;
 }
 
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.toolbar-cluster {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.02);
+}
+
+.toolbar-cluster-metric {
+  border-radius: 10px;
+}
+
+.toolbar-cluster-grain {
+  border-radius: 999px;
+  background: rgba(255,255,255,0.01);
+}
+
 .widget-filter-row {
   display: flex;
   gap: 8px;
@@ -185,7 +211,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .widget-control-trigger {
   min-width: 220px;
-  background: rgba(255,255,255,0.88);
+  background: rgba(255,255,255,0.03);
 }
 
 .widget-control-panel {
@@ -261,9 +287,9 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .control-tools button {
   height: 36px;
   padding: 0 13px;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--line);
-  background: rgba(255,255,255,0.03);
+  background: rgba(255,255,255,0.02);
   font-weight: 700;
 }
 
@@ -294,9 +320,27 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .shortcut-pill:hover,
 .segment-btn.active,
 .segment-btn:hover {
-  background: rgba(77, 142, 244, 0.14);
-  border-color: rgba(77, 142, 244, 0.3);
+  background: rgba(93, 115, 255, 0.12);
+  border-color: rgba(93, 115, 255, 0.34);
   color: var(--text);
+}
+
+#timelineMetricTabs .segment-btn,
+#issueTabs .segment-btn,
+#productViewTabs .segment-btn {
+  min-width: 118px;
+  height: 40px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.015);
+}
+
+#timelineBucketTabs .segment-btn,
+#botBucketTabs .segment-btn,
+.drilldown-tabs .segment-btn {
+  min-width: 92px;
+  height: 36px;
+  border-radius: 999px;
+  background: transparent;
 }
 
 .filter-grid {
@@ -321,7 +365,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .control-trigger {
   width: 100%;
   min-height: 42px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--surface-soft);
   display: flex;
   align-items: center;
@@ -376,7 +420,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   z-index: 50;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 10px;
   box-shadow: 0 24px 48px rgba(0, 0, 0, 0.36);
   padding: 12px;
   display: none;
@@ -414,7 +458,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   align-items: center;
   gap: 10px;
   padding: 10px;
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--surface-soft);
   font-size: 13px;
 }
@@ -478,12 +522,12 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   right: 0;
   top: 0;
   height: 2px;
-  background: linear-gradient(90deg, rgba(110, 168, 255, 0.95), rgba(141, 125, 255, 0.6));
+  background: linear-gradient(90deg, rgba(93,115,255,0.9), rgba(141,107,255,0.9), rgba(38,198,218,0.72));
 }
 
 .kpi-value {
-  font-family: "IBM Plex Sans", system-ui, sans-serif;
-  font-size: 38px;
+  font-family: "Sora", system-ui, sans-serif;
+  font-size: 34px;
   font-weight: 800;
   letter-spacing: -0.05em;
   line-height: 1;
@@ -509,7 +553,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .kpi-share {
   margin-top: 8px;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted-strong);
   font-weight: 700;
 }
@@ -540,12 +584,14 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.chart-area { min-height: 320px; }
-.chart-area.compact { min-height: 260px; }
+.chart-area { min-height: 356px; overflow: hidden; }
+.chart-area.compact { min-height: 300px; overflow: hidden; }
 .chart-area,
 .feature-panel {
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.008) 100%);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.008) 100%),
+    linear-gradient(180deg, rgba(93,115,255,0.03), transparent 40%);
 }
 
 .spotlight-list,
@@ -563,7 +609,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .mini-stat,
 .pipeline-run {
   padding: 14px 16px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
 }
@@ -649,7 +695,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   align-items: center;
   padding: 5px 9px;
   border-radius: 999px;
-  background: rgba(77, 142, 244, 0.1);
+  background: rgba(93, 115, 255, 0.10);
   font-size: 11px;
   font-weight: 700;
   color: var(--muted-strong);
@@ -662,23 +708,23 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 }
 
 .issue-card {
-  padding: 20px;
-  border-radius: 12px;
+  padding: 18px;
+  border-radius: 8px;
   border: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(18, 24, 35, 0.98) 0%, rgba(13, 18, 27, 0.98) 100%);
+  background: linear-gradient(180deg, rgba(18, 22, 30, 0.98) 0%, rgba(13, 16, 23, 0.98) 100%);
   display: grid;
-  gap: 16px;
+  gap: 14px;
   text-align: left;
 }
 
 .issue-head { display: grid; gap: 8px; }
-.issue-title { font-size: 22px; font-weight: 800; line-height: 1.2; letter-spacing: -0.025em; }
+.issue-title { font-size: 18px; font-weight: 800; line-height: 1.24; letter-spacing: -0.025em; }
 
 .issue-subtitle {
   color: var(--muted);
-  font-size: 14px;
-  line-height: 1.55;
-  max-width: 92%;
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 100%;
 }
 
 .issue-metrics {
@@ -688,8 +734,8 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 }
 
 .issue-metric {
-  padding: 12px 14px;
-  border-radius: 8px;
+  padding: 11px 12px;
+  border-radius: 6px;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--line);
 }
@@ -706,7 +752,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .issue-metric-value {
   margin-top: 6px;
   font-weight: 800;
-  font-size: 30px;
+  font-size: 24px;
   line-height: 1;
   letter-spacing: -0.03em;
 }
@@ -1058,7 +1104,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   overflow: auto;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 8px;
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.48);
   padding: 24px;
 }
@@ -1079,8 +1125,8 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   padding: 12px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.02);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.015);
   border: 1px solid var(--line);
 }
 
@@ -1099,7 +1145,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .drilldown-filter-field input {
   min-width: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid var(--line);
   background: rgba(255,255,255,0.03);
   color: var(--text);
@@ -1113,7 +1159,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .drilldown-control-trigger {
   min-height: 46px;
-  background: rgba(255,255,255,0.04);
+  background: rgba(255,255,255,0.03);
 }
 
 .drilldown-control-panel {
@@ -1123,14 +1169,6 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .drilldown-control-panel .option-list {
   max-height: 220px;
-}
-
-.drilldown-filter-actions {
-  display: flex;
-  align-items: end;
-  justify-content: flex-end;
-  gap: 10px;
-  grid-column: span 2;
 }
 
 .drilldown-tabs {
@@ -1151,7 +1189,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   display: grid;
   gap: 16px;
   padding: 16px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: linear-gradient(180deg, rgba(255,255,255,0.025) 0%, rgba(255,255,255,0.012) 100%);
   border: 1px solid rgba(255,255,255,0.05);
 }
@@ -1175,7 +1213,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .insight-card {
   padding: 16px;
-  border-radius: 14px;
+  border-radius: 8px;
   background: linear-gradient(180deg, rgba(24, 30, 43, 0.98) 0%, rgba(18, 22, 33, 0.98) 100%);
   border: 1px solid var(--line);
   display: grid;
@@ -1387,9 +1425,11 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 }
 
 .chart-scroll {
+  width: 100%;
+  max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  padding-bottom: 6px;
+  padding-bottom: 8px;
 }
 
 .fault-product-card h4 {

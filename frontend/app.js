@@ -102,28 +102,46 @@ const QUICK_PRESETS = [
 ];
 
 const VISUAL_THEME = {
-  blue: "#6ea8ff",
-  green: "#23d07a",
-  amber: "#f2aa3c",
-  red: "#ff5f6d",
-  purple: "#8d7dff",
-  teal: "#31c6d4",
-  orange: "#ff8f3d",
-  slate: "#8191ad",
-  text: "#eef4ff",
-  muted: "#8191ad",
-  grid: "rgba(148,170,204,0.16)",
+  blue: "#5d73ff",
+  green: "#2bd487",
+  amber: "#ffb347",
+  red: "#ff6b6b",
+  purple: "#8d6bff",
+  teal: "#26c6da",
+  orange: "#ff8f4d",
+  slate: "#97a7c3",
+  text: "#f6f8ff",
+  muted: "#8f9bb3",
+  grid: "rgba(180, 194, 224, 0.14)",
   donutTrack: "rgba(255,255,255,0.06)",
-  barFill: "rgba(110, 168, 255, 0.58)",
-  barStroke: "rgba(166, 204, 255, 0.92)",
+  barFill: "rgba(93, 115, 255, 0.26)",
+  barStroke: "rgba(121, 142, 255, 0.92)",
+  deltaLine: "rgba(255,255,255,0.38)",
+  badgeBg: "rgba(7, 10, 16, 0.92)",
 };
 
-function shouldShowAxisLabel(index, total) {
-  if (total <= 6) return true;
-  if (total <= 10) return index % 2 === 0 || index === total - 1;
-  if (total <= 18) return index % 3 === 0 || index === total - 1;
-  return index % 4 === 0 || index === total - 1;
-}
+const METRIC_VISUALS = {
+  tickets: {
+    accent: VISUAL_THEME.blue,
+    fill: "rgba(93, 115, 255, 0.34)",
+    stroke: "rgba(121, 142, 255, 0.96)",
+  },
+  installation_tickets: {
+    accent: VISUAL_THEME.amber,
+    fill: "rgba(255, 179, 71, 0.26)",
+    stroke: "rgba(255, 190, 92, 0.94)",
+  },
+  bot_resolved_tickets: {
+    accent: VISUAL_THEME.teal,
+    fill: "rgba(38, 198, 218, 0.24)",
+    stroke: "rgba(91, 218, 231, 0.94)",
+  },
+  repeat_tickets: {
+    accent: VISUAL_THEME.purple,
+    fill: "rgba(141, 107, 255, 0.26)",
+    stroke: "rgba(173, 145, 255, 0.94)",
+  },
+};
 
 const state = {
   apiBaseUrl: (window.QUBO_APP_CONFIG?.apiBaseUrl || window.location.origin || "").replace(/\/$/, ""),
@@ -160,6 +178,7 @@ const state = {
   drilldownFilters: null,
   drilldownOpenFilter: null,
   drilldownSearches: {},
+  drilldownRefreshTimer: null,
   currentDrilldownMeta: null,
 };
 state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
@@ -645,17 +664,12 @@ function renderKpis(kpis) {
 function renderTimeline(points) {
   const bucketed = bucketTimeline(points, state.timelineBucket);
   const metricKey = state.timelineMetric;
-  const color = metricKey === "installation_tickets"
-    ? VISUAL_THEME.amber
-    : metricKey === "bot_resolved_tickets"
-      ? VISUAL_THEME.green
-      : metricKey === "repeat_tickets"
-        ? VISUAL_THEME.purple
-        : VISUAL_THEME.blue;
+  const visual = METRIC_VISUALS[metricKey] || METRIC_VISUALS.tickets;
   const chartPoints = addPreviousDelta(bucketed.map((item) => ({ label: item.label, value: item[metricKey] || 0 })));
   renderBarChart(els.timelineChart, {
     points: chartPoints,
-    color,
+    mode: state.timelineBucket,
+    visual,
     yLabel: TIMELINE_METRICS.find((item) => item.key === metricKey)?.label || "Tickets",
   });
 }
@@ -881,15 +895,16 @@ function renderBotTrend(points) {
     els.botTrendChart.innerHTML = '<div class="empty-state">No bot trend data in the selected range.</div>';
     return;
   }
-  const width = Math.max(960, bucketed.length * 52);
-  const height = 250;
-  const pad = { top: 22, right: 56, bottom: 34, left: 48 };
+  const mode = state.botBucket;
+  const width = getChartWidth(bucketed.length, mode, 920);
+  const height = 282;
+  const pad = { top: 26, right: 58, bottom: 40, left: 56 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const maxTickets = Math.max(...bucketed.map((item) => item.tickets || 0), 1);
   const step = innerW / Math.max(bucketed.length, 1);
-  const barW = Math.max(18, Math.min(34, step * 0.68));
-  const showValueLabels = bucketed.length <= 18;
+  const barW = Math.max(12, Math.min(30, step * 0.48));
+  const showValueLabels = shouldShowChartValueLabels(bucketed.length, mode);
   const linePoints = bucketed.map((item, index) => {
     const pct = item.tickets ? (item.bot_resolved_tickets || 0) / item.tickets : 0;
     return {
@@ -907,7 +922,7 @@ function renderBotTrend(points) {
   }
   const linePath = linePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
   els.botTrendChart.innerHTML = `
-    <div class="chart-scroll"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMinYMid meet" style="width:${width}px;height:250px">
+    <div class="chart-scroll"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="min-width:${width}px;width:100%;height:${height}px">
       ${[0, 0.5, 1].map((ratio) => {
         const y = pad.top + innerH - ratio * innerH;
         return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line><text x="${width - pad.right + 8}" y="${y + 4}" font-size="10" fill="${VISUAL_THEME.muted}">${Math.round(ratio * 100)}%</text>`;
@@ -920,10 +935,10 @@ function renderBotTrend(points) {
         const barH = ((item.tickets || 0) / maxTickets) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `${renderChartBar({ x, y, barW, barH, color: VISUAL_THEME.barFill, stroke: VISUAL_THEME.barStroke, radius: 6 })}${showValueLabels ? `${renderChartValueLabel(x + barW / 2, y - 10, fmtNum(item.tickets || 0))}${index > 0 ? renderChartDeltaLabel(x + barW / 2, y + 12, linePoints[index].delta) : ""}` : ""}${shouldShowAxisLabel(index, bucketed.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>` : ""}`;
+        return `${renderChartBar({ x, y, barW, barH, color: METRIC_VISUALS.tickets.fill, stroke: METRIC_VISUALS.tickets.stroke, radius: 4 })}${showValueLabels ? renderChartValueLabel(x + barW / 2, y - 10, fmtNum(item.tickets || 0)) : ""}${shouldShowAxisLabel(index, bucketed.length, mode) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>` : ""}`;
       }).join("")}
-      <path d="${linePath}" fill="none" stroke="${VISUAL_THEME.green}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
-      ${linePoints.map((point, index) => `<circle cx="${point.x}" cy="${point.y}" r="4.5" fill="${VISUAL_THEME.green}"></circle>${bucketed.length <= 8 || shouldShowAxisLabel(index, bucketed.length) ? `<text x="${point.x}" y="${Math.max(14, point.y - 10)}" text-anchor="middle" font-size="10" font-weight="700" fill="${VISUAL_THEME.green}">${(point.pct * 100).toFixed(0)}%</text>` : ""}`).join("")}
+      <path d="${linePath}" fill="none" stroke="${VISUAL_THEME.teal}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path>
+      ${linePoints.map((point, index) => `${renderChartPoint(point.x, point.y, VISUAL_THEME.teal)}${shouldShowDeltaLabel(index, bucketed.length, mode) ? renderChartPercentLabel(point.x, point.y - 16, point.pct) : ""}`).join("")}
     </svg></div>`;
 }
 
@@ -1038,7 +1053,7 @@ function renderMappingStudio(mappingStudio) {
   if (els.mappingShowOverriddenOnly) els.mappingShowOverriddenOnly.checked = !!state.mappingShowOverriddenOnly;
   renderMappingStudioLayout();
   els.mappingStudioSummary.innerHTML = `
-    <div class="mapping-banner">Workbook mapping stays as the base. Edits here are session-only and affect only your current analysis.</div>
+    <div class="mapping-banner">Workbook mapping stays as the base. Changes saved here persist and affect the live dashboard.</div>
     <div class="mapping-stat">
       <span class="mapping-stat-value">${fmtNum(active.products || 0)}</span>
       <span class="mapping-stat-label">Product overrides</span>
@@ -1319,13 +1334,11 @@ function renderDrilldownFilters() {
         <input type="date" data-drilldown-date="date_end" min="${escHtml(bounds.min || "")}" max="${escHtml(bounds.max || "")}" value="${escHtml(state.drilldownFilters.date_end || "")}">
       </label>
       ${defs.map(renderSelect).join("")}
-      <div class="drilldown-filter-actions">
-        <button class="primary-btn" type="button" data-drilldown-filter-apply="true">Apply filters</button>
-      </div>
     </div>`;
   els.drilldownFilters.querySelectorAll("[data-drilldown-date]").forEach((input) => {
     input.addEventListener("change", () => {
       state.drilldownFilters[input.dataset.drilldownDate] = input.value;
+      scheduleDrilldownRefresh();
     });
   });
   els.drilldownFilters.querySelectorAll("[data-drilldown-filter-trigger]").forEach((button) => {
@@ -1349,12 +1362,8 @@ function renderDrilldownFilters() {
       else next.delete(input.value);
       state.drilldownFilters[key] = [...next];
       renderDrilldownFilters();
+      scheduleDrilldownRefresh();
     });
-  });
-  els.drilldownFilters.querySelector("[data-drilldown-filter-apply]")?.addEventListener("click", async () => {
-    state.drilldownOpenFilter = null;
-    state.categoryDrilldownBucket = recommendedBucketMode(state.drilldownFilters.date_start, state.drilldownFilters.date_end, state.options.date_bounds);
-    await refreshCurrentDrilldown();
   });
   if (activeFilterKey) {
     const nextInput = els.drilldownFilters.querySelector(`[data-drilldown-filter-search="${CSS.escape(activeFilterKey)}"]`);
@@ -1363,6 +1372,15 @@ function renderDrilldownFilters() {
       if (activeSelectionStart !== null) nextInput.setSelectionRange(activeSelectionStart, activeSelectionStart);
     }
   }
+}
+
+function scheduleDrilldownRefresh() {
+  if (state.drilldownRefreshTimer) clearTimeout(state.drilldownRefreshTimer);
+  state.drilldownRefreshTimer = setTimeout(async () => {
+    state.drilldownOpenFilter = null;
+    state.categoryDrilldownBucket = recommendedBucketMode(state.drilldownFilters.date_start, state.drilldownFilters.date_end, state.options.date_bounds);
+    await refreshCurrentDrilldown();
+  }, 220);
 }
 
 async function refreshCurrentDrilldown() {
@@ -1433,7 +1451,7 @@ function renderDrilldownPanels(drilldown) {
     <section class="drilldown-section">
       <div class="section-label">Trend</div>
       <div class="panel-actions">${renderCategoryBucketTabs()}</div>
-      <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline)}</div>
+      <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline, state.categoryDrilldownBucket)}</div>
     </section>
     <section class="drilldown-section">
       <div class="section-label">Leading signals</div>
@@ -1509,7 +1527,7 @@ function renderCategoryDrilldownPanels(drilldown) {
     </section>
     <section class="drilldown-section">
       <div class="section-label">Trend</div>
-      <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline)}</div>
+      <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline, state.categoryDrilldownBucket)}</div>
     </section>
     <section class="drilldown-section">
       <div class="section-label">Product and issue mix</div>
@@ -1563,6 +1581,7 @@ function renderCategoryDrilldownPanels(drilldown) {
 
 function closeDrilldown() {
   els.drilldownModal.classList.add("hidden");
+  if (state.drilldownRefreshTimer) clearTimeout(state.drilldownRefreshTimer);
   state.currentCategoryDrilldown = null;
   state.currentDrilldown = null;
   state.currentDrilldownKind = null;
@@ -1570,6 +1589,7 @@ function closeDrilldown() {
   state.drilldownFilters = null;
   state.drilldownOpenFilter = null;
   state.drilldownSearches = {};
+  state.drilldownRefreshTimer = null;
   state.currentDrilldownMeta = null;
   if (els.drilldownFilters) els.drilldownFilters.innerHTML = "";
 }
@@ -1846,31 +1866,35 @@ function renderMiniStat(label, value, isPercent = false) {
   return `<div class="mini-stat"><div class="mini-stat-key">${escHtml(label)}</div><div class="mini-stat-value">${isPercent ? fmtPct(value) : fmtNum(value)}</div></div>`;
 }
 
-function renderMiniChartSvg(points) {
+function renderMiniChartSvg(points, mode = "daily") {
   if (!points.length) return '<div class="empty-state">No trend available.</div>';
-  const width = Math.max(620, points.length * 46);
-  const height = 220;
-  const pad = { top: 18, right: 14, bottom: 30, left: 44 };
+  const series = addPreviousDelta(points.map((point) => ({
+    ...point,
+    value: Number(point.tickets || 0),
+  })));
+  const width = getChartWidth(points.length, mode, 700);
+  const height = 252;
+  const pad = { top: 24, right: 28, bottom: 38, left: 48 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
-  const max = Math.max(...points.map((point) => Number(point.tickets || 0)), 1);
-  const barW = Math.max(18, Math.min(34, innerW / Math.max(points.length, 1) * 0.68));
-  const showValueLabels = points.length <= 18;
-  return `<div class="chart-scroll"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMinYMid meet" style="width:${width}px;height:220px">
+  const max = Math.max(...series.map((point) => Number(point.tickets || 0)), 1);
+  const barW = Math.max(12, Math.min(28, innerW / Math.max(series.length, 1) * 0.46));
+  const showValueLabels = shouldShowChartValueLabels(series.length, mode);
+  return `<div class="chart-scroll"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="min-width:${width}px;width:100%;height:${height}px">
     ${[0, 0.5, 1].map((ratio) => {
       const y = pad.top + innerH - innerH * ratio;
       return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line>${ratio === 0 || ratio === 1 ? `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(max * ratio))}</text>` : ""}`;
     }).join("")}
-    ${points.map((point, index) => {
-      const step = innerW / Math.max(points.length, 1);
+    ${series.map((point, index) => {
+      const step = innerW / Math.max(series.length, 1);
       const value = Number(point.tickets || 0);
-      const previous = Number(points[index - 1]?.tickets || 0);
       const barH = (value / max) * innerH;
       const x = pad.left + step * index + (step - barW) / 2;
       const y = pad.top + innerH - barH;
-      const delta = index === 0 ? 0 : previous > 0 ? (value - previous) / previous : 0;
-      return `${renderChartBar({ x, y, barW, barH, color: VISUAL_THEME.barFill, stroke: VISUAL_THEME.barStroke, radius: 5 })}${showValueLabels ? `${renderChartValueLabel(x + barW / 2, y - 8, fmtNum(value))}${index > 0 ? renderChartDeltaLabel(x + barW / 2, y + 10, delta) : ""}` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
-    }).join("")}</svg></div>`;
+      return `${renderChartBar({ x, y, barW, barH, color: METRIC_VISUALS.tickets.fill, stroke: METRIC_VISUALS.tickets.stroke, radius: 4 })}${showValueLabels ? renderChartValueLabel(x + barW / 2, y - 10, fmtNum(value)) : ""}${shouldShowAxisLabel(index, series.length, mode) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
+    }).join("")}
+    ${renderDeltaLine(series.map((point) => ({ tickets: point.tickets, previous_delta: point.previous_delta, label: point.label })), mode, width, height, pad, innerW, innerH)}
+  </svg></div>`;
 }
 
 function renderIssueList(container, issues, emptyMessage) {
@@ -1893,23 +1917,23 @@ function renderSegmented(container, options, active, onSelect) {
   });
 }
 
-function renderBarChart(container, { points, color, yLabel }) {
+function renderBarChart(container, { points, mode, visual, yLabel }) {
   if (!points.length) {
     container.innerHTML = '<div class="empty-state">No trend data in the selected range.</div>';
     return;
   }
-  const width = Math.max(960, points.length * 52);
-  const height = 290;
-  const pad = { top: 24, right: 20, bottom: 38, left: 54 };
+  const width = getChartWidth(points.length, mode, 980);
+  const height = 332;
+  const pad = { top: 28, right: 24, bottom: 42, left: 56 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const max = Math.max(...points.map((point) => Number(point.value || 0)), 1);
   const step = innerW / Math.max(points.length, 1);
-  const barW = Math.max(18, Math.min(42, step * 0.68));
-  const showValueLabels = points.length <= 18;
+  const barW = Math.max(12, Math.min(32, step * 0.46));
+  const showValueLabels = shouldShowChartValueLabels(points.length, mode);
   container.innerHTML = `
     <div class="chart-scroll">
-      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMinYMid meet" style="width:${width}px;height:290px">
+      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="min-width:${width}px;width:100%;height:${height}px">
       ${[0.25, 0.5, 0.75].map((ratio) => {
         const y = pad.top + innerH - innerH * ratio;
         return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line>`;
@@ -1923,24 +1947,105 @@ function renderBarChart(container, { points, color, yLabel }) {
         const barH = (value / max) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `${renderChartBar({ x, y, barW, barH, color, stroke: VISUAL_THEME.barStroke, radius: 5 })}${showValueLabels ? `${renderChartValueLabel(x + barW / 2, y - 12, fmtNum(value))}${index > 0 ? renderChartDeltaLabel(x + barW / 2, y + 12, point.previous_delta || 0) : ""}` : ""}${shouldShowAxisLabel(index, points.length) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
+        return `${renderChartBar({ x, y, barW, barH, color: visual.fill, stroke: visual.stroke, radius: 4 })}${showValueLabels ? renderChartValueLabel(x + barW / 2, y - 12, fmtNum(value)) : ""}${shouldShowAxisLabel(index, points.length, mode) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
       }).join("")}
-      <text x="12" y="${pad.top + 12}" font-size="11" fill="${VISUAL_THEME.muted}">${escHtml(yLabel)}</text>
+      ${renderDeltaLine(points.map((point) => ({ tickets: point.value, previous_delta: point.previous_delta, label: point.label })), mode, width, height, pad, innerW, innerH)}
     </svg>
     </div>`;
 }
 
 function renderChartBar({ x, y, barW, barH, color, stroke, radius }) {
-  return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="${radius}" fill="${color}" stroke="${stroke}" stroke-width="1"></rect>`;
+  return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="${radius}" fill="${color}" stroke="${stroke}" stroke-width="1.15"></rect><line x1="${x + 1}" x2="${x + barW - 1}" y1="${y + 1.5}" y2="${y + 1.5}" stroke="rgba(255,255,255,0.24)" stroke-width="1"></line>`;
 }
 
 function renderChartValueLabel(x, y, text) {
-  return `<text x="${x}" y="${Math.max(14, y)}" text-anchor="middle" font-size="11" font-weight="800" fill="${VISUAL_THEME.text}">${escHtml(text)}</text>`;
+  return renderChartBadge(x, Math.max(18, y), text, "neutral");
 }
 
-function renderChartDeltaLabel(x, y, delta) {
-  const fill = Number(delta || 0) >= 0 ? VISUAL_THEME.green : VISUAL_THEME.red;
-  return `<text x="${x}" y="${y}" text-anchor="middle" font-size="10" font-weight="700" fill="${fill}">${escHtml(formatSignedPct(delta || 0))}</text>`;
+function renderChartBadge(x, y, text, tone = "neutral") {
+  const paddingX = 7;
+  const width = Math.max(34, String(text).length * 6.5 + paddingX * 2);
+  const height = 18;
+  const fill = tone === "good"
+    ? "rgba(13, 45, 27, 0.95)"
+    : tone === "bad"
+      ? "rgba(56, 18, 23, 0.95)"
+      : VISUAL_THEME.badgeBg;
+  const stroke = tone === "good"
+    ? "rgba(43, 212, 135, 0.32)"
+    : tone === "bad"
+      ? "rgba(255, 107, 107, 0.34)"
+      : "rgba(255,255,255,0.08)";
+  const textFill = tone === "good" ? VISUAL_THEME.green : tone === "bad" ? VISUAL_THEME.red : VISUAL_THEME.text;
+  return `<g transform="translate(${x - width / 2} ${y - height})"><rect width="${width}" height="${height}" rx="6" fill="${fill}" stroke="${stroke}"></rect><text x="${width / 2}" y="12.5" text-anchor="middle" font-size="10" font-weight="800" fill="${textFill}">${escHtml(text)}</text></g>`;
+}
+
+function renderChartPoint(x, y, fill) {
+  return `<circle cx="${x}" cy="${y}" r="4.2" fill="${fill}" stroke="${VISUAL_THEME.badgeBg}" stroke-width="1.5"></circle>`;
+}
+
+function renderChartPercentLabel(x, y, pct) {
+  return renderChartBadge(x, Math.max(18, y), `${(pct * 100).toFixed(1)}%`, "neutral");
+}
+
+function getChartWidth(count, mode, minWidth = 900) {
+  const unit = mode === "monthly" ? 132 : mode === "weekly" ? 88 : 56;
+  return Math.max(minWidth, count * unit);
+}
+
+function shouldShowChartValueLabels(total, mode) {
+  if (mode === "monthly") return total <= 12;
+  if (mode === "weekly") return total <= 10;
+  return total <= 7;
+}
+
+function shouldShowAxisLabel(index, total, mode = "weekly") {
+  if (mode === "monthly") return total <= 8 || index % 1 === 0;
+  if (mode === "weekly") {
+    if (total <= 8) return true;
+    if (total <= 16) return index % 2 === 0 || index === total - 1;
+    return index % 3 === 0 || index === total - 1;
+  }
+  if (total <= 10) return true;
+  if (total <= 21) return index % 3 === 0 || index === total - 1;
+  return index % 4 === 0 || index === total - 1;
+}
+
+function shouldShowDeltaLabel(index, total, mode = "weekly") {
+  if (index === 0) return false;
+  if (mode === "monthly") return true;
+  if (mode === "weekly") return total <= 10 || index % 2 === 0 || index === total - 1;
+  return total <= 12 || index % 4 === 0 || index === total - 1;
+}
+
+function renderDeltaLine(points, mode, width, height, pad, innerW, innerH) {
+  const deltas = points
+    .map((point) => Number(point.previous_delta))
+    .filter((value, index) => index > 0 && Number.isFinite(value));
+  if (!deltas.length) return "";
+  const maxAbs = Math.max(...deltas.map((value) => Math.abs(value)), 0.01);
+  const step = innerW / Math.max(points.length, 1);
+  const deltaToY = (delta) => pad.top + innerH / 2 - (delta / maxAbs) * innerH * 0.24;
+  const linePoints = points
+    .map((point, index) => {
+      if (index === 0) return null;
+      return {
+        x: pad.left + step * index + step / 2,
+        y: deltaToY(Number(point.previous_delta || 0)),
+        delta: Number(point.previous_delta || 0),
+      };
+    })
+    .filter(Boolean);
+  const path = linePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+  const zeroY = deltaToY(0);
+  return `
+    <line x1="${pad.left}" x2="${width - pad.right}" y1="${zeroY}" y2="${zeroY}" stroke="rgba(255,255,255,0.10)" stroke-dasharray="3 5"></line>
+    <path d="${path}" fill="none" stroke="${VISUAL_THEME.deltaLine}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+    ${linePoints.map((point, index) => {
+      const tone = point.delta >= 0 ? "good" : "bad";
+      const absoluteIndex = index + 1;
+      return `${renderChartPoint(point.x, point.y, point.delta >= 0 ? VISUAL_THEME.green : VISUAL_THEME.red)}${shouldShowDeltaLabel(absoluteIndex, points.length, mode) ? renderChartBadge(point.x, point.y - 12, formatSignedPct(point.delta), tone) : ""}`;
+    }).join("")}`;
 }
 
 function buildQueryParams(filters, options = {}) {
