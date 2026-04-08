@@ -604,6 +604,42 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
     linear-gradient(180deg, rgba(184,106,69,0.02), transparent 38%);
 }
 
+.inline-trend-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 10px 0 16px;
+}
+
+.inline-filter {
+  display: grid;
+  gap: 6px;
+}
+
+.inline-filter span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.inline-filter input,
+.inline-filter select {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--text);
+  font: inherit;
+}
+
+.inline-filter-search {
+  grid-column: span 1;
+}
+
 .panel,
 .mini-panel,
 .feature-panel,
@@ -1595,6 +1631,9 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   .dashboard-grid-wide,
   .dashboard-grid-split,
   .drilldown-grid {
+    grid-template-columns: 1fr;
+  }
+  .inline-trend-filters {
     grid-template-columns: 1fr;
   }
 }

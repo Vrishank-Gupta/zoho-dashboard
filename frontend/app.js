@@ -180,6 +180,10 @@ const state = {
   drilldownFilters: null,
   drilldownOpenFilter: null,
   drilldownSearches: {},
+  drilldownIssueTrendFilters: {
+    product: { efc: "", query: "" },
+    category: { product: "", efc: "", query: "" },
+  },
   drilldownRefreshTimer: null,
   currentDrilldownMeta: null,
 };
@@ -1274,6 +1278,7 @@ async function runPipeline() {
 
 async function openProductDrilldown(category, productName) {
   state.drilldownFilters = structuredClone(state.filters);
+  state.drilldownIssueTrendFilters.product = { efc: "", query: "" };
   state.currentDrilldownMeta = { category, product_name: productName };
   state.currentDrilldownKind = "product";
   state.currentDrilldownTab = "overview";
@@ -1289,6 +1294,7 @@ async function openProductDrilldown(category, productName) {
 
 async function openCategoryDrilldown(category) {
   state.drilldownFilters = structuredClone(state.filters);
+  state.drilldownIssueTrendFilters.category = { product: "", efc: "", query: "" };
   state.currentDrilldownMeta = { category };
   state.categoryDrilldownBucket = recommendedBucketMode(state.filters.date_start, state.filters.date_end, state.options.date_bounds);
   state.currentDrilldownKind = "category";
@@ -1304,6 +1310,7 @@ async function openCategoryDrilldown(category) {
 
 async function openIssueDrilldown(issueId) {
   state.drilldownFilters = structuredClone(state.filters);
+  state.drilldownIssueTrendFilters.product = { efc: "", query: "" };
   state.currentDrilldownMeta = { issue_id: issueId };
   state.currentDrilldownKind = "issue";
   state.currentDrilldownTab = "overview";
@@ -1560,6 +1567,7 @@ function renderDrilldownPanels(drilldown) {
     repeat_tickets: 0,
   })), state.categoryDrilldownBucket);
   const productIssueTrendModel = buildProductIssueTrendModel(drilldown.issue_daily || [], state.categoryDrilldownBucket);
+  const productIssueTrendEfcs = [...new Set((drilldown.issue_daily || []).map((row) => row.executive_fault_code || "Others"))].sort((a, b) => a.localeCompare(b));
   renderDrilldownTabs();
   const snapshotCards = state.currentDrilldownKind === "issue"
     ? [
@@ -1617,15 +1625,17 @@ function renderDrilldownPanels(drilldown) {
       <div class="mini-panel analysis-panel">
         <div class="analysis-panel-head">
           <div>
-            <h3>Period view</h3>
-              <div class="analysis-caption">Open a period to review the issue mix contributing within that window.</div>
+            <h3>Issue trend by period</h3>
+              <div class="analysis-caption">Filter and compare issue movement across the selected periods.</div>
           </div>
           <div class="panel-actions">${renderCategoryBucketTabs()}</div>
         </div>
+        ${renderIssueTrendFilters("product", { efcs: productIssueTrendEfcs })}
         ${renderProductIssueTrendTable(productIssueTrendModel)}
       </div>
     </section>` : ""}`;
   els.drilldownBody.innerHTML = state.currentDrilldownTab === "analysis" ? analysis : overview;
+  bindIssueTrendFilters(els.drilldownBody);
   els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
     button.addEventListener("click", () => {
       state.categoryDrilldownBucket = button.dataset.categoryBucket || "daily";
@@ -1646,6 +1656,9 @@ function renderCategoryDrilldownPanels(drilldown) {
   })), state.categoryDrilldownBucket);
   const productTrend = buildCategoryProductTrendModel(drilldown.product_daily || [], state.categoryDrilldownBucket);
   const faultMatrices = buildCategoryFaultMatrixModel(drilldown.product_fault_daily || [], state.categoryDrilldownBucket);
+  const categoryTrendEfcs = [...new Set((drilldown.product_fault_daily || []).map((row) => row.executive_fault_code || "Others"))].sort((a, b) => a.localeCompare(b));
+  const categoryTrendProducts = [...new Set((drilldown.product_daily || []).map((row) => row.product_name || "Unknown"))].sort((a, b) => a.localeCompare(b));
+  const filteredCategoryTrend = filterCategoryTrendModels(productTrend, faultMatrices, state.drilldownIssueTrendFilters.category);
   const productDeltaMap = new Map(productTrend.rows.map((row) => [row.product_name, row.delta_vs_previous || 0]));
   renderDrilldownTabs();
   const overview = `
@@ -1687,15 +1700,16 @@ function renderCategoryDrilldownPanels(drilldown) {
       </div>
     </section>`;
   const productsView = `
-    <div class="mini-panel analysis-panel">
-      <div class="analysis-panel-head">
-        <div>
-          <h3>Product trend by period</h3>
-          <div class="analysis-caption">Compare product volume across periods. Expand a row to see the top issues driving that product.</div>
+      <div class="mini-panel analysis-panel">
+        <div class="analysis-panel-head">
+          <div>
+            <h3>Product trend by period</h3>
+          <div class="analysis-caption">Filter by product, EFC, or issue text to compare issue movement across the category.</div>
+          </div>
+          <div class="panel-actions">${renderCategoryBucketTabs()}</div>
         </div>
-        <div class="panel-actions">${renderCategoryBucketTabs()}</div>
-      </div>
-      ${renderCategoryProductTrendTable(productTrend, faultMatrices)}
+      ${renderIssueTrendFilters("category", { products: categoryTrendProducts, efcs: categoryTrendEfcs })}
+      ${renderCategoryProductTrendTable(filteredCategoryTrend.model, filteredCategoryTrend.faultModel)}
     </div>
     <section class="drilldown-section">
       <div class="drilldown-two-col">
@@ -1704,6 +1718,7 @@ function renderCategoryDrilldownPanels(drilldown) {
       </div>
     </section>`;
   els.drilldownBody.innerHTML = state.currentDrilldownTab === "products" ? productsView : overview;
+  bindIssueTrendFilters(els.drilldownBody);
   els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
     button.addEventListener("click", () => {
       state.categoryDrilldownBucket = button.dataset.categoryBucket || "daily";
@@ -1722,6 +1737,8 @@ function closeDrilldown() {
   state.drilldownFilters = null;
   state.drilldownOpenFilter = null;
   state.drilldownSearches = {};
+  state.drilldownIssueTrendFilters.product = { efc: "", query: "" };
+  state.drilldownIssueTrendFilters.category = { product: "", efc: "", query: "" };
   state.drilldownRefreshTimer = null;
   state.currentDrilldownMeta = null;
   if (els.drilldownFilters) els.drilldownFilters.innerHTML = "";
@@ -2596,6 +2613,50 @@ function renderSnapshotStat(label, count, rate = null, previousCount = 0) {
     </div>`;
 }
 
+function renderIssueTrendFilters(kind, config) {
+  const current = state.drilldownIssueTrendFilters[kind] || {};
+  const productOptions = config.products || [];
+  const efcOptions = config.efcs || [];
+  return `
+    <div class="inline-trend-filters">
+      ${productOptions.length ? `
+        <label class="inline-filter">
+          <span>Product</span>
+          <select data-issue-trend-filter="${escHtml(kind)}:product">
+            <option value="">All products</option>
+            ${productOptions.map((value) => `<option value="${escHtml(value)}" ${current.product === value ? "selected" : ""}>${escHtml(value)}</option>`).join("")}
+          </select>
+        </label>` : ""}
+      <label class="inline-filter">
+        <span>EFC</span>
+        <select data-issue-trend-filter="${escHtml(kind)}:efc">
+          <option value="">All EFCs</option>
+          ${efcOptions.map((value) => `<option value="${escHtml(value)}" ${current.efc === value ? "selected" : ""}>${escHtml(value)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="inline-filter inline-filter-search">
+        <span>Issue search</span>
+        <input type="search" value="${escHtml(current.query || "")}" placeholder="Filter issue text" data-issue-trend-filter="${escHtml(kind)}:query">
+      </label>
+    </div>`;
+}
+
+function bindIssueTrendFilters(scope = document) {
+  scope.querySelectorAll("[data-issue-trend-filter]").forEach((input) => {
+    const handler = () => {
+      const [kind, field] = String(input.dataset.issueTrendFilter || "").split(":");
+      if (!kind || !field || !state.drilldownIssueTrendFilters[kind]) return;
+      state.drilldownIssueTrendFilters[kind][field] = input.value || "";
+      if (state.currentDrilldownKind === "category") {
+        renderCategoryDrilldownPanels(state.currentCategoryDrilldown || {});
+      } else {
+        renderDrilldownPanels(state.currentDrilldown || {});
+      }
+    };
+    input.addEventListener(input.tagName === "SELECT" ? "change" : "input", handler);
+  });
+}
+
 function renderCategoryProductTrendTable(model, faultModel = { products: [] }) {
   if (!model.rows.length) return '<div class="empty-state">No product trend available in the selected range.</div>';
   const faultByProduct = new Map((faultModel.products || []).map((product) => [product.product_name, product.faults || []]));
@@ -2812,6 +2873,18 @@ function buildProductIssueTrendModel(issueDailyRows, mode) {
 
 function renderProductIssueTrendTable(model) {
   if (!model.rows.length) return '<div class="empty-state">No issue trend available in the selected range.</div>';
+  const active = state.drilldownIssueTrendFilters.product || {};
+  const efcFilter = String(active.efc || "").trim().toLowerCase();
+  const query = String(active.query || "").trim().toLowerCase();
+  const rows = model.rows.filter((row) => {
+    if (efcFilter && String(row.executive_fault_code || "").trim().toLowerCase() !== efcFilter) return false;
+    if (query) {
+      const hay = `${row.issue_detail || ""} ${row.executive_fault_code || ""}`.toLowerCase();
+      if (!hay.includes(query)) return false;
+    }
+    return true;
+  });
+  if (!rows.length) return '<div class="empty-state">No issues match the current local filters.</div>';
   return `
     <div class="heatmap-wrap">
       <table class="heatmap-table compact issue-trend-table">
@@ -2824,7 +2897,7 @@ function renderProductIssueTrendTable(model) {
           </tr>
         </thead>
         <tbody>
-          ${model.rows.map((row) => `
+          ${rows.map((row) => `
             <tr>
               <td class="heatmap-row-label">
                 <div class="fault-label-stack">
@@ -2847,4 +2920,39 @@ function renderProductIssueTrendTable(model) {
         </tbody>
       </table>
     </div>`;
+}
+
+function filterCategoryTrendModels(model, faultModel, filters) {
+  const productFilter = String(filters?.product || "").trim().toLowerCase();
+  const efcFilter = String(filters?.efc || "").trim().toLowerCase();
+  const query = String(filters?.query || "").trim().toLowerCase();
+
+  const filteredFaultProducts = (faultModel.products || []).map((product) => {
+    const productName = String(product.product_name || "").trim().toLowerCase();
+    if (productFilter && productName !== productFilter) return null;
+    const faults = (product.faults || []).filter((fault) => {
+      const efc = String(fault.efc || "").trim().toLowerCase();
+      const text = `${fault.primary || ""} ${fault.secondary || ""} ${fault.efc || ""}`.toLowerCase();
+      if (efcFilter && efc !== efcFilter) return false;
+      if (query && !text.includes(query)) return false;
+      return true;
+    });
+    if (efcFilter || query) {
+      if (!faults.length) return null;
+    }
+    return { ...product, faults };
+  }).filter(Boolean);
+
+  const allowedProducts = new Set(filteredFaultProducts.map((product) => product.product_name));
+  const filteredRows = (model.rows || []).filter((row) => {
+    const productName = String(row.product_name || "").trim().toLowerCase();
+    if (productFilter && productName !== productFilter) return false;
+    if ((efcFilter || query) && !allowedProducts.has(row.product_name)) return false;
+    return true;
+  });
+
+  return {
+    model: { ...model, rows: filteredRows },
+    faultModel: { ...faultModel, products: filteredFaultProducts },
+  };
 }
