@@ -94,6 +94,8 @@ const BUCKET_MODES = [
   { key: "monthly", label: "Monthly" },
 ];
 
+const NONE_SENTINEL = "__NONE__";
+
 const QUICK_PRESETS = [
   { key: "30d", label: "Last 30 days", days: 29 },
   { key: "60d", label: "Last 60 days", days: 59 },
@@ -218,6 +220,7 @@ const els = {
   timelineChart: document.getElementById("timelineChart"),
   productHealthTable: document.getElementById("productHealthTable"),
   issueBoard: document.getElementById("issueBoard"),
+  risingSignals: document.getElementById("risingSignals"),
   issueWidgetFilters: document.getElementById("issueWidgetFilters"),
   botOverview: document.getElementById("botOverview"),
   botTrendChart: document.getElementById("botTrendChart"),
@@ -497,8 +500,9 @@ function renderDashboard(payload) {
   renderKpis(payload.kpis || {});
   renderTimeline(payload.timeline || []);
   renderProductHealth();
-  renderIssueWidgetFilters();
-  renderIssueBoard(payload.issue_views || {});
+    renderIssueWidgetFilters();
+    renderIssueBoard(payload.issue_views || {});
+    renderRisingSignals(payload.rising_signals || []);
   renderBotSummary(payload.bot_summary || {});
   renderDonut(els.categoryDonut, payload.service_ops?.category_mix || [], "Category");
   renderDonut(els.channelDonut, payload.service_ops?.channel_mix || [], "Channel");
@@ -584,15 +588,16 @@ function renderFilterControls() {
           </span>
           <span class="control-caret">${state.openFilter === control.key ? "▲" : "▼"}</span>
         </button>
-        <div class="control-panel" data-filter-panel="${escHtml(control.key)}">
-          <div class="control-tools">
-            <input type="search" value="${escHtml(search)}" data-filter-search="${escHtml(control.key)}" placeholder="Search ${escHtml(control.label)}">
-            <button type="button" data-filter-clear="${escHtml(control.key)}">Clear</button>
-          </div>
+          <div class="control-panel" data-filter-panel="${escHtml(control.key)}">
+            <div class="control-tools">
+              <input type="search" value="${escHtml(search)}" data-filter-search="${escHtml(control.key)}" placeholder="Search ${escHtml(control.label)}">
+              <button type="button" data-filter-select-all="${escHtml(control.key)}">All</button>
+              <button type="button" data-filter-remove-all="${escHtml(control.key)}">None</button>
+            </div>
           <div class="option-list">
             ${visible.length ? visible.map((item) => `
               <label class="option-item">
-                <input type="checkbox" data-filter-option="${escHtml(control.key)}" value="${escHtml(item.label)}" ${selected.includes(item.label) ? "checked" : ""}>
+                <input type="checkbox" data-filter-option="${escHtml(control.key)}" value="${escHtml(item.label)}" ${selected.includes(item.label) && !selected.includes(NONE_SENTINEL) ? "checked" : ""}>
                 <span>${escHtml(formatOptionLabel(control, item.label))}</span>
                 <span class="option-count">${fmtNum(item.count)}</span>
               </label>`).join("") : '<div class="empty-state">No values match the current search.</div>'}
@@ -612,19 +617,32 @@ function renderFilterControls() {
         renderFilterControls();
       });
     });
-    grid.querySelectorAll("[data-filter-clear]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const key = button.dataset.filterClear;
-        state.filters[key] = [];
-        renderFilterControls();
-        loadDashboard();
+      grid.querySelectorAll("[data-filter-select-all]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const key = button.dataset.filterSelectAll;
+          const control = CONTROLS.find((item) => item.key === key);
+          if (!control) return;
+          const blocked = new Set(control.oppositeKey ? (state.filters[control.oppositeKey] || []) : []);
+          state.filters[key] = getControlOptions(control)
+            .map((item) => item.label)
+            .filter((label) => !blocked.has(label));
+          renderFilterControls();
+          loadDashboard();
+        });
       });
-    });
-    grid.querySelectorAll("[data-filter-option]").forEach((input) => {
-      input.addEventListener("change", () => {
-        toggleFilterValue(input.dataset.filterOption, input.value, input.checked);
-        renderFilterControls();
-        loadDashboard();
+      grid.querySelectorAll("[data-filter-remove-all]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const key = button.dataset.filterRemoveAll;
+          state.filters[key] = [NONE_SENTINEL];
+          renderFilterControls();
+          loadDashboard();
+        });
+      });
+      grid.querySelectorAll("[data-filter-option]").forEach((input) => {
+        input.addEventListener("change", () => {
+          toggleFilterValue(input.dataset.filterOption, input.value, input.checked);
+          renderFilterControls();
+          loadDashboard();
       });
     });
   });
@@ -691,35 +709,35 @@ function renderProductHealth() {
     const classes = numeric ? "num" : "";
     return `<th class="${classes}"><button class="sort-header" type="button" data-product-sort="${escHtml(key)}">${escHtml(label)} <span class="sort-indicator">${arrow}</span></button></th>`;
   };
-  const body = rows.slice(0, 18).map((row, index) => `
-    <tr class="click-row"
-      data-product-row="${state.productView === "category" ? "" : escHtml(JSON.stringify({ category: row.product_category, product_name: row.product_name }))}"
-      data-category-row="${state.productView === "category" ? escHtml(row.product_category || "") : ""}">
+    const body = rows.slice(0, 18).map((row, index) => `
+      <tr class="click-row"
+        data-product-row="${state.productView === "category" ? "" : escHtml(JSON.stringify({ category: row.product_category, product_name: row.product_name }))}"
+        data-category-row="${state.productView === "category" ? escHtml(row.product_category || "") : ""}">
       <td class="num">${index + 1}</td>
       <td>
         <div class="name-stack">
           <div class="name-main">${escHtml(state.productView === "category" ? row.product_category : row.product_name || "Other")}<span class="row-chevron">›</span></div>
           <div class="name-sub">${escHtml(state.productView === "category" ? `Top issue: ${row.top_issue_detail || "No issue detail"}` : `Category: ${row.product_category || "Other"}`)}</div>
         </div>
-      </td>
-      <td class="num">${fmtNum(row.tickets)}</td>
-      <td class="num">${fmtPct(row.installation_rate)}</td>
-      <td class="num">${fmtPct(row.repeat_rate)}</td>
-      <td class="num">${fmtPct(row.bot_resolved_rate)}</td>
-      <td><span class="metric-pill">${escHtml(row.top_efc || "Blank")}</span></td>
-    </tr>`).join("");
+        </td>
+        <td class="num">${fmtNum(row.tickets)}</td>
+        <td class="num ${Number(row.change_rate || 0) >= 0 ? "good" : "bad"}">${formatSignedPct(row.change_rate || 0)}</td>
+        <td class="num">${fmtPct(row.repeat_rate)}</td>
+        <td class="num">${fmtPct(row.bot_resolved_rate)}</td>
+        <td><span class="metric-pill">${escHtml(row.top_efc || "Others")}</span></td>
+      </tr>`).join("");
 
   els.productHealthTable.innerHTML = `
     <table class="data-table">
       <thead>
         <tr>
-          <th class="num">#</th>
-          ${sortHeader(state.productView === "category" ? "product_category" : "product_name", state.productView === "category" ? "Category" : "Product")}
-          ${sortHeader("tickets", "Tickets", true)}
-          ${sortHeader("installation_rate", "Installation %", true)}
-          ${sortHeader("repeat_rate", "Repeat %", true)}
-          ${sortHeader("bot_resolved_rate", "Bot resolved %", true)}
-          <th>Top EFC</th>
+            <th class="num">#</th>
+            ${sortHeader(state.productView === "category" ? "product_category" : "product_name", state.productView === "category" ? "Category" : "Product")}
+            ${sortHeader("tickets", "Tickets", true)}
+            ${sortHeader("change_rate", "Change", true)}
+            ${sortHeader("repeat_rate", "Repeat %", true)}
+            ${sortHeader("bot_resolved_rate", "Bot resolved %", true)}
+            <th>Top EFC</th>
         </tr>
       </thead>
       <tbody>${body}</tbody>
@@ -778,6 +796,24 @@ function renderIssueBoard(issueViews) {
   });
 }
 
+function renderRisingSignals(items) {
+  if (!els.risingSignals) return;
+  if (!items.length) {
+    els.risingSignals.innerHTML = '<div class="empty-state">No strong week-over-week jumps in the current filtered view.</div>';
+    return;
+  }
+  els.risingSignals.innerHTML = items.slice(0, 5).map((item) => `
+    <button class="issue-list-item click-card" type="button" data-rising-issue="${escHtml(item.issue_id)}">
+      <div class="issue-list-item-title">${escHtml(item.fault_code_level_2 || "Unclassified")}</div>
+      <div class="issue-list-item-meta">${escHtml(item.product_category || "Other")} · ${escHtml(item.product_name || "Other")} · ${escHtml(item.executive_fault_code || "Others")}</div>
+      <div class="issue-list-item-meta">${escHtml(fmtNum(item.volume || 0))} tickets · ${escHtml(formatSignedPct(item.delta_rate || 0))} vs prior week</div>
+    </button>
+  `).join("");
+  els.risingSignals.querySelectorAll("[data-rising-issue]").forEach((button) => {
+    button.addEventListener("click", () => openIssueDrilldown(button.dataset.risingIssue));
+  });
+}
+
 function renderIssueWidgetFilters() {
   if (!els.issueWidgetFilters) return;
   const options = getIssueWidgetOptions();
@@ -797,11 +833,15 @@ function renderIssueWidgetFilters() {
           </span>
           <span class="control-caret">${state.issueWidgetOpenFilter === definition.key ? "▲" : "▼"}</span>
         </button>
-        <div class="control-panel widget-control-panel" data-widget-filter-panel="${escHtml(definition.key)}">
-          <div class="option-list">
+          <div class="control-panel widget-control-panel" data-widget-filter-panel="${escHtml(definition.key)}">
+            <div class="control-tools">
+              <button type="button" data-widget-filter-select-all="${escHtml(definition.key)}">All</button>
+              <button type="button" data-widget-filter-remove-all="${escHtml(definition.key)}">None</button>
+            </div>
+            <div class="option-list">
             ${definition.options.length ? definition.options.map((item) => `
               <label class="option-item">
-                <input type="checkbox" data-widget-filter-option="${escHtml(definition.key)}" value="${escHtml(item.label)}" ${selected.includes(item.label) ? "checked" : ""}>
+                <input type="checkbox" data-widget-filter-option="${escHtml(definition.key)}" value="${escHtml(item.label)}" ${selected.includes(item.label) && !selected.includes(NONE_SENTINEL) ? "checked" : ""}>
                 <span>${escHtml(item.label)}</span>
                 <span class="option-count">${fmtNum(item.count)}</span>
               </label>
@@ -818,14 +858,32 @@ function renderIssueWidgetFilters() {
       renderIssueWidgetFilters();
     });
   });
-  els.issueWidgetFilters.querySelectorAll("[data-widget-filter-option]").forEach((input) => {
-    input.addEventListener("change", () => {
-      toggleIssueWidgetFilterValue(input.dataset.widgetFilterOption, input.value, input.checked);
-      renderIssueWidgetFilters();
-      renderIssueBoard(state.payload?.issue_views || {});
+    els.issueWidgetFilters.querySelectorAll("[data-widget-filter-option]").forEach((input) => {
+      input.addEventListener("change", () => {
+        toggleIssueWidgetFilterValue(input.dataset.widgetFilterOption, input.value, input.checked);
+        renderIssueWidgetFilters();
+        renderIssueBoard(state.payload?.issue_views || {});
+      });
     });
-  });
-}
+    els.issueWidgetFilters.querySelectorAll("[data-widget-filter-select-all]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.dataset.widgetFilterSelectAll;
+        const definition = definitions.find((item) => item.key === key);
+        if (!definition) return;
+        state.issueWidgetFilters[key] = definition.options.map((item) => item.label);
+        renderIssueWidgetFilters();
+        renderIssueBoard(state.payload?.issue_views || {});
+      });
+    });
+    els.issueWidgetFilters.querySelectorAll("[data-widget-filter-remove-all]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.dataset.widgetFilterRemoveAll;
+        state.issueWidgetFilters[key] = [NONE_SENTINEL];
+        renderIssueWidgetFilters();
+        renderIssueBoard(state.payload?.issue_views || {});
+      });
+    });
+  }
 
 function getIssueWidgetOptions() {
   const issueViews = state.payload?.issue_views || {};
@@ -855,20 +913,25 @@ function filterIssueWidgetItems(items) {
   const selectedCategories = state.issueWidgetFilters.categories;
   const selectedProducts = state.issueWidgetFilters.products;
   return items.filter((item) => {
-    const categoryOkay = !selectedCategories.length || selectedCategories.includes(item.product_category || "Other");
-    const productOkay = !selectedProducts.length || selectedProducts.includes(item.product_name || "Other");
+    const categoryOkay = selectedCategories.includes(NONE_SENTINEL)
+      ? false
+      : !selectedCategories.length || selectedCategories.includes(item.product_category || "Other");
+    const productOkay = selectedProducts.includes(NONE_SENTINEL)
+      ? false
+      : !selectedProducts.length || selectedProducts.includes(item.product_name || "Other");
     return categoryOkay && productOkay;
   });
 }
 
 function toggleIssueWidgetFilterValue(key, value, checked) {
   const next = new Set(state.issueWidgetFilters[key] || []);
+  next.delete(NONE_SENTINEL);
   if (checked) next.add(value);
   else next.delete(value);
   state.issueWidgetFilters[key] = [...next];
   if (key === "categories") {
     const validProducts = new Set(getIssueWidgetOptions().products.map((item) => item.label));
-    state.issueWidgetFilters.products = state.issueWidgetFilters.products.filter((item) => validProducts.has(item));
+    state.issueWidgetFilters.products = state.issueWidgetFilters.products.filter((item) => item === NONE_SENTINEL || validProducts.has(item));
   }
 }
 
@@ -922,7 +985,7 @@ function renderBotTrend(points) {
   }
   const linePath = linePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
   els.botTrendChart.innerHTML = `
-    <div class="chart-scroll"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="min-width:${width}px;width:100%;height:${height}px">
+    <div class="chart-scroll"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMinYMid meet" style="min-width:${width}px;height:${height}px">
       ${[0, 0.5, 1].map((ratio) => {
         const y = pad.top + innerH - ratio * innerH;
         return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line><text x="${width - pad.right + 8}" y="${y + 4}" font-size="10" fill="${VISUAL_THEME.muted}">${Math.round(ratio * 100)}%</text>`;
@@ -1355,14 +1418,16 @@ function renderDrilldownFilters() {
           </span>
           <span class="control-caret">${state.drilldownOpenFilter === definition.key ? "▲" : "▼"}</span>
         </button>
-        <div class="control-panel drilldown-control-panel" data-drilldown-filter-panel="${escHtml(definition.key)}">
-          <div class="control-tools">
-            <input type="search" placeholder="Search ${escHtml(definition.label.toLowerCase())}" value="${escHtml(search)}" data-drilldown-filter-search="${escHtml(definition.key)}">
-          </div>
+          <div class="control-panel drilldown-control-panel" data-drilldown-filter-panel="${escHtml(definition.key)}">
+            <div class="control-tools">
+              <input type="search" placeholder="Search ${escHtml(definition.label.toLowerCase())}" value="${escHtml(search)}" data-drilldown-filter-search="${escHtml(definition.key)}">
+              <button type="button" data-drilldown-filter-select-all="${escHtml(definition.key)}">All</button>
+              <button type="button" data-drilldown-filter-remove-all="${escHtml(definition.key)}">None</button>
+            </div>
           <div class="option-list">
             ${filteredOptions.length ? filteredOptions.map((item) => `
               <label class="option-item">
-                <input type="checkbox" data-drilldown-filter-option="${escHtml(definition.key)}" value="${escHtml(item.label)}" ${selected.includes(item.label) ? "checked" : ""}>
+                <input type="checkbox" data-drilldown-filter-option="${escHtml(definition.key)}" value="${escHtml(item.label)}" ${selected.includes(item.label) && !selected.includes(NONE_SENTINEL) ? "checked" : ""}>
                 <span>${escHtml(formatOptionLabel(definition, item.label))}</span>
                 <span class="option-count">${fmtNum(item.count)}</span>
               </label>
@@ -1402,17 +1467,35 @@ function renderDrilldownFilters() {
       renderDrilldownFilters();
     });
   });
-  els.drilldownFilters.querySelectorAll("[data-drilldown-filter-option]").forEach((input) => {
-    input.addEventListener("change", () => {
-      const key = input.dataset.drilldownFilterOption;
-      const next = new Set(state.drilldownFilters[key] || []);
-      if (input.checked) next.add(input.value);
+    els.drilldownFilters.querySelectorAll("[data-drilldown-filter-option]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const key = input.dataset.drilldownFilterOption;
+        const next = new Set(state.drilldownFilters[key] || []);
+        if (input.checked) next.add(input.value);
       else next.delete(input.value);
       state.drilldownFilters[key] = [...next];
-      renderDrilldownFilters();
-      scheduleDrilldownRefresh();
+        renderDrilldownFilters();
+        scheduleDrilldownRefresh();
+      });
     });
-  });
+    els.drilldownFilters.querySelectorAll("[data-drilldown-filter-select-all]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.dataset.drilldownFilterSelectAll;
+        const definition = defs.find((item) => item.key === key);
+        if (!definition) return;
+        state.drilldownFilters[key] = getDrilldownOptions(definition).map((item) => item.label);
+        renderDrilldownFilters();
+        scheduleDrilldownRefresh();
+      });
+    });
+    els.drilldownFilters.querySelectorAll("[data-drilldown-filter-remove-all]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.dataset.drilldownFilterRemoveAll;
+        state.drilldownFilters[key] = [NONE_SENTINEL];
+        renderDrilldownFilters();
+        scheduleDrilldownRefresh();
+      });
+    });
   if (activeFilterKey) {
     const nextInput = els.drilldownFilters.querySelector(`[data-drilldown-filter-search="${CSS.escape(activeFilterKey)}"]`);
     if (nextInput instanceof HTMLInputElement) {
@@ -1535,7 +1618,7 @@ function renderDrilldownPanels(drilldown) {
         <div class="analysis-panel-head">
           <div>
             <h3>Period view</h3>
-            <div class="analysis-caption">Expand a period to see the top issues contributing within that window.</div>
+              <div class="analysis-caption">Open a period to review the issue mix contributing within that window.</div>
           </div>
           <div class="panel-actions">${renderCategoryBucketTabs()}</div>
         </div>
@@ -1810,14 +1893,14 @@ function renderCategoryProductTrendTable(model) {
         </thead>
         <tbody>
           ${model.rows.map((row) => `
-            <tr>
-              <td class="heatmap-row-label">${escHtml(row.product_name)}</td>
-              ${row.cells.map((cell) => `
-                <td>
-                  <div class="heat-cell" style="background: rgba(77, 142, 244, ${0.12 + cell.intensity * 0.42})">
-                    ${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}
-                  </div>
-                </td>
+              <tr>
+                <td class="heatmap-row-label"><span class="clickable-label">${escHtml(row.product_name)}</span></td>
+                ${row.cells.map((cell) => `
+                  <td>
+                    <div class="heat-cell" style="background: rgba(127, 141, 163, ${0.12 + cell.intensity * 0.32})">
+                      ${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}
+                    </div>
+                  </td>
               `).join("")}
               <td class="num"><strong>${escHtml(fmtNum(row.total))}</strong></td>
             </tr>
@@ -1908,7 +1991,7 @@ function formatMiniCell(row, column) {
   const value = row[column.key];
   if (column.format === "number") return escHtml(fmtNum(value || 0));
   if (column.format === "percentOfTickets") return escHtml(fmtPct(ratio(value, row.tickets)));
-  if (column.format === "signedPercent") return escHtml(formatSignedPct(value || 0));
+  if (column.format === "signedPercent") return `<span class="${Number(value || 0) >= 0 ? "good" : "bad"}">${escHtml(formatSignedPct(value || 0))}</span>`;
   return escHtml(formatBotActionLabelIfNeeded(column.key, value));
 }
 
@@ -1930,7 +2013,7 @@ function renderMiniChartSvg(points, mode = "daily") {
   const max = Math.max(...series.map((point) => Number(point.tickets || 0)), 1);
   const barW = Math.max(12, Math.min(28, innerW / Math.max(series.length, 1) * 0.46));
   const showValueLabels = shouldShowChartValueLabels(series.length, mode);
-  return `<div class="chart-scroll"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="min-width:${width}px;width:100%;height:${height}px">
+    return `<div class="chart-scroll"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMinYMid meet" style="min-width:${width}px;height:${height}px">
     ${[0, 0.5, 1].map((ratio) => {
       const y = pad.top + innerH - innerH * ratio;
       return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line>${ratio === 0 || ratio === 1 ? `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(max * ratio))}</text>` : ""}`;
@@ -1983,7 +2066,7 @@ function renderBarChart(container, { points, mode, visual, yLabel }) {
   const showValueLabels = shouldShowChartValueLabels(points.length, mode);
   container.innerHTML = `
     <div class="chart-scroll">
-      <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="min-width:${width}px;width:100%;height:${height}px">
+        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMinYMid meet" style="min-width:${width}px;height:${height}px">
       ${[0.25, 0.5, 0.75].map((ratio) => {
         const y = pad.top + innerH - innerH * ratio;
         return `<line x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}" stroke="${VISUAL_THEME.grid}"></line>`;
@@ -2119,10 +2202,10 @@ function reconcileFilterState() {
     state.filters.date_start = clampIsoDate(state.filters.date_start || bounds.min, bounds.min, bounds.max || bounds.min);
   }
   const validProducts = new Set(getControlOptions({ key: "products", optionsKey: "products" }).map((item) => item.label));
-  state.filters.products = state.filters.products.filter((value) => validProducts.has(value));
+  state.filters.products = state.filters.products.filter((value) => value === NONE_SENTINEL || validProducts.has(value));
   CONTROLS.forEach((control) => {
     const valid = new Set(getControlOptions(control).map((item) => item.label));
-    state.filters[control.key] = (state.filters[control.key] || []).filter((value) => valid.has(value));
+    state.filters[control.key] = (state.filters[control.key] || []).filter((value) => value === NONE_SENTINEL || valid.has(value));
   });
   if (state.filters.exclude_unclassified_blank) applyBlankUnclassifiedShortcut(true);
 }
@@ -2131,8 +2214,8 @@ function reconcileIssueWidgetFilters() {
   const options = getIssueWidgetOptions();
   const validCategories = new Set(options.categories.map((item) => item.label));
   const validProducts = new Set(options.products.map((item) => item.label));
-  state.issueWidgetFilters.categories = state.issueWidgetFilters.categories.filter((value) => validCategories.has(value));
-  state.issueWidgetFilters.products = state.issueWidgetFilters.products.filter((value) => validProducts.has(value));
+  state.issueWidgetFilters.categories = state.issueWidgetFilters.categories.filter((value) => value === NONE_SENTINEL || validCategories.has(value));
+  state.issueWidgetFilters.products = state.issueWidgetFilters.products.filter((value) => value === NONE_SENTINEL || validProducts.has(value));
 }
 
 function getControlOptions(control) {
@@ -2151,13 +2234,21 @@ function getControlOptions(control) {
 }
 
 function summarizeSelection(control, options, selected) {
-  if (!selected.length) return { main: "All selected", count: options.length ? `${options.length}` : "" };
-  if (selected.length === 1) return { main: formatOptionLabel(control, selected[0]), count: "1 selected" };
-  return { main: formatOptionLabel(control, selected[0]), count: `+${selected.length - 1} more` };
+  if (selected.includes(NONE_SENTINEL)) {
+    return { main: "None selected", count: "0" };
+  }
+  const optionLabels = new Set(options.map((item) => item.label));
+  const visibleSelected = selected.filter((value) => optionLabels.has(value));
+  if (!visibleSelected.length || (options.length && visibleSelected.length === options.length)) {
+    return { main: "All selected", count: options.length ? `${options.length}` : "" };
+  }
+  if (visibleSelected.length === 1) return { main: formatOptionLabel(control, visibleSelected[0]), count: "1 selected" };
+  return { main: formatOptionLabel(control, visibleSelected[0]), count: `+${visibleSelected.length - 1} more` };
 }
 
 function toggleFilterValue(key, value, checked) {
   const next = new Set(state.filters[key] || []);
+  next.delete(NONE_SENTINEL);
   if (checked) next.add(value);
   else next.delete(value);
   state.filters[key] = [...next];
@@ -2212,9 +2303,10 @@ function renderLoading() {
   [
     els.kpiStrip,
     els.timelineChart,
-    els.productHealthTable,
-    els.issueBoard,
-    els.botOverview,
+      els.productHealthTable,
+      els.issueBoard,
+      els.risingSignals,
+      els.botOverview,
     els.botTrendChart,
     els.botLeakyIssues,
     els.botBestIssues,
@@ -2513,10 +2605,10 @@ function renderCategoryProductTrendTable(model, faultModel = { products: [] }) {
         const faults = faultByProduct.get(row.product_name) || [];
         return `
           <details class="drilldown-detail">
-            <summary class="drilldown-detail-summary">
-              <div class="drilldown-detail-title">${escHtml(row.product_name)}</div>
-              <div class="drilldown-detail-meta">${escHtml(fmtNum(row.total))} tickets</div>
-            </summary>
+              <summary class="drilldown-detail-summary">
+                <div class="drilldown-detail-title">${escHtml(row.product_name)}</div>
+                <div class="drilldown-detail-meta">${escHtml(fmtNum(row.total))} tickets · ${escHtml(formatSignedPct(row.delta_vs_previous || 0))} vs previous <span class="detail-open-pill">View issues</span></div>
+              </summary>
             <div class="heatmap-wrap">
               <table class="heatmap-table">
                 <thead>
@@ -2534,10 +2626,10 @@ function renderCategoryProductTrendTable(model, faultModel = { products: [] }) {
                       const delta = index === 0 ? 0 : previous > 0 ? (cell.tickets - previous) / previous : 0;
                       return `
                         <td>
-                          <div class="heat-cell" style="background: rgba(77, 142, 244, ${0.12 + cell.intensity * 0.42})">
-                            <strong>${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}</strong>
-                            ${index > 0 && cell.tickets ? `<span class="heat-cell-delta ${delta >= 0 ? "up" : "down"}">${escHtml(formatSignedPct(delta))}</span>` : ""}
-                          </div>
+                            <div class="heat-cell" style="background: rgba(127, 141, 163, ${0.12 + cell.intensity * 0.32})">
+                              <strong>${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}</strong>
+                              ${index > 0 && cell.tickets ? `<span class="heat-cell-delta ${delta >= 0 ? "up" : "down"}">${escHtml(formatSignedPct(delta))}</span>` : ""}
+                            </div>
                         </td>`;
                     }).join("")}
                     <td class="num"><strong>${escHtml(fmtNum(row.total))}</strong></td>
@@ -2580,10 +2672,10 @@ function renderCategoryFaultRows(faults) {
                 const delta = index === 0 ? 0 : previous > 0 ? (cell.tickets - previous) / previous : 0;
                 return `
                   <td>
-                    <div class="heat-cell issue" style="background: rgba(30, 197, 90, ${0.10 + cell.intensity * 0.38})">
-                      <strong>${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}</strong>
-                      ${index > 0 && cell.tickets ? `<span class="heat-cell-delta ${delta >= 0 ? "up" : "down"}">${escHtml(formatSignedPct(delta))}</span>` : ""}
-                    </div>
+                      <div class="heat-cell issue" style="background: rgba(98, 180, 171, ${0.10 + cell.intensity * 0.30})">
+                        <strong>${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}</strong>
+                        ${index > 0 && cell.tickets ? `<span class="heat-cell-delta ${delta >= 0 ? "up" : "down"}">${escHtml(formatSignedPct(delta))}</span>` : ""}
+                      </div>
                   </td>`;
               }).join("")}
               <td class="num"><strong>${escHtml(fmtNum(fault.total))}</strong></td>
@@ -2647,10 +2739,10 @@ function renderProductPeriodTable(periods) {
     <div class="drilldown-accordion">
       ${periods.map((period) => `
         <details class="drilldown-detail">
-          <summary class="drilldown-detail-summary">
-            <div class="drilldown-detail-title">${escHtml(period.label)}</div>
-            <div class="drilldown-detail-meta">${escHtml(fmtNum(period.tickets))} tickets · ${escHtml(formatSignedPct(period.delta_vs_previous || 0))} vs previous</div>
-          </summary>
+            <summary class="drilldown-detail-summary">
+              <div class="drilldown-detail-title">${escHtml(period.label)}</div>
+              <div class="drilldown-detail-meta">${escHtml(fmtNum(period.tickets))} tickets · ${escHtml(formatSignedPct(period.delta_vs_previous || 0))} vs previous <span class="detail-open-pill">View issue mix</span></div>
+            </summary>
           <div class="drilldown-detail-body">
             ${renderMiniTable(period.issues, [
               { key: "executive_fault_code", label: "EFC" },

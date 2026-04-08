@@ -443,10 +443,11 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   display: flex;
   gap: 8px;
   margin-bottom: 10px;
+  flex-wrap: wrap;
 }
 
 .control-tools input {
-  flex: 1;
+  flex: 1 1 140px;
   height: 36px;
   border-radius: 10px;
   border: 1px solid var(--line);
@@ -632,6 +633,11 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   border: 1px solid var(--line);
 }
 
+.click-card {
+  width: 100%;
+  text-align: left;
+}
+
 .spotlight-card h3,
 .mini-panel h3 {
   margin: 0;
@@ -704,6 +710,23 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   color: var(--muted);
   font-size: 15px;
   transform: translateY(-1px);
+}
+.clickable-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+.clickable-label::after {
+  content: "Open";
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
 }
 .name-main,
 .issue-title,
@@ -1453,12 +1476,31 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   font-size: 12px;
   font-weight: 700;
   color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .drilldown-detail-body {
   padding: 0 18px 18px;
   display: grid;
   gap: 12px;
+}
+
+.detail-open-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.03);
+  color: var(--muted-strong);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .fault-matrix-grid {

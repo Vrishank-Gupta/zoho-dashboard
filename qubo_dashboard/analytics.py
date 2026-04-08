@@ -120,7 +120,8 @@ class AnalyticsService:
                     self._mapped_daily_rows(
                         self._clickhouse.fetch_daily_rows(*self._resolve_window(filters, self._clickhouse.fetch_min_metric_date(), self._clickhouse.fetch_max_metric_date()), filters),
                         filters,
-                    )
+                    ),
+                    [],
                 )
                 if item["product_category"] == category
             ]
@@ -193,8 +194,8 @@ class AnalyticsService:
         option_issue_rows = self._mapped_issue_rows(option_issue_rows, option_filters, apply_mapping_filters=False)
 
         issues = self._agg_issues(current_issue_rows, previous_issue_rows)
-        category_health = self._agg_category_health(current_daily_rows)
-        product_health = self._agg_product_health(current_daily_rows)
+        category_health = self._agg_category_health(current_daily_rows, previous_daily_rows)
+        product_health = self._agg_product_health(current_daily_rows, previous_daily_rows)
         service_ops = self._agg_service_ops(current_daily_rows)
         kpis = self._agg_kpis(current_daily_rows, previous_daily_rows)
         filter_options = self._agg_filter_options(option_daily_rows, self._agg_issues(option_issue_rows, []), min_date, max_date)
@@ -218,6 +219,7 @@ class AnalyticsService:
             "category_health": category_health,
             "product_health": product_health,
             "issue_views": self._agg_issue_views(issues),
+            "rising_signals": self._agg_rising_signals(current_issue_rows),
             "service_ops": service_ops,
             "bot_summary": self._agg_bot_summary(bot_rows, issues),
             "pipeline_health": pipeline_health,
@@ -339,13 +341,17 @@ class AnalyticsService:
             grouped[key]["repeat_tickets"] += int(row.get("repeat_tickets", 0) or 0)
         return [{"date": day, **metrics} for day, metrics in sorted(grouped.items())]
 
-    def _agg_category_health(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _agg_category_health(self, rows: list[dict[str, Any]], previous_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        previous_grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
             grouped[str(row.get("product_category") or "Other")].append(row)
+        for row in previous_rows:
+            previous_grouped[str(row.get("product_category") or "Other")].append(row)
         items = []
         for category, category_rows in grouped.items():
             counts = self._sum_counts(category_rows)
+            previous_counts = self._sum_counts(previous_grouped.get(category, []))
             issue_rows = [row for row in category_rows if row.get("fault_code_level_2") not in {None, "", "Unclassified"}]
             top_issue = max(issue_rows, key=lambda row: int(row.get("tickets", 0) or 0), default=None)
             efc_totals: dict[str, int] = defaultdict(int)
@@ -355,23 +361,26 @@ class AnalyticsService:
                 {
                     "product_category": category,
                     "tickets": counts["tickets"],
-                    "installation_tickets": counts["installation_field_tickets"],
-                    "installation_rate": self._ratio(counts["installation_field_tickets"], counts["tickets"]),
                     "repeat_rate": self._ratio(counts["repeat_tickets"], counts["tickets"]),
                     "bot_resolved_rate": self._ratio(counts["bot_resolved_tickets"], counts["tickets"]),
+                    "change_rate": self._metric(counts["tickets"], previous_counts["tickets"])["change"],
                     "top_efc": max(efc_totals.items(), key=lambda item: item[1])[0] if efc_totals else "Others",
                     "top_issue_detail": top_issue.get("fault_code_level_2") if top_issue else "Unclassified",
                 }
             )
         return sorted(items, key=lambda item: item["tickets"], reverse=True)
 
-    def _agg_product_health(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _agg_product_health(self, rows: list[dict[str, Any]], previous_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        previous_grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
             grouped[(str(row.get("product_category") or "Other"), str(row.get("product_name") or "Other"))].append(row)
+        for row in previous_rows:
+            previous_grouped[(str(row.get("product_category") or "Other"), str(row.get("product_name") or "Other"))].append(row)
         items = []
         for (category, product_name), product_rows in grouped.items():
             counts = self._sum_counts(product_rows)
+            previous_counts = self._sum_counts(previous_grouped.get((category, product_name), []))
             efc_totals: dict[str, int] = defaultdict(int)
             for row in product_rows:
                 efc_totals[str(row.get("executive_fault_code") or "Others")] += int(row.get("tickets", 0) or 0)
@@ -385,10 +394,9 @@ class AnalyticsService:
                     "product_category": category,
                     "product_name": product_name,
                     "tickets": counts["tickets"],
-                    "installation_tickets": counts["installation_field_tickets"],
-                    "installation_rate": self._ratio(counts["installation_field_tickets"], counts["tickets"]),
                     "repeat_rate": self._ratio(counts["repeat_tickets"], counts["tickets"]),
                     "bot_resolved_rate": self._ratio(counts["bot_resolved_tickets"], counts["tickets"]),
+                    "change_rate": self._metric(counts["tickets"], previous_counts["tickets"])["change"],
                     "top_efc": max(efc_totals.items(), key=lambda item: item[1])[0] if efc_totals else "Others",
                     "top_issue_detail": top_issue.get("fault_code_level_2") if top_issue else "Unclassified",
                 }
@@ -436,6 +444,63 @@ class AnalyticsService:
             "repeat_heavy": [self._issue_payload(issue) for issue in sorted(issues, key=lambda item: (item.volume * item.repeat_rate, item.volume), reverse=True)[:10]],
             "bot_leakage": [self._issue_payload(issue) for issue in sorted(issues, key=lambda item: (item.volume * item.bot_transfer_rate, item.volume), reverse=True)[:10]],
         }
+
+    def _agg_rising_signals(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        weekly: dict[tuple[str, str, str, str], dict[date, int]] = defaultdict(lambda: defaultdict(int))
+        meta: dict[tuple[str, str, str, str], dict[str, str]] = {}
+        for row in rows:
+            product_category = str(row.get("product_category") or "Other")
+            product_name = str(row.get("product_name") or "Other")
+            efc = str(row.get("executive_fault_code") or "Others")
+            fc1 = str(row.get("fault_code_level_1") or "Unclassified")
+            fc2 = str(row.get("fault_code_level_2") or "Unclassified")
+            if product_name.strip().lower() in {"blank product", "blankproduct", "-"}:
+                continue
+            if efc.strip().lower() in {"others", "blank", "unclassified"}:
+                continue
+            if fc2.strip().lower() in {"unclassified", "blank", "others"}:
+                continue
+            if "instal" in fc1.lower() or "instal" in fc2.lower():
+                continue
+            metric_date = row.get("metric_date")
+            if not isinstance(metric_date, date):
+                continue
+            week_start = metric_date - timedelta(days=metric_date.weekday())
+            key = (product_category, product_name, efc, fc2)
+            weekly[key][week_start] += int(row.get("tickets", 0) or 0)
+            meta[key] = {
+                "product_category": product_category,
+                "product_name": product_name,
+                "executive_fault_code": efc,
+                "fault_code_level_1": fc1,
+                "fault_code_level_2": fc2,
+            }
+
+        signals: list[dict[str, Any]] = []
+        for key, counts in weekly.items():
+            ordered = sorted(counts.items(), key=lambda item: item[0])
+            if len(ordered) < 2:
+                continue
+            latest_week, latest_value = ordered[-1]
+            previous_value = ordered[-2][1]
+            if latest_value <= 0 or previous_value <= 0:
+                continue
+            delta = (latest_value - previous_value) / previous_value
+            streak = len(ordered) >= 3 and ordered[-3][1] < ordered[-2][1] < ordered[-1][1]
+            if latest_value < 20:
+                continue
+            if not (delta >= 0.35 or streak):
+                continue
+            payload = {
+                **meta[key],
+                "issue_id": "|".join([key[0], key[1], key[2], key[3]]),
+                "volume": latest_value,
+                "delta_rate": delta,
+                "week_start": latest_week.isoformat(),
+                "streak": streak,
+            }
+            signals.append(payload)
+        return sorted(signals, key=lambda item: (item["delta_rate"], item["volume"]), reverse=True)[:6]
 
     def _agg_service_ops(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         return {
@@ -598,6 +663,7 @@ class AnalyticsService:
             date_end=end_date.isoformat(),
             exclude_installation=filters.exclude_installation,
             exclude_blank_chat=filters.exclude_blank_chat,
+            exclude_unclassified_blank=filters.exclude_unclassified_blank,
             departments=list(filters.departments),
             channels=list(filters.channels),
             statuses=list(filters.statuses),
@@ -683,6 +749,16 @@ class AnalyticsService:
             return False
         if filters.efcs and str(row.get("executive_fault_code") or "Others") not in filters.efcs:
             return False
+        if filters.exclude_unclassified_blank:
+            product_name = str(row.get("product_name") or "").strip().lower()
+            product_category = str(row.get("product_category") or "").strip().lower()
+            efc = str(row.get("executive_fault_code") or "").strip().lower()
+            if product_name in {"blank product", "blankproduct", "-"}:
+                return False
+            if product_category in {"blank product", "blankproduct", "-"}:
+                return False
+            if efc in {"blank", "unclassified"}:
+                return False
         return True
 
     def _collapse_rows(
@@ -991,11 +1067,12 @@ class AnalyticsService:
                 "repeat_tickets": {"value": 0.0, "change": 0.0},
                 "no_reopen_rate": {"value": 0.0, "change": 0.0},
             },
-            "timeline": [],
-            "category_health": [],
-            "product_health": [],
-            "issue_views": {"highest_volume": [], "installation_tickets": [], "repeat_heavy": [], "bot_leakage": []},
-            "service_ops": {"category_mix": [], "department_mix": [], "channel_mix": [], "bot_action_mix": [], "installation_mix": []},
+              "timeline": [],
+              "category_health": [],
+              "product_health": [],
+              "issue_views": {"highest_volume": [], "installation_tickets": [], "repeat_heavy": [], "bot_leakage": []},
+              "rising_signals": [],
+              "service_ops": {"category_mix": [], "department_mix": [], "channel_mix": [], "bot_action_mix": [], "installation_mix": []},
             "bot_summary": {"overview": {}, "by_product": [], "best_issues": [], "leaky_issues": []},
             "pipeline_health": {"status": "Unavailable", "last_run_at": "Unknown", "duration_minutes": 0, "rows_fetched": 0, "rows_inserted": 0, "recent_runs": []},
             "mapping_studio": {"product_rows": [], "fc2_rows": [], "category_options": [], "efc_options": [], "active_overrides": {"products": 0, "efcs": 0}},

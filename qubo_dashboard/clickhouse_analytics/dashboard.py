@@ -223,16 +223,15 @@ class ClickHouseAnalyticsRepository:
                 ORDER BY tickets DESC
                 """
             ),
-            "resolutions": self._query(
-                f"""
-                SELECT normalized_resolution AS label, count() AS tickets
-                FROM {settings.clickhouse_fact_table} FINAL
-                WHERE {where_sql}
-                GROUP BY label
-                ORDER BY tickets DESC
-                LIMIT 12
-                """
-            ),
+              "resolutions": self._query(
+                  f"""
+                  SELECT normalized_resolution AS label, count() AS tickets
+                  FROM {settings.clickhouse_fact_table} FINAL
+                  WHERE {where_sql}
+                  GROUP BY label
+                  ORDER BY tickets DESC
+                  """
+              ),
             "statuses": self._query(
                 f"""
                 SELECT ifNull(status, 'Unknown') AS label, count() AS tickets
@@ -242,36 +241,33 @@ class ClickHouseAnalyticsRepository:
                 ORDER BY tickets DESC
                 """
             ),
-            "efcs": self._query(
-                f"""
-                SELECT executive_fault_code AS label, count() AS tickets
-                FROM {settings.clickhouse_fact_table} FINAL
-                WHERE {where_sql}
-                GROUP BY label
-                ORDER BY tickets DESC
-                LIMIT 12
-                """
-            ),
-            "fc1": self._query(
-                f"""
-                SELECT normalized_fault_code_l1 AS label, count() AS tickets
-                FROM {settings.clickhouse_fact_table} FINAL
-                WHERE {where_sql}
-                GROUP BY label
-                ORDER BY tickets DESC
-                LIMIT 12
-                """
-            ),
-            "fc2": self._query(
-                f"""
-                SELECT normalized_fault_code_l2 AS label, count() AS tickets
-                FROM {settings.clickhouse_fact_table} FINAL
-                WHERE {where_sql}
-                GROUP BY label
-                ORDER BY tickets DESC
-                LIMIT 12
-                """
-            ),
+              "efcs": self._query(
+                  f"""
+                  SELECT executive_fault_code AS label, count() AS tickets
+                  FROM {settings.clickhouse_fact_table} FINAL
+                  WHERE {where_sql}
+                  GROUP BY label
+                  ORDER BY tickets DESC
+                  """
+              ),
+              "fc1": self._query(
+                  f"""
+                  SELECT normalized_fault_code_l1 AS label, count() AS tickets
+                  FROM {settings.clickhouse_fact_table} FINAL
+                  WHERE {where_sql}
+                  GROUP BY label
+                  ORDER BY tickets DESC
+                  """
+              ),
+              "fc2": self._query(
+                  f"""
+                  SELECT normalized_fault_code_l2 AS label, count() AS tickets
+                  FROM {settings.clickhouse_fact_table} FINAL
+                  WHERE {where_sql}
+                  GROUP BY label
+                  ORDER BY tickets DESC
+                  """
+              ),
             "issue_matrix": self._query(
                 f"""
                 SELECT
@@ -366,21 +362,20 @@ class ClickHouseAnalyticsRepository:
                 ORDER BY metric_date
                 """
             ),
-            "products": self._query(
-                f"""
-                SELECT
-                    product_name AS label,
+              "products": self._query(
+                  f"""
+                  SELECT
+                      product_name AS label,
                     count() AS tickets,
                     countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets,
                     countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
                     countIf(match(lower(ifNull(status, '')), 'open|escal|pending|progress|wip')) AS open_tickets
-                FROM {settings.clickhouse_fact_table} FINAL
-                WHERE {where_sql}
-                GROUP BY label
-                ORDER BY tickets DESC
-                LIMIT 15
-                """
-            ),
+                  FROM {settings.clickhouse_fact_table} FINAL
+                  WHERE {where_sql}
+                  GROUP BY label
+                  ORDER BY tickets DESC
+                  """
+              ),
             "bot_actions": self._query(
                 f"""
                 SELECT normalized_bot_action AS label, count() AS tickets
@@ -390,16 +385,15 @@ class ClickHouseAnalyticsRepository:
                 ORDER BY tickets DESC
                 """
             ),
-            "resolutions": self._query(
-                f"""
-                SELECT normalized_resolution AS label, count() AS tickets
-                FROM {settings.clickhouse_fact_table} FINAL
-                WHERE {where_sql}
-                GROUP BY label
-                ORDER BY tickets DESC
-                LIMIT 12
-                """
-            ),
+              "resolutions": self._query(
+                  f"""
+                  SELECT normalized_resolution AS label, count() AS tickets
+                  FROM {settings.clickhouse_fact_table} FINAL
+                  WHERE {where_sql}
+                  GROUP BY label
+                  ORDER BY tickets DESC
+                  """
+              ),
             "statuses": self._query(
                 f"""
                 SELECT ifNull(status, 'Unknown') AS label, count() AS tickets
@@ -409,16 +403,15 @@ class ClickHouseAnalyticsRepository:
                 ORDER BY tickets DESC
                 """
             ),
-            "efcs": self._query(
-                f"""
-                SELECT executive_fault_code AS label, count() AS tickets
-                FROM {settings.clickhouse_fact_table} FINAL
-                WHERE {where_sql}
-                GROUP BY label
-                ORDER BY tickets DESC
-                LIMIT 12
-                """
-            ),
+              "efcs": self._query(
+                  f"""
+                  SELECT executive_fault_code AS label, count() AS tickets
+                  FROM {settings.clickhouse_fact_table} FINAL
+                  WHERE {where_sql}
+                  GROUP BY label
+                  ORDER BY tickets DESC
+                  """
+              ),
             "fc1": self._query(
                 f"""
                 SELECT normalized_fault_code_l1 AS label, count() AS tickets
@@ -708,6 +701,9 @@ class ClickHouseAnalyticsRepository:
             clauses.append("(positionCaseInsensitive(fault_code_level_1, 'instal') = 0 AND positionCaseInsensitive(fault_code_level_2, 'instal') = 0)")
         if filters.exclude_blank_chat:
             clauses.append("normalized_bot_action != 'Blank chat'")
+        if filters.exclude_unclassified_blank:
+            clauses.append("lowerUTF8(trim(BOTH ' ' FROM product_name)) NOT IN ('blank product', 'blankproduct', '-')")
+            clauses.append("lowerUTF8(trim(BOTH ' ' FROM executive_fault_code)) NOT IN ('blank', 'unclassified')")
         return " AND ".join(clauses) if clauses else "1 = 1"
 
     def _issue_filters(self, filters: DashboardFilters, start_date: date | None, end_date: date | None) -> str:
@@ -742,6 +738,9 @@ class ClickHouseAnalyticsRepository:
             clauses.append("(positionCaseInsensitive(normalized_fault_code_l1, 'instal') = 0 AND positionCaseInsensitive(normalized_fault_code_l2, 'instal') = 0)")
         if filters.exclude_blank_chat:
             clauses.append("normalized_bot_action != 'Blank chat'")
+        if filters.exclude_unclassified_blank:
+            clauses.append("lowerUTF8(trim(BOTH ' ' FROM product_name)) NOT IN ('blank product', 'blankproduct', '-')")
+            clauses.append("lowerUTF8(trim(BOTH ' ' FROM executive_fault_code)) NOT IN ('blank', 'unclassified')")
         return " AND ".join(clauses) if clauses else "1 = 1"
 
     def _multi_filters(self, column: str, include_values: list[str], exclude_values: list[str]) -> list[str]:
