@@ -73,7 +73,6 @@ const DRILLDOWN_TABS = {
   ],
   category: [
     { key: "overview", label: "Overview" },
-    { key: "products", label: "Product trend" },
   ],
   issue: [
     { key: "overview", label: "Overview" },
@@ -1543,8 +1542,10 @@ function renderDrilldownFilters() {
   const defs = getDrilldownControlDefinitions();
   const bounds = state.options.date_bounds || {};
   const renderSelect = (definition) => {
-    const selected = state.drilldownFilters[definition.key] || [];
     const options = getDrilldownOptions(definition);
+    const allowed = new Set(options.map((item) => item.label));
+    const selected = (state.drilldownFilters[definition.key] || []).filter((item) => item === NONE_SENTINEL || allowed.has(item));
+    state.drilldownFilters[definition.key] = selected;
     const summary = summarizeSelection(definition, options, selected);
     const search = state.drilldownSearches[definition.key] || "";
     const filteredOptions = options.filter((item) => item.label.toLowerCase().includes(search.toLowerCase()));
@@ -1789,14 +1790,11 @@ function renderCategoryDrilldownPanels(drilldown) {
     bot_resolved_tickets: row.bot_resolved_tickets,
     repeat_tickets: 0,
   })), state.categoryDrilldownBucket);
-  const productTrend = buildCategoryProductTrendModel(drilldown.product_daily || [], state.categoryDrilldownBucket);
-  const faultMatrices = buildCategoryFaultMatrixModel(drilldown.product_fault_daily || [], state.categoryDrilldownBucket);
-  const categoryTrendEfcs = [...new Set((drilldown.product_fault_daily || []).map((row) => row.executive_fault_code || "Others"))].sort((a, b) => a.localeCompare(b));
-  const categoryTrendFc1 = [...new Set((drilldown.product_fault_daily || []).map((row) => row.fault_code_level_1 || "Unclassified"))].sort((a, b) => a.localeCompare(b));
-  const categoryTrendFc2 = [...new Set((drilldown.product_fault_daily || []).map((row) => row.fault_code_level_2 || "Unclassified"))].sort((a, b) => a.localeCompare(b));
-  const categoryTrendProducts = [...new Set((drilldown.product_daily || []).map((row) => row.product_name || "Unknown"))].sort((a, b) => a.localeCompare(b));
-  const filteredCategoryTrend = filterCategoryTrendModels(productTrend, faultMatrices, state.drilldownIssueTrendFilters.category);
-  const productDeltaMap = new Map(productTrend.rows.map((row) => [row.product_name, row.delta_vs_previous || 0]));
+  const previousProducts = new Map((drilldown.products_previous || []).map((row) => [row.label, Number(row.tickets || 0)]));
+  const topResolutionByProduct = new Map();
+  (drilldown.resolution_by_product || []).forEach((row) => {
+    if (!topResolutionByProduct.has(row.product_name)) topResolutionByProduct.set(row.product_name, row.resolution || "Unknown");
+  });
   renderDrilldownTabs();
   const overview = `
     <section class="drilldown-section">
@@ -1815,12 +1813,15 @@ function renderCategoryDrilldownPanels(drilldown) {
     <section class="drilldown-section">
       <div class="section-label">Product and issue mix</div>
       <div class="drilldown-two-col">
-        <div class="mini-panel"><h3>Products in category</h3>${renderMiniTable((drilldown.products || []).map((row) => ({ ...row, delta_vs_previous: productDeltaMap.get(row.label) || 0 })), [
-          { key: "label", label: "Product" },
-          { key: "tickets", label: "Tickets", format: "number" },
-          { key: "bot_resolved_tickets", label: "Bot resolved", format: "percentOfTickets" },
-          { key: "delta_vs_previous", label: "Change", format: "signedPercent" },
-        ])}</div>
+        <div class="mini-panel"><h3>Products in category</h3>${renderCategoryProductsTable((drilldown.products || []).map((row) => {
+          const previous = Number(previousProducts.get(row.label) || 0);
+          const current = Number(row.tickets || 0);
+          return {
+            ...row,
+            delta_vs_previous: previous > 0 ? (current - previous) / previous : current > 0 ? 1 : 0,
+            top_resolution: topResolutionByProduct.get(row.label) || "Unknown",
+          };
+        }))}</div>
         <div class="mini-panel"><h3>Issue hotspots</h3>${renderMiniTable(drilldown.issues || [], [
           { key: "executive_fault_code", label: "EFC" },
           { key: "tickets", label: "Tickets", format: "number" },
@@ -1836,32 +1837,8 @@ function renderCategoryDrilldownPanels(drilldown) {
         ${renderInsightCard("Top bot action", formatBotActionLabel((drilldown.bot_actions || [])[0]?.label || "No bot action"), ((drilldown.bot_actions || [])[0]?.tickets || 0))}
       </div>
     </section>`;
-  const productsView = `
-      <div class="mini-panel analysis-panel">
-        <div class="analysis-panel-head">
-          <div>
-            <h3>Product trend by period</h3>
-          <div class="analysis-caption">Filter by product, EFC, or issue text to compare issue movement across the category.</div>
-          </div>
-          <div class="panel-actions">${renderCategoryBucketTabs()}</div>
-        </div>
-      ${renderIssueTrendFilters("category", { products: categoryTrendProducts, efcs: categoryTrendEfcs, fc1s: categoryTrendFc1, fc2s: categoryTrendFc2 })}
-      ${renderCategoryProductTrendTable(filteredCategoryTrend.model, filteredCategoryTrend.faultModel)}
-    </div>
-    <section class="drilldown-section">
-      <div class="drilldown-two-col">
-        <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
-        <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
-      </div>
-    </section>`;
-  els.drilldownBody.innerHTML = state.currentDrilldownTab === "products" ? productsView : overview;
-  bindIssueTrendFilters(els.drilldownBody);
-  els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.categoryDrilldownBucket = button.dataset.categoryBucket || "daily";
-      renderCategoryDrilldownPanels(state.currentCategoryDrilldown || drilldown);
-    });
-  });
+  els.drilldownBody.innerHTML = overview;
+  bindCategoryProductActions(els.drilldownBody);
 }
 
 function closeDrilldown() {
@@ -3014,11 +2991,14 @@ function buildProductIssueTrendModel(issueDailyRows, mode) {
         executive_fault_code: row.executive_fault_code || "Others",
         fault_code_level_1: row.fault_code_level_1 || "Unclassified",
         issue_detail: row.issue_detail || "Unclassified",
+        resolutions: new Map(),
         byPeriod: new Map(),
       });
     }
     const current = issueMap.get(issueKey);
     current.byPeriod.set(bucket.key, (current.byPeriod.get(bucket.key) || 0) + Number(row.tickets || 0));
+    const resolution = row.resolution || "Unknown";
+    current.resolutions.set(resolution, (current.resolutions.get(resolution) || 0) + Number(row.tickets || 0));
   });
   const periods = [...periodMap.values()].sort((a, b) => a.key.localeCompare(b.key));
   const rows = [...issueMap.values()].map((issue) => {
@@ -3040,6 +3020,7 @@ function buildProductIssueTrendModel(issueDailyRows, mode) {
       executive_fault_code: issue.executive_fault_code,
       fault_code_level_1: issue.fault_code_level_1,
       issue_detail: issue.issue_detail,
+      top_resolution: [...issue.resolutions.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "Unknown",
       total,
       latest,
       delta_vs_previous: previous > 0 ? (latest - previous) / previous : latest > 0 ? 1 : 0,
@@ -3080,6 +3061,7 @@ function renderProductIssueTrendTable(model) {
         <thead>
           <tr>
             <th>Issue</th>
+            <th>Top resolution</th>
             ${model.periods.map((period) => `<th>${escHtml(period.label)}</th>`).join("")}
             <th class="num">Total</th>
             <th class="num">Latest change</th>
@@ -3094,6 +3076,7 @@ function renderProductIssueTrendTable(model) {
                   <span>${escHtml(row.executive_fault_code)} · ${escHtml(row.fault_code_level_1 || "Unclassified")}</span>
                 </div>
               </td>
+              <td>${escHtml(row.top_resolution || "Unknown")}</td>
               ${row.cells.map((cell, index) => `
                 <td>
                   <div class="heat-cell issue" style="background: rgba(98, 180, 171, ${0.10 + cell.intensity * 0.30})">
@@ -3109,6 +3092,48 @@ function renderProductIssueTrendTable(model) {
         </tbody>
       </table>
     </div>`;
+}
+
+function renderCategoryProductsTable(rows) {
+  if (!rows.length) return '<div class="empty-state">No products available in the selected range.</div>';
+  return `
+    <div class="mini-table-wrap">
+      <table class="mini-table clickable-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Tickets</th>
+            <th>Bot resolved</th>
+            <th>Change</th>
+            <th>Top resolution</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.slice(0, 12).map((row) => `
+            <tr class="clickable-row" data-category-product-row="${escHtml(row.label)}">
+              <td>${escHtml(row.label)}</td>
+              <td>${escHtml(fmtNum(row.tickets || 0))}</td>
+              <td>${escHtml(fmtPct(ratio(row.bot_resolved_tickets, row.tickets)))}</td>
+              <td><span class="${Number(row.delta_vs_previous || 0) >= 0 ? "good" : "bad"}">${escHtml(formatSignedPct(row.delta_vs_previous || 0))}</span></td>
+              <td>${escHtml(row.top_resolution || "Unknown")}</td>
+              <td><button class="table-link-btn" type="button">Open issue drilldown</button></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function bindCategoryProductActions(scope = document) {
+  scope.querySelectorAll("[data-category-product-row]").forEach((row) => {
+    row.addEventListener("click", (event) => {
+      event.preventDefault();
+      const productName = row.dataset.categoryProductRow || "";
+      const category = state.currentCategoryDrilldown?.category || state.currentDrilldownMeta?.category || "";
+      if (productName) openProductDrilldown(category, productName);
+    });
+  });
 }
 
 function filterCategoryTrendModels(model, faultModel, filters) {

@@ -341,10 +341,11 @@ class ClickHouseAnalyticsRepository:
                     executive_fault_code,
                     normalized_fault_code_l1 AS fault_code_level_1,
                     normalized_fault_code_l2 AS issue_detail,
+                    normalized_resolution AS resolution,
                     count() AS tickets
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE {where_sql}
-                GROUP BY metric_date, executive_fault_code, fault_code_level_1, issue_detail
+                GROUP BY metric_date, executive_fault_code, fault_code_level_1, issue_detail, resolution
                 ORDER BY metric_date, tickets DESC
                 """
             ),
@@ -357,6 +358,7 @@ class ClickHouseAnalyticsRepository:
                 "summary_previous": [],
                 "timeline": [],
                 "products": [],
+                "products_previous": [],
                 "bot_actions": [],
                 "resolutions": [],
                 "statuses": [],
@@ -364,8 +366,6 @@ class ClickHouseAnalyticsRepository:
                 "fc1": [],
                 "issues": [],
                 "resolution_by_product": [],
-                "product_daily": [],
-                "product_fault_daily": [],
             }
         current_start, current_end = self._resolve_date_range(filters)
         previous_start, previous_end = self._previous_period(current_start, current_end)
@@ -419,7 +419,6 @@ class ClickHouseAnalyticsRepository:
                   SELECT
                       product_name AS label,
                     count() AS tickets,
-                    countIf(positionCaseInsensitive(normalized_fault_code_l1, 'instal') > 0 OR positionCaseInsensitive(normalized_fault_code_l2, 'instal') > 0) AS installation_tickets,
                     countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
                     countIf(match(lower(ifNull(status, '')), 'open|escal|pending|progress|wip')) AS open_tickets
                   FROM {settings.clickhouse_fact_table} FINAL
@@ -428,6 +427,17 @@ class ClickHouseAnalyticsRepository:
                   ORDER BY tickets DESC
                   """
               ),
+            "products_previous": self._query(
+                f"""
+                SELECT
+                    product_name AS label,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {self._fact_filters(filters, previous_start, previous_end)} AND product_name IN ({self._quote_join(product_names)})
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
             "bot_actions": self._query(
                 f"""
                 SELECT normalized_bot_action AS label, count() AS tickets
@@ -497,33 +507,6 @@ class ClickHouseAnalyticsRepository:
                 GROUP BY product_name, resolution
                 ORDER BY tickets DESC
                 LIMIT 18
-                """
-            ),
-            "product_daily": self._query(
-                f"""
-                SELECT
-                    created_date AS metric_date,
-                    product_name,
-                    count() AS tickets
-                FROM {settings.clickhouse_fact_table} FINAL
-                WHERE {where_sql}
-                GROUP BY metric_date, product_name
-                ORDER BY metric_date, product_name
-                """
-            ),
-            "product_fault_daily": self._query(
-                f"""
-                SELECT
-                    created_date AS metric_date,
-                    product_name,
-                    executive_fault_code,
-                    normalized_fault_code_l1 AS fault_code_level_1,
-                    normalized_fault_code_l2 AS fault_code_level_2,
-                    count() AS tickets
-                FROM {settings.clickhouse_fact_table} FINAL
-                WHERE {where_sql}
-                GROUP BY metric_date, product_name, executive_fault_code, fault_code_level_1, fault_code_level_2
-                ORDER BY product_name, metric_date, tickets DESC
                 """
             ),
         }

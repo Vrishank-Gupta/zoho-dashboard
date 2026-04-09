@@ -57,7 +57,7 @@ class Settings:
     zoho_primary_key: str = os.getenv("QUBO_ZOHO_PRIMARY_KEY", "Ticket_Id")
     zoho_created_column: str = os.getenv("QUBO_ZOHO_CREATED_COLUMN", "Created_Time")
     zoho_modified_column: str = os.getenv("QUBO_ZOHO_MODIFIED_COLUMN", "Modified_Time")
-    source_start_date: str = os.getenv("QUBO_SOURCE_START_DATE", "2026-02-01")
+    source_start_date: str = os.getenv("QUBO_SOURCE_START_DATE", "2026-01-01")
     mapping_workbook_path: str | None = os.getenv("QUBO_MAPPING_WORKBOOK")
     clickhouse_fact_table: str = os.getenv("QUBO_CLICKHOUSE_FACT_TABLE", "tickets_fact_recent")
     clickhouse_daily_summary_table: str = os.getenv("QUBO_CLICKHOUSE_DAILY_SUMMARY_TABLE", "tickets_daily_summary")

@@ -80,7 +80,23 @@ class ClickHouseETLJob:
         started_at = datetime.now(UTC)
         previous_sync = self.get_last_successful_sync()
         target_dates = self.compute_target_dates(previous_sync, started_at)
+        return self._run_target_dates(target_dates, started_at, previous_sync)
 
+    def run_for_date_range(self, start_date: date, end_date: date) -> ETLResult:
+        if end_date < start_date:
+            raise ValueError("end_date must be on or after start_date")
+        self.ensure_bootstrap()
+        started_at = datetime.now(UTC)
+        previous_sync = self.get_last_successful_sync()
+        target_dates = [start_date + timedelta(days=index) for index in range((end_date - start_date).days + 1)]
+        return self._run_target_dates(target_dates, started_at, previous_sync)
+
+    def _run_target_dates(
+        self,
+        target_dates: list[date],
+        started_at: datetime,
+        previous_sync: datetime | None,
+    ) -> ETLResult:
         rows_fetched = 0
         rows_inserted = 0
         affected_dates = {day.isoformat() for day in target_dates}
