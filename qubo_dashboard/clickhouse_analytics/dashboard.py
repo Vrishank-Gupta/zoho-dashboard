@@ -288,11 +288,12 @@ class ClickHouseAnalyticsRepository:
                 SELECT
                     created_date AS metric_date,
                     executive_fault_code,
+                    normalized_fault_code_l1 AS fault_code_level_1,
                     normalized_fault_code_l2 AS issue_detail,
                     count() AS tickets
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE {where_sql}
-                GROUP BY metric_date, executive_fault_code, issue_detail
+                GROUP BY metric_date, executive_fault_code, fault_code_level_1, issue_detail
                 ORDER BY metric_date, tickets DESC
                 """
             ),
@@ -465,11 +466,12 @@ class ClickHouseAnalyticsRepository:
                     created_date AS metric_date,
                     product_name,
                     executive_fault_code,
+                    normalized_fault_code_l1 AS fault_code_level_1,
                     normalized_fault_code_l2 AS fault_code_level_2,
                     count() AS tickets
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE {where_sql}
-                GROUP BY metric_date, product_name, executive_fault_code, fault_code_level_2
+                GROUP BY metric_date, product_name, executive_fault_code, fault_code_level_1, fault_code_level_2
                 ORDER BY product_name, metric_date, tickets DESC
                 """
             ),

@@ -181,8 +181,8 @@ const state = {
   drilldownOpenFilter: null,
   drilldownSearches: {},
   drilldownIssueTrendFilters: {
-    product: { efc: "", query: "" },
-    category: { product: "", efc: "", query: "" },
+    product: { efc: "", fc1: "", fc2: "", query: "" },
+    category: { product: "", efc: "", fc1: "", fc2: "", query: "" },
   },
   drilldownRefreshTimer: null,
   currentDrilldownMeta: null,
@@ -1278,7 +1278,7 @@ async function runPipeline() {
 
 async function openProductDrilldown(category, productName) {
   state.drilldownFilters = structuredClone(state.filters);
-  state.drilldownIssueTrendFilters.product = { efc: "", query: "" };
+  state.drilldownIssueTrendFilters.product = { efc: "", fc1: "", fc2: "", query: "" };
   state.currentDrilldownMeta = { category, product_name: productName };
   state.currentDrilldownKind = "product";
   state.currentDrilldownTab = "overview";
@@ -1294,7 +1294,7 @@ async function openProductDrilldown(category, productName) {
 
 async function openCategoryDrilldown(category) {
   state.drilldownFilters = structuredClone(state.filters);
-  state.drilldownIssueTrendFilters.category = { product: "", efc: "", query: "" };
+  state.drilldownIssueTrendFilters.category = { product: "", efc: "", fc1: "", fc2: "", query: "" };
   state.currentDrilldownMeta = { category };
   state.categoryDrilldownBucket = recommendedBucketMode(state.filters.date_start, state.filters.date_end, state.options.date_bounds);
   state.currentDrilldownKind = "category";
@@ -1310,7 +1310,7 @@ async function openCategoryDrilldown(category) {
 
 async function openIssueDrilldown(issueId, options = {}) {
   state.drilldownFilters = structuredClone(state.filters);
-  state.drilldownIssueTrendFilters.product = { efc: "", query: "" };
+  state.drilldownIssueTrendFilters.product = { efc: "", fc1: "", fc2: "", query: "" };
   state.currentDrilldownMeta = { issue_id: issueId };
   state.currentDrilldownKind = "issue";
   state.currentDrilldownTab = options.focusWeekStart ? "analysis" : "overview";
@@ -1583,6 +1583,8 @@ function renderDrilldownPanels(drilldown) {
   })), state.categoryDrilldownBucket);
   const productIssueTrendModel = buildProductIssueTrendModel(drilldown.issue_daily || [], state.categoryDrilldownBucket);
   const productIssueTrendEfcs = [...new Set((drilldown.issue_daily || []).map((row) => row.executive_fault_code || "Others"))].sort((a, b) => a.localeCompare(b));
+  const productIssueTrendFc1 = [...new Set((drilldown.issue_daily || []).map((row) => row.fault_code_level_1 || "Unclassified"))].sort((a, b) => a.localeCompare(b));
+  const productIssueTrendFc2 = [...new Set((drilldown.issue_daily || []).map((row) => row.issue_detail || "Unclassified"))].sort((a, b) => a.localeCompare(b));
   renderDrilldownTabs();
   const snapshotCards = state.currentDrilldownKind === "issue"
     ? [
@@ -1645,7 +1647,7 @@ function renderDrilldownPanels(drilldown) {
           </div>
           <div class="panel-actions">${renderCategoryBucketTabs()}</div>
         </div>
-        ${renderIssueTrendFilters("product", { efcs: productIssueTrendEfcs })}
+        ${renderIssueTrendFilters("product", { efcs: productIssueTrendEfcs, fc1s: productIssueTrendFc1, fc2s: productIssueTrendFc2 })}
         ${renderProductIssueTrendTable(productIssueTrendModel)}
       </div>
     </section>` : ""}`;
@@ -1672,6 +1674,8 @@ function renderCategoryDrilldownPanels(drilldown) {
   const productTrend = buildCategoryProductTrendModel(drilldown.product_daily || [], state.categoryDrilldownBucket);
   const faultMatrices = buildCategoryFaultMatrixModel(drilldown.product_fault_daily || [], state.categoryDrilldownBucket);
   const categoryTrendEfcs = [...new Set((drilldown.product_fault_daily || []).map((row) => row.executive_fault_code || "Others"))].sort((a, b) => a.localeCompare(b));
+  const categoryTrendFc1 = [...new Set((drilldown.product_fault_daily || []).map((row) => row.fault_code_level_1 || "Unclassified"))].sort((a, b) => a.localeCompare(b));
+  const categoryTrendFc2 = [...new Set((drilldown.product_fault_daily || []).map((row) => row.fault_code_level_2 || "Unclassified"))].sort((a, b) => a.localeCompare(b));
   const categoryTrendProducts = [...new Set((drilldown.product_daily || []).map((row) => row.product_name || "Unknown"))].sort((a, b) => a.localeCompare(b));
   const filteredCategoryTrend = filterCategoryTrendModels(productTrend, faultMatrices, state.drilldownIssueTrendFilters.category);
   const productDeltaMap = new Map(productTrend.rows.map((row) => [row.product_name, row.delta_vs_previous || 0]));
@@ -1723,7 +1727,7 @@ function renderCategoryDrilldownPanels(drilldown) {
           </div>
           <div class="panel-actions">${renderCategoryBucketTabs()}</div>
         </div>
-      ${renderIssueTrendFilters("category", { products: categoryTrendProducts, efcs: categoryTrendEfcs })}
+      ${renderIssueTrendFilters("category", { products: categoryTrendProducts, efcs: categoryTrendEfcs, fc1s: categoryTrendFc1, fc2s: categoryTrendFc2 })}
       ${renderCategoryProductTrendTable(filteredCategoryTrend.model, filteredCategoryTrend.faultModel)}
     </div>
     <section class="drilldown-section">
@@ -1752,8 +1756,8 @@ function closeDrilldown() {
   state.drilldownFilters = null;
   state.drilldownOpenFilter = null;
   state.drilldownSearches = {};
-  state.drilldownIssueTrendFilters.product = { efc: "", query: "" };
-  state.drilldownIssueTrendFilters.category = { product: "", efc: "", query: "" };
+  state.drilldownIssueTrendFilters.product = { efc: "", fc1: "", fc2: "", query: "" };
+  state.drilldownIssueTrendFilters.category = { product: "", efc: "", fc1: "", fc2: "", query: "" };
   state.drilldownRefreshTimer = null;
   state.currentDrilldownMeta = null;
   if (els.drilldownFilters) els.drilldownFilters.innerHTML = "";
@@ -1837,6 +1841,7 @@ function buildCategoryFaultMatrixModel(rows, mode) {
     if (!product.faults.has(key)) {
       product.faults.set(key, {
         efc: row.executive_fault_code || "Blank",
+        fc1: row.fault_code_level_1 || "Unclassified",
         fc2: row.fault_code_level_2 || "",
         total: 0,
         periods: new Map(),
@@ -1853,7 +1858,7 @@ function buildCategoryFaultMatrixModel(rows, mode) {
       const sortedFaults = [...product.faults.values()].sort((a, b) => b.total - a.total || faultPrimaryLabel(a).localeCompare(faultPrimaryLabel(b)));
       const topFaults = sortedFaults.slice(0, 6);
       if (sortedFaults.length > 6) {
-        const other = { efc: "Other issues", fc2: "", total: 0, periods: new Map() };
+        const other = { efc: "Other issues", fc1: "", fc2: "", total: 0, periods: new Map() };
         sortedFaults.slice(6).forEach((fault) => {
           other.total += fault.total;
           fault.periods.forEach((value, key) => {
@@ -1908,7 +1913,10 @@ function faultPrimaryLabel(fault) {
 
 function faultSecondaryLabel(fault) {
   const primary = faultPrimaryLabel(fault);
-  return fault.efc && fault.efc !== primary ? fault.efc : "";
+  const parts = [];
+  if (fault.efc && fault.efc !== primary) parts.push(fault.efc);
+  if (fault.fc1 && fault.fc1 !== primary && fault.fc1 !== fault.efc) parts.push(fault.fc1);
+  return parts.join(" · ");
 }
 
 function renderCategoryProductTrendTable(model) {
@@ -2657,6 +2665,8 @@ function renderIssueTrendFilters(kind, config) {
   const current = state.drilldownIssueTrendFilters[kind] || {};
   const productOptions = config.products || [];
   const efcOptions = config.efcs || [];
+  const fc1Options = config.fc1s || [];
+  const fc2Options = config.fc2s || [];
   return `
     <div class="inline-trend-filters">
       ${productOptions.length ? `
@@ -2672,6 +2682,20 @@ function renderIssueTrendFilters(kind, config) {
         <select data-issue-trend-filter="${escHtml(kind)}:efc">
           <option value="">All EFCs</option>
           ${efcOptions.map((value) => `<option value="${escHtml(value)}" ${current.efc === value ? "selected" : ""}>${escHtml(value)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="inline-filter">
+        <span>FC1</span>
+        <select data-issue-trend-filter="${escHtml(kind)}:fc1">
+          <option value="">All FC1</option>
+          ${fc1Options.map((value) => `<option value="${escHtml(value)}" ${current.fc1 === value ? "selected" : ""}>${escHtml(value)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="inline-filter">
+        <span>FC2</span>
+        <select data-issue-trend-filter="${escHtml(kind)}:fc2">
+          <option value="">All FC2</option>
+          ${fc2Options.map((value) => `<option value="${escHtml(value)}" ${current.fc2 === value ? "selected" : ""}>${escHtml(value)}</option>`).join("")}
         </select>
       </label>
       <label class="inline-filter inline-filter-search">
@@ -2817,6 +2841,7 @@ function buildProductPeriodModel(timelineRows, issueDailyRows, mode) {
     if (!current.issues.has(issueKey)) {
       current.issues.set(issueKey, {
         executive_fault_code: row.executive_fault_code || "Others",
+        fault_code_level_1: row.fault_code_level_1 || "Unclassified",
         issue_detail: row.issue_detail || "Unclassified",
         tickets: 0,
       });
@@ -2869,6 +2894,7 @@ function buildProductIssueTrendModel(issueDailyRows, mode) {
     if (!issueMap.has(issueKey)) {
       issueMap.set(issueKey, {
         executive_fault_code: row.executive_fault_code || "Others",
+        fault_code_level_1: row.fault_code_level_1 || "Unclassified",
         issue_detail: row.issue_detail || "Unclassified",
         byPeriod: new Map(),
       });
@@ -2894,6 +2920,7 @@ function buildProductIssueTrendModel(issueDailyRows, mode) {
     const previous = cells.length > 1 ? cells[cells.length - 2]?.tickets || 0 : 0;
     return {
       executive_fault_code: issue.executive_fault_code,
+      fault_code_level_1: issue.fault_code_level_1,
       issue_detail: issue.issue_detail,
       total,
       latest,
@@ -2915,11 +2942,15 @@ function renderProductIssueTrendTable(model) {
   if (!model.rows.length) return '<div class="empty-state">No issue trend available in the selected range.</div>';
   const active = state.drilldownIssueTrendFilters.product || {};
   const efcFilter = String(active.efc || "").trim().toLowerCase();
+  const fc1Filter = String(active.fc1 || "").trim().toLowerCase();
+  const fc2Filter = String(active.fc2 || "").trim().toLowerCase();
   const query = String(active.query || "").trim().toLowerCase();
   const rows = model.rows.filter((row) => {
     if (efcFilter && String(row.executive_fault_code || "").trim().toLowerCase() !== efcFilter) return false;
+    if (fc1Filter && String(row.fault_code_level_1 || "").trim().toLowerCase() !== fc1Filter) return false;
+    if (fc2Filter && String(row.issue_detail || "").trim().toLowerCase() !== fc2Filter) return false;
     if (query) {
-      const hay = `${row.issue_detail || ""} ${row.executive_fault_code || ""}`.toLowerCase();
+      const hay = `${row.issue_detail || ""} ${row.executive_fault_code || ""} ${row.fault_code_level_1 || ""}`.toLowerCase();
       if (!hay.includes(query)) return false;
     }
     return true;
@@ -2942,7 +2973,7 @@ function renderProductIssueTrendTable(model) {
               <td class="heatmap-row-label">
                 <div class="fault-label-stack">
                   <strong>${escHtml(row.issue_detail)}</strong>
-                  <span>${escHtml(row.executive_fault_code)}</span>
+                  <span>${escHtml(row.executive_fault_code)} · ${escHtml(row.fault_code_level_1 || "Unclassified")}</span>
                 </div>
               </td>
               ${row.cells.map((cell, index) => `
@@ -2965,6 +2996,8 @@ function renderProductIssueTrendTable(model) {
 function filterCategoryTrendModels(model, faultModel, filters) {
   const productFilter = String(filters?.product || "").trim().toLowerCase();
   const efcFilter = String(filters?.efc || "").trim().toLowerCase();
+  const fc1Filter = String(filters?.fc1 || "").trim().toLowerCase();
+  const fc2Filter = String(filters?.fc2 || "").trim().toLowerCase();
   const query = String(filters?.query || "").trim().toLowerCase();
 
   const filteredFaultProducts = (faultModel.products || []).map((product) => {
@@ -2972,12 +3005,16 @@ function filterCategoryTrendModels(model, faultModel, filters) {
     if (productFilter && productName !== productFilter) return null;
     const faults = (product.faults || []).filter((fault) => {
       const efc = String(fault.efc || "").trim().toLowerCase();
-      const text = `${fault.primary || ""} ${fault.secondary || ""} ${fault.efc || ""}`.toLowerCase();
+      const fc1 = String(fault.fc1 || "").trim().toLowerCase();
+      const fc2 = String(fault.fc2 || "").trim().toLowerCase();
+      const text = `${fault.primary || ""} ${fault.secondary || ""} ${fault.efc || ""} ${fault.fc1 || ""} ${fault.fc2 || ""}`.toLowerCase();
       if (efcFilter && efc !== efcFilter) return false;
+      if (fc1Filter && fc1 !== fc1Filter) return false;
+      if (fc2Filter && fc2 !== fc2Filter) return false;
       if (query && !text.includes(query)) return false;
       return true;
     });
-    if (efcFilter || query) {
+    if (efcFilter || fc1Filter || fc2Filter || query) {
       if (!faults.length) return null;
     }
     return { ...product, faults };
@@ -2987,7 +3024,7 @@ function filterCategoryTrendModels(model, faultModel, filters) {
   const filteredRows = (model.rows || []).filter((row) => {
     const productName = String(row.product_name || "").trim().toLowerCase();
     if (productFilter && productName !== productFilter) return false;
-    if ((efcFilter || query) && !allowedProducts.has(row.product_name)) return false;
+    if ((efcFilter || fc1Filter || fc2Filter || query) && !allowedProducts.has(row.product_name)) return false;
     return true;
   });
 
