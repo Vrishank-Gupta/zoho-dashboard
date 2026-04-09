@@ -1181,7 +1181,9 @@ class AnalyticsService:
                 str(row.get("metric_date") or ""),
                 str(row.get("product_name") or ""),
                 effective_efc,
+                str(row.get("fault_code_level_1") or "Unclassified"),
                 issue_detail,
+                str(row.get("resolution") or "Unknown"),
             )
             product_fault_totals[key] += int(row.get("tickets", 0) or 0)
             efc_totals[effective_efc] += 0
@@ -1195,10 +1197,12 @@ class AnalyticsService:
                 "metric_date": metric_date,
                 "product_name": product_name,
                 "executive_fault_code": executive_fault_code,
+                "fault_code_level_1": fault_code_level_1,
                 "fault_code_level_2": fault_code_level_2,
+                "resolution": resolution,
                 "tickets": tickets,
             }
-            for (metric_date, product_name, executive_fault_code, fault_code_level_2), tickets in sorted(product_fault_totals.items())
+            for (metric_date, product_name, executive_fault_code, fault_code_level_1, fault_code_level_2, resolution), tickets in sorted(product_fault_totals.items())
         ]
         return mapped
 

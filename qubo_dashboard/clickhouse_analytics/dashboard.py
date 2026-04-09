@@ -509,6 +509,22 @@ class ClickHouseAnalyticsRepository:
                 LIMIT 18
                 """
             ),
+            "product_fault_daily": self._query(
+                f"""
+                SELECT
+                    created_date AS metric_date,
+                    product_name,
+                    executive_fault_code,
+                    normalized_fault_code_l1 AS fault_code_level_1,
+                    normalized_fault_code_l2 AS fault_code_level_2,
+                    normalized_resolution AS resolution,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY metric_date, product_name, executive_fault_code, fault_code_level_1, fault_code_level_2, resolution
+                ORDER BY product_name, metric_date, tickets DESC
+                """
+            ),
         }
 
     def fetch_issue_drilldown(self, filters: DashboardFilters, issue_id: str) -> dict[str, list[dict]]:
