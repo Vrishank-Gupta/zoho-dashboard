@@ -2311,14 +2311,35 @@ function bucketTimeline(points, mode) {
       : bucketMode === "weekly"
         ? startOfWeek(rawDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })
         : rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
-    if (!grouped.has(key)) grouped.set(key, { label, tickets: 0, installation_tickets: 0, bot_resolved_tickets: 0, repeat_tickets: 0 });
+    if (!grouped.has(key)) grouped.set(key, {
+      label,
+      tickets: 0,
+      installation_tickets: 0,
+      bot_resolved_tickets: 0,
+      repeat_tickets: 0,
+      _dates: new Set(),
+    });
     const current = grouped.get(key);
     current.tickets += Number(point.tickets || 0);
     current.installation_tickets += Number(point.installation_tickets || 0);
     current.bot_resolved_tickets += Number(point.bot_resolved_tickets || 0);
     current.repeat_tickets += Number(point.repeat_tickets || 0);
+    current._dates.add(isoDate(rawDate));
   });
-  return [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, value]) => value);
+  let entries = [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  if ((bucketMode === "weekly" || bucketMode === "monthly") && entries.length > 2) {
+    entries = entries.filter(([key, value], index) => {
+      if (index !== 0 && index !== entries.length - 1) return true;
+      const distinctDates = value._dates?.size || 0;
+      if (bucketMode === "weekly") return distinctDates >= 7;
+      const [year, month] = key.split("-").map(Number);
+      return distinctDates >= daysInMonth(year, month);
+    });
+  }
+  return entries.map(([, value]) => {
+    delete value._dates;
+    return value;
+  });
 }
 
 function resolveBucketMode(points, mode) {
@@ -2542,6 +2563,10 @@ function startOfWeek(value) {
 
 function isoDate(value) {
   return value.toISOString().slice(0, 10);
+}
+
+function daysInMonth(year, month) {
+  return new Date(year, month, 0).getDate();
 }
 
 function toDate(value) {
