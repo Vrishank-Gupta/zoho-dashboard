@@ -1790,6 +1790,7 @@ function renderCategoryDrilldownPanels(drilldown) {
     bot_resolved_tickets: row.bot_resolved_tickets,
     repeat_tickets: 0,
   })), state.categoryDrilldownBucket);
+  const faultMatrices = buildCategoryFaultMatrixModel(drilldown.product_fault_daily || [], state.categoryDrilldownBucket);
   const previousProducts = new Map((drilldown.products_previous || []).map((row) => [row.label, Number(row.tickets || 0)]));
   const topResolutionByProduct = new Map();
   (drilldown.resolution_by_product || []).forEach((row) => {
@@ -1821,7 +1822,7 @@ function renderCategoryDrilldownPanels(drilldown) {
             delta_vs_previous: previous > 0 ? (current - previous) / previous : current > 0 ? 1 : 0,
             top_resolution: topResolutionByProduct.get(row.label) || "Unknown",
           };
-        }))}</div>
+        }), faultMatrices)}</div>
         <div class="mini-panel"><h3>Issue hotspots</h3>${renderMiniTable(drilldown.issues || [], [
           { key: "executive_fault_code", label: "EFC" },
           { key: "tickets", label: "Tickets", format: "number" },
@@ -1838,7 +1839,6 @@ function renderCategoryDrilldownPanels(drilldown) {
       </div>
     </section>`;
   els.drilldownBody.innerHTML = overview;
-  bindCategoryProductActions(els.drilldownBody);
 }
 
 function closeDrilldown() {
@@ -3094,46 +3094,31 @@ function renderProductIssueTrendTable(model) {
     </div>`;
 }
 
-function renderCategoryProductsTable(rows) {
+function renderCategoryProductsTable(rows, faultModel = { products: [] }) {
   if (!rows.length) return '<div class="empty-state">No products available in the selected range.</div>';
+  const faultByProduct = new Map((faultModel.products || []).map((product) => [product.product_name, product.faults || []]));
   return `
-    <div class="mini-table-wrap">
-      <table class="mini-table clickable-table">
-        <thead>
-          <tr>
-            <th>Product</th>
-            <th>Tickets</th>
-            <th>Bot resolved</th>
-            <th>Change</th>
-            <th>Top resolution</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.slice(0, 12).map((row) => `
-            <tr class="clickable-row" data-category-product-row="${escHtml(row.label)}">
-              <td>${escHtml(row.label)}</td>
-              <td>${escHtml(fmtNum(row.tickets || 0))}</td>
-              <td>${escHtml(fmtPct(ratio(row.bot_resolved_tickets, row.tickets)))}</td>
-              <td><span class="${Number(row.delta_vs_previous || 0) >= 0 ? "good" : "bad"}">${escHtml(formatSignedPct(row.delta_vs_previous || 0))}</span></td>
-              <td>${escHtml(row.top_resolution || "Unknown")}</td>
-              <td><button class="table-link-btn" type="button">Open issue drilldown</button></td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
+    <div class="drilldown-accordion">
+      ${rows.slice(0, 12).map((row) => {
+        const faults = faultByProduct.get(row.label) || [];
+        return `
+          <details class="drilldown-detail">
+            <summary class="drilldown-detail-summary">
+              <div class="drilldown-detail-title">${escHtml(row.label)}</div>
+              <div class="drilldown-detail-meta">
+                ${escHtml(fmtNum(row.tickets || 0))} tickets · Bot resolved ${escHtml(fmtPct(ratio(row.bot_resolved_tickets, row.tickets)))} ·
+                <span class="${Number(row.delta_vs_previous || 0) >= 0 ? "good" : "bad"}">${escHtml(formatSignedPct(row.delta_vs_previous || 0))}</span> ·
+                ${escHtml(row.top_resolution || "Unknown")}
+                <span class="detail-open-pill">View issue trend</span>
+              </div>
+            </summary>
+            <div class="drilldown-detail-body">
+              <div class="mini-title">Top issues in this product</div>
+              ${faults.length ? renderCategoryFaultRows(faults) : '<div class="empty-state">No issue movement available.</div>'}
+            </div>
+          </details>`;
+      }).join("")}
     </div>`;
-}
-
-function bindCategoryProductActions(scope = document) {
-  scope.querySelectorAll("[data-category-product-row]").forEach((row) => {
-    row.addEventListener("click", (event) => {
-      event.preventDefault();
-      const productName = row.dataset.categoryProductRow || "";
-      const category = state.currentCategoryDrilldown?.category || state.currentDrilldownMeta?.category || "";
-      if (productName) openProductDrilldown(category, productName);
-    });
-  });
 }
 
 function filterCategoryTrendModels(model, faultModel, filters) {
