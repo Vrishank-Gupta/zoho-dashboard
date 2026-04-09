@@ -168,6 +168,7 @@ class AnalyticsService:
             futures = {
                 "current_daily": pool.submit(self._clickhouse.fetch_daily_rows, start_date, end_date, filters),
                 "current_issue": pool.submit(self._clickhouse.fetch_issue_rows, start_date, end_date, filters),
+                "current_repeat": pool.submit(self._clickhouse.fetch_repeat_rows, start_date, end_date, filters),
                 "bot_rows": pool.submit(self._clickhouse.fetch_bot_rows, start_date, end_date, filters),
                 "pipeline_rows": pool.submit(self._clickhouse.fetch_pipeline_rows),
             }
@@ -177,14 +178,17 @@ class AnalyticsService:
             if previous_end >= previous_start:
                 futures["previous_daily"] = pool.submit(self._clickhouse.fetch_daily_rows, previous_start, previous_end, filters)
                 futures["previous_issue"] = pool.submit(self._clickhouse.fetch_issue_rows, previous_start, previous_end, filters)
+                futures["previous_repeat"] = pool.submit(self._clickhouse.fetch_repeat_rows, previous_start, previous_end, filters)
             current_daily_rows = futures["current_daily"].result()
             current_issue_rows = futures["current_issue"].result()
+            current_repeat_rows = futures["current_repeat"].result()
             bot_rows = futures["bot_rows"].result()
             pipeline_rows = futures["pipeline_rows"].result()
             option_daily_rows = futures["option_daily"].result() if "option_daily" in futures else current_daily_rows
             option_issue_rows = futures["option_issue"].result() if "option_issue" in futures else current_issue_rows
             previous_daily_rows = futures["previous_daily"].result() if "previous_daily" in futures else []
             previous_issue_rows = futures["previous_issue"].result() if "previous_issue" in futures else []
+            previous_repeat_rows = futures["previous_repeat"].result() if "previous_repeat" in futures else []
         current_daily_rows = self._mapped_daily_rows(current_daily_rows, filters)
         previous_daily_rows = self._mapped_daily_rows(previous_daily_rows, filters)
         current_issue_rows = self._mapped_issue_rows(current_issue_rows, filters)
@@ -194,6 +198,14 @@ class AnalyticsService:
         option_issue_rows = self._mapped_issue_rows(option_issue_rows, option_filters, apply_mapping_filters=False)
 
         issues = self._agg_issues(current_issue_rows, previous_issue_rows)
+        repeat_analysis = self._agg_repeat_analysis(
+            current_repeat_rows,
+            previous_repeat_rows,
+            current_daily_rows,
+            previous_daily_rows,
+            current_issue_rows,
+            previous_issue_rows,
+        )
         category_health = self._agg_category_health(current_daily_rows, previous_daily_rows)
         product_health = self._agg_product_health(current_daily_rows, previous_daily_rows)
         service_ops = self._agg_service_ops(current_daily_rows)
@@ -216,6 +228,7 @@ class AnalyticsService:
             "filter_options": filter_options,
             "kpis": kpis,
             "timeline": self._agg_timeline(current_daily_rows),
+            "repeat_analysis": repeat_analysis,
             "category_health": category_health,
             "product_health": product_health,
             "issue_views": self._agg_issue_views(issues),
@@ -340,6 +353,247 @@ class AnalyticsService:
             grouped[key]["bot_resolved_tickets"] += int(row.get("bot_resolved_tickets", 0) or 0)
             grouped[key]["repeat_tickets"] += int(row.get("repeat_tickets", 0) or 0)
         return [{"date": day, **metrics} for day, metrics in sorted(grouped.items())]
+
+    def _agg_repeat_analysis(
+        self,
+        current_rows: list[dict[str, Any]],
+        previous_rows: list[dict[str, Any]],
+        current_daily_rows: list[dict[str, Any]],
+        previous_daily_rows: list[dict[str, Any]],
+        current_issue_rows: list[dict[str, Any]],
+        previous_issue_rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        current_returns = sum(int(row.get("repeat_returns", 0) or 0) for row in current_rows)
+        previous_returns = sum(int(row.get("repeat_returns", 0) or 0) for row in previous_rows)
+        current_ticket_total = sum(int(row.get("tickets", 0) or 0) for row in current_daily_rows)
+        previous_ticket_total = sum(int(row.get("tickets", 0) or 0) for row in previous_daily_rows)
+        current_customers = {
+            (str(row.get("product_name") or ""), str(row.get("metric_date") or ""), str(row.get("return_fault_code_level_2") or ""))
+            for row in current_rows
+            if int(row.get("repeat_returns", 0) or 0) > 0
+        }
+        previous_customers = {
+            (str(row.get("product_name") or ""), str(row.get("metric_date") or ""), str(row.get("return_fault_code_level_2") or ""))
+            for row in previous_rows
+            if int(row.get("repeat_returns", 0) or 0) > 0
+        }
+        overview = {
+            "repeat_returns": self._metric(current_returns, previous_returns),
+            "repeat_rate": self._metric_ratio(current_returns, current_ticket_total, previous_returns, previous_ticket_total),
+            "repeat_customer_events": self._metric(len(current_customers), len(previous_customers)),
+            "median_return_days": self._metric(self._median_days(current_rows), self._median_days(previous_rows)),
+            "within_7d_share": self._metric_ratio(
+                self._bucket_total(current_rows, {"0-7 days"}),
+                current_returns,
+                self._bucket_total(previous_rows, {"0-7 days"}),
+                previous_returns,
+            ),
+            "within_30d_share": self._metric_ratio(
+                self._bucket_total(current_rows, {"0-7 days", "8-15 days", "16-30 days"}),
+                current_returns,
+                self._bucket_total(previous_rows, {"0-7 days", "8-15 days", "16-30 days"}),
+                previous_returns,
+            ),
+        }
+        base_counts = {
+            "product_name": self._repeat_base_lookup(current_daily_rows, "product_name"),
+            "product_category": self._repeat_base_lookup(current_daily_rows, "product_category"),
+            "return_executive_fault_code": self._repeat_base_lookup(current_issue_rows, "executive_fault_code"),
+            "return_fault_code_level_2": self._repeat_base_lookup(current_issue_rows, "fault_code_level_2"),
+        }
+        previous_base_counts = {
+            "product_name": self._repeat_base_lookup(previous_daily_rows, "product_name"),
+            "product_category": self._repeat_base_lookup(previous_daily_rows, "product_category"),
+            "return_executive_fault_code": self._repeat_base_lookup(previous_issue_rows, "executive_fault_code"),
+            "return_fault_code_level_2": self._repeat_base_lookup(previous_issue_rows, "fault_code_level_2"),
+        }
+        return {
+            "overview": overview,
+            "aging": self._agg_repeat_aging(current_rows),
+            "same_issue_mix": self._agg_repeat_same_issue_mix(current_rows),
+            "trend": self._agg_repeat_trend(current_rows),
+            "products": self._agg_repeat_dimension(current_rows, previous_rows, "product_name", "return_executive_fault_code", base_counts["product_name"], previous_base_counts["product_name"]),
+            "categories": self._agg_repeat_dimension(current_rows, previous_rows, "product_category", "return_executive_fault_code", base_counts["product_category"], previous_base_counts["product_category"]),
+            "efcs": self._agg_repeat_dimension(current_rows, previous_rows, "return_executive_fault_code", "return_fault_code_level_2", base_counts["return_executive_fault_code"], previous_base_counts["return_executive_fault_code"]),
+            "fc2": self._agg_repeat_dimension(current_rows, previous_rows, "return_fault_code_level_2", "return_resolution", base_counts["return_fault_code_level_2"], previous_base_counts["return_fault_code_level_2"]),
+            "resolution_fallout": self._agg_repeat_resolution_fallout(current_rows),
+            "transitions": self._agg_repeat_transitions(current_rows),
+        }
+
+    def _agg_repeat_aging(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        order = ["0-7 days", "8-15 days", "16-30 days", "31-60 days", "61-90 days", "90+ days"]
+        grouped: dict[str, int] = defaultdict(int)
+        total = 0
+        for row in rows:
+            bucket = str(row.get("aging_bucket") or "90+ days")
+            value = int(row.get("repeat_returns", 0) or 0)
+            grouped[bucket] += value
+            total += value
+        return [
+            {"label": bucket, "count": grouped.get(bucket, 0), "share": self._ratio(grouped.get(bucket, 0), total)}
+            for bucket in order
+            if grouped.get(bucket, 0) > 0
+        ]
+
+    def _agg_repeat_same_issue_mix(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        total = sum(int(row.get("repeat_returns", 0) or 0) for row in rows)
+        same_fc2 = sum(int(row.get("repeat_returns", 0) or 0) for row in rows if int(row.get("same_fc2", 0) or 0) == 1)
+        same_efc_only = sum(
+            int(row.get("repeat_returns", 0) or 0)
+            for row in rows
+            if int(row.get("same_fc2", 0) or 0) == 0 and int(row.get("same_efc", 0) or 0) == 1
+        )
+        different = max(total - same_fc2 - same_efc_only, 0)
+        return [
+            {"label": "Same FC2", "count": same_fc2, "share": self._ratio(same_fc2, total)},
+            {"label": "Same EFC, different FC2", "count": same_efc_only, "share": self._ratio(same_efc_only, total)},
+            {"label": "Different issue", "count": different, "share": self._ratio(different, total)},
+        ]
+
+    def _agg_repeat_trend(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[str, dict[str, int]] = defaultdict(lambda: {"repeat_returns": 0, "same_fc2_returns": 0})
+        for row in rows:
+            key = row["metric_date"].isoformat() if hasattr(row.get("metric_date"), "isoformat") else str(row.get("metric_date"))
+            value = int(row.get("repeat_returns", 0) or 0)
+            grouped[key]["repeat_returns"] += value
+            if int(row.get("same_fc2", 0) or 0) == 1:
+                grouped[key]["same_fc2_returns"] += value
+        return [{"date": key, **value} for key, value in sorted(grouped.items())]
+
+    def _agg_repeat_dimension(
+        self,
+        current_rows: list[dict[str, Any]],
+        previous_rows: list[dict[str, Any]],
+        dimension: str,
+        secondary_dimension: str,
+        base_counts: dict[str, int],
+        previous_base_counts: dict[str, int],
+    ) -> list[dict[str, Any]]:
+        current = self._group_repeat_dimension(current_rows, dimension, secondary_dimension)
+        previous = self._group_repeat_dimension(previous_rows, dimension, secondary_dimension)
+        items: list[dict[str, Any]] = []
+        for key, bucket in current.items():
+            previous_bucket = previous.get(key, {})
+            items.append(
+                {
+                    "label": key,
+                    "repeat_returns": bucket["repeat_returns"],
+                    "repeat_rate": self._ratio(bucket["repeat_returns"], base_counts.get(key, 0)),
+                    "median_days": self._weighted_median_days(bucket["days"]),
+                    "same_issue_share": self._ratio(bucket["same_fc2_returns"], bucket["repeat_returns"]),
+                    "change_rate": self._metric(bucket["repeat_returns"], previous_bucket.get("repeat_returns", 0))["change"],
+                    "repeat_rate_change": self._metric(
+                        self._ratio(bucket["repeat_returns"], base_counts.get(key, 0)),
+                        self._ratio(previous_bucket.get("repeat_returns", 0), previous_base_counts.get(key, 0)),
+                    )["change"],
+                    "top_secondary": max(bucket["secondary"].items(), key=lambda item: item[1])[0] if bucket["secondary"] else "Unknown",
+                    "top_first_resolution": max(bucket["first_resolution"].items(), key=lambda item: item[1])[0] if bucket["first_resolution"] else "Unknown",
+                }
+            )
+        return sorted(items, key=lambda item: item["repeat_returns"], reverse=True)[:12]
+
+    def _group_repeat_dimension(self, rows: list[dict[str, Any]], dimension: str, secondary_dimension: str) -> dict[str, dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            label = str(row.get(dimension) or "Unknown")
+            current = grouped.get(label)
+            if current is None:
+                current = {
+                    "repeat_returns": 0,
+                    "same_fc2_returns": 0,
+                    "days": [],
+                    "secondary": defaultdict(int),
+                    "first_resolution": defaultdict(int),
+                }
+                grouped[label] = current
+            value = int(row.get("repeat_returns", 0) or 0)
+            current["repeat_returns"] += value
+            current["same_fc2_returns"] += value if int(row.get("same_fc2", 0) or 0) == 1 else 0
+            current["days"].append((int(row.get("days_to_return", 0) or 0), value))
+            current["secondary"][str(row.get(secondary_dimension) or "Unknown")] += value
+            current["first_resolution"][str(row.get("first_resolution") or "Unknown")] += value
+        return grouped
+
+    def _repeat_base_lookup(self, rows: list[dict[str, Any]], dimension: str) -> dict[str, int]:
+        grouped: dict[str, int] = defaultdict(int)
+        for row in rows:
+            label = str(row.get(dimension) or "Unknown")
+            grouped[label] += int(row.get("tickets", 0) or 0)
+        return dict(grouped)
+
+    def _agg_repeat_resolution_fallout(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            label = str(row.get("first_resolution") or "Unknown")
+            current = grouped.get(label)
+            if current is None:
+                current = {"repeat_returns": 0, "days": [], "return_resolution": defaultdict(int), "return_efc": defaultdict(int)}
+                grouped[label] = current
+            value = int(row.get("repeat_returns", 0) or 0)
+            current["repeat_returns"] += value
+            current["days"].append((int(row.get("days_to_return", 0) or 0), value))
+            current["return_resolution"][str(row.get("return_resolution") or "Unknown")] += value
+            current["return_efc"][str(row.get("return_executive_fault_code") or "Unknown")] += value
+        items = []
+        for label, bucket in grouped.items():
+            items.append(
+                {
+                    "label": label,
+                    "repeat_returns": bucket["repeat_returns"],
+                    "median_days": self._weighted_median_days(bucket["days"]),
+                    "top_return_resolution": max(bucket["return_resolution"].items(), key=lambda item: item[1])[0] if bucket["return_resolution"] else "Unknown",
+                    "top_return_efc": max(bucket["return_efc"].items(), key=lambda item: item[1])[0] if bucket["return_efc"] else "Unknown",
+                }
+            )
+        return sorted(items, key=lambda item: item["repeat_returns"], reverse=True)[:10]
+
+    def _agg_repeat_transitions(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            key = (
+                str(row.get("first_executive_fault_code") or "Unknown"),
+                str(row.get("return_executive_fault_code") or "Unknown"),
+            )
+            current = grouped.get(key)
+            if current is None:
+                current = {"repeat_returns": 0, "days": []}
+                grouped[key] = current
+            value = int(row.get("repeat_returns", 0) or 0)
+            current["repeat_returns"] += value
+            current["days"].append((int(row.get("days_to_return", 0) or 0), value))
+        items = []
+        for (first_efc, return_efc), bucket in grouped.items():
+            items.append(
+                {
+                    "first_efc": first_efc,
+                    "return_efc": return_efc,
+                    "repeat_returns": bucket["repeat_returns"],
+                    "median_days": self._weighted_median_days(bucket["days"]),
+                }
+            )
+        return sorted(items, key=lambda item: item["repeat_returns"], reverse=True)[:12]
+
+    def _bucket_total(self, rows: list[dict[str, Any]], accepted_buckets: set[str]) -> int:
+        return sum(int(row.get("repeat_returns", 0) or 0) for row in rows if str(row.get("aging_bucket") or "") in accepted_buckets)
+
+    def _median_days(self, rows: list[dict[str, Any]]) -> float:
+        weighted = [(int(row.get("days_to_return", 0) or 0), int(row.get("repeat_returns", 0) or 0)) for row in rows]
+        return self._weighted_median_days(weighted)
+
+    def _weighted_median_days(self, weighted: list[tuple[int, int]]) -> float:
+        if not weighted:
+            return 0.0
+        ordered = sorted((days, weight) for days, weight in weighted if weight > 0)
+        total_weight = sum(weight for _, weight in ordered)
+        if total_weight <= 0:
+            return 0.0
+        midpoint = total_weight / 2
+        cumulative = 0
+        for days, weight in ordered:
+            cumulative += weight
+            if cumulative >= midpoint:
+                return float(days)
+        return float(ordered[-1][0])
 
     def _agg_category_health(self, rows: list[dict[str, Any]], previous_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -1104,6 +1358,7 @@ class AnalyticsService:
                 "no_reopen_rate": {"value": 0.0, "change": 0.0},
             },
               "timeline": [],
+              "repeat_analysis": {"overview": {}, "aging": [], "same_issue_mix": [], "trend": [], "products": [], "categories": [], "efcs": [], "fc2": [], "resolution_fallout": [], "transitions": []},
               "category_health": [],
               "product_health": [],
               "issue_views": {"highest_volume": [], "installation_tickets": [], "repeat_heavy": [], "bot_leakage": []},

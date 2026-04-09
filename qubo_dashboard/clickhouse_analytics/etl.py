@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from ..config import settings
 from ..models import TicketRecord
 from ..pipeline.transforms import build_ticket_facts
+from ..repeat_analysis import build_repeat_events
 from ..repository import clean_text, connect_mysql, parse_datetime
 from .schema import bootstrap_statements
 
@@ -114,6 +115,7 @@ class ClickHouseETLJob:
 
             if target_dates:
                 self.rebuild_summaries(sorted(affected_dates))
+                self.rebuild_repeat_events()
 
             finished_at = datetime.now(UTC)
             result = ETLResult(
@@ -190,6 +192,96 @@ class ClickHouseETLJob:
             client.command(
                 f"ALTER TABLE {settings.clickhouse_issues_summary_table} DELETE WHERE metric_date IN ({dates_sql})",
                 settings={"mutations_sync": 1},
+            )
+
+    def rebuild_repeat_events(self) -> None:
+        rows = self._query(
+            f"""
+            SELECT
+                ticket_id,
+                customer_key,
+                created_at,
+                closed_at,
+                product_category,
+                product_name,
+                canonical_product AS product_family,
+                executive_fault_code,
+                normalized_fault_code_l1 AS fault_code_level_1,
+                normalized_fault_code_l2 AS fault_code_level_2,
+                normalized_resolution AS resolution,
+                normalized_channel AS channel,
+                normalized_bot_action AS bot_action,
+                ifNull(status, 'Unknown') AS status
+            FROM {settings.clickhouse_fact_table} FINAL
+            WHERE customer_key IS NOT NULL AND customer_key != ''
+            ORDER BY customer_key, product_name, created_at, ticket_id
+            """
+        )
+        events = build_repeat_events(rows)
+        with closing(self._clickhouse_client()) as client:
+            client.command(f"TRUNCATE TABLE {settings.clickhouse_repeat_events_table}")
+            if not events:
+                return
+            client.insert(
+                settings.clickhouse_repeat_events_table,
+                [[
+                    event.customer_key,
+                    event.product_category,
+                    event.product_name,
+                    event.product_family,
+                    event.first_ticket_id,
+                    event.return_ticket_id,
+                    event.first_created_at,
+                    event.return_created_at,
+                    event.return_created_at.date(),
+                    int(event.days_to_return),
+                    event.aging_bucket,
+                    event.first_executive_fault_code,
+                    event.first_fault_code_level_1,
+                    event.first_fault_code_level_2,
+                    event.return_executive_fault_code,
+                    event.return_fault_code_level_1,
+                    event.return_fault_code_level_2,
+                    event.first_resolution,
+                    event.return_resolution,
+                    event.first_channel,
+                    event.return_channel,
+                    event.first_bot_action,
+                    event.return_bot_action,
+                    event.first_status,
+                    event.return_status,
+                    int(event.same_efc),
+                    int(event.same_fc2),
+                ] for event in events],
+                column_names=[
+                    "customer_key",
+                    "product_category",
+                    "product_name",
+                    "product_family",
+                    "first_ticket_id",
+                    "return_ticket_id",
+                    "first_created_at",
+                    "return_created_at",
+                    "return_created_date",
+                    "days_to_return",
+                    "aging_bucket",
+                    "first_executive_fault_code",
+                    "first_fault_code_level_1",
+                    "first_fault_code_level_2",
+                    "return_executive_fault_code",
+                    "return_fault_code_level_1",
+                    "return_fault_code_level_2",
+                    "first_resolution",
+                    "return_resolution",
+                    "first_channel",
+                    "return_channel",
+                    "first_bot_action",
+                    "return_bot_action",
+                    "first_status",
+                    "return_status",
+                    "same_efc",
+                    "same_fc2",
+                ],
             )
 
     def fetch_created_batch(

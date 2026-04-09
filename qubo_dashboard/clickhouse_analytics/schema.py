@@ -146,6 +146,40 @@ def bootstrap_statements() -> list[str]:
         ORDER BY (metric_date, product_category, product_name, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action)
         """.strip(),
         f"""
+        CREATE TABLE IF NOT EXISTS {settings.clickhouse.database}.{settings.clickhouse_repeat_events_table} (
+            customer_key String,
+            product_category LowCardinality(String),
+            product_name LowCardinality(String),
+            product_family LowCardinality(String),
+            first_ticket_id String,
+            return_ticket_id String,
+            first_created_at DateTime64(3, 'UTC'),
+            return_created_at DateTime64(3, 'UTC'),
+            return_created_date Date,
+            days_to_return UInt32,
+            aging_bucket LowCardinality(String),
+            first_executive_fault_code LowCardinality(String),
+            first_fault_code_level_1 LowCardinality(String),
+            first_fault_code_level_2 LowCardinality(String),
+            return_executive_fault_code LowCardinality(String),
+            return_fault_code_level_1 LowCardinality(String),
+            return_fault_code_level_2 LowCardinality(String),
+            first_resolution LowCardinality(String),
+            return_resolution LowCardinality(String),
+            first_channel LowCardinality(String),
+            return_channel LowCardinality(String),
+            first_bot_action LowCardinality(String),
+            return_bot_action LowCardinality(String),
+            first_status LowCardinality(String),
+            return_status LowCardinality(String),
+            same_efc UInt8,
+            same_fc2 UInt8
+        )
+        ENGINE = MergeTree
+        PARTITION BY toYYYYMM(return_created_date)
+        ORDER BY (return_created_date, product_category, product_name, return_executive_fault_code, return_fault_code_level_2, customer_key, return_ticket_id)
+        """.strip(),
+        f"""
         CREATE TABLE IF NOT EXISTS {settings.clickhouse.database}.{settings.clickhouse_sync_state_table} (
             pipeline_name LowCardinality(String),
             last_successful_sync Nullable(DateTime64(3, 'UTC')),

@@ -223,6 +223,13 @@ const els = {
   kpiStrip: document.getElementById("kpiStrip"),
   timelineChart: document.getElementById("timelineChart"),
   productHealthTable: document.getElementById("productHealthTable"),
+  repeatOverview: document.getElementById("repeatOverview"),
+  repeatAging: document.getElementById("repeatAging"),
+  repeatIssueMix: document.getElementById("repeatIssueMix"),
+  repeatProducts: document.getElementById("repeatProducts"),
+  repeatEfcs: document.getElementById("repeatEfcs"),
+  repeatResolutionFallout: document.getElementById("repeatResolutionFallout"),
+  repeatTransitions: document.getElementById("repeatTransitions"),
   issueBoard: document.getElementById("issueBoard"),
   risingSignals: document.getElementById("risingSignals"),
   issueWidgetFilters: document.getElementById("issueWidgetFilters"),
@@ -504,6 +511,7 @@ function renderDashboard(payload) {
   renderKpis(payload.kpis || {});
   renderTimeline(payload.timeline || []);
   renderProductHealth();
+  renderRepeatAnalysis(payload.repeat_analysis || {});
     renderIssueWidgetFilters();
     renderIssueBoard(payload.issue_views || {});
     renderRisingSignals(payload.rising_signals || []);
@@ -774,6 +782,116 @@ function renderProductHealth() {
       renderProductHealth();
     });
   });
+}
+
+function renderRepeatAnalysis(repeatAnalysis) {
+  renderRepeatOverview(repeatAnalysis.overview || {});
+  renderMixList(els.repeatAging, repeatAnalysis.aging || []);
+  renderDonut(els.repeatIssueMix, repeatAnalysis.same_issue_mix || [], "Repeat mix");
+  renderRepeatTable(
+    els.repeatProducts,
+    repeatAnalysis.products || [],
+    "product",
+    [
+      { key: "label", label: "Product" },
+      { key: "repeat_returns", label: "Returns", numeric: true, format: "number" },
+      { key: "repeat_rate", label: "Repeat %", numeric: true, format: "percent" },
+      { key: "median_days", label: "Median days", numeric: true, format: "days" },
+      { key: "change_rate", label: "Change", numeric: true, format: "signed_percent" },
+      { key: "top_secondary", label: "Top return EFC" },
+    ],
+  );
+  renderRepeatTable(
+    els.repeatEfcs,
+    repeatAnalysis.efcs || [],
+    "efc",
+    [
+      { key: "label", label: "EFC" },
+      { key: "repeat_returns", label: "Returns", numeric: true, format: "number" },
+      { key: "repeat_rate", label: "Repeat %", numeric: true, format: "percent" },
+      { key: "same_issue_share", label: "Same FC2 %", numeric: true, format: "percent" },
+      { key: "median_days", label: "Median days", numeric: true, format: "days" },
+      { key: "change_rate", label: "Change", numeric: true, format: "signed_percent" },
+    ],
+  );
+  renderRepeatTable(
+    els.repeatResolutionFallout,
+    repeatAnalysis.resolution_fallout || [],
+    "resolution",
+    [
+      { key: "label", label: "First resolution" },
+      { key: "repeat_returns", label: "Returns", numeric: true, format: "number" },
+      { key: "median_days", label: "Median days", numeric: true, format: "days" },
+      { key: "top_return_efc", label: "Top return EFC" },
+      { key: "top_return_resolution", label: "Return resolution" },
+    ],
+  );
+  renderRepeatTable(
+    els.repeatTransitions,
+    repeatAnalysis.transitions || [],
+    "transition",
+    [
+      { key: "first_efc", label: "First EFC" },
+      { key: "return_efc", label: "Return EFC" },
+      { key: "repeat_returns", label: "Returns", numeric: true, format: "number" },
+      { key: "median_days", label: "Median days", numeric: true, format: "days" },
+    ],
+  );
+}
+
+function renderRepeatOverview(overview) {
+  if (!els.repeatOverview) return;
+  const cards = [
+    ["Repeat returns", overview.repeat_returns],
+    ["Repeat rate", overview.repeat_rate],
+    ["Repeat customer events", overview.repeat_customer_events],
+    ["Median return days", overview.median_return_days],
+    ["Within 7 days", overview.within_7d_share],
+    ["Within 30 days", overview.within_30d_share],
+  ];
+  els.repeatOverview.innerHTML = cards.map(([label, metric]) => {
+    const value = metric?.value ?? 0;
+    const formatted = /rate|Within/.test(label) ? fmtPct(value) : /days/.test(label) ? `${fmtNum(value)}d` : fmtNum(value);
+    const delta = metric?.change ?? 0;
+    return `
+      <div class="repeat-card">
+        <div class="repeat-card-label">${escHtml(label)}</div>
+        <div class="repeat-card-value">${escHtml(formatted)}</div>
+        <div class="repeat-card-change ${delta >= 0 ? "good" : "bad"}">${escHtml(formatSignedPct(delta))} vs prior window</div>
+      </div>`;
+  }).join("");
+}
+
+function renderRepeatTable(container, rows, kind, columns) {
+  if (!container) return;
+  if (!rows.length) {
+    container.innerHTML = '<div class="empty-state">No repeat data in the current view.</div>';
+    return;
+  }
+  const header = columns.map((column) => `<th class="${column.numeric ? "num" : ""}">${escHtml(column.label)}</th>`).join("");
+  const body = rows.slice(0, 10).map((row) => `
+    <tr class="${kind === "product" ? "click-row" : ""}" ${kind === "product" ? `data-repeat-product="${escHtml(row.label || "")}"` : ""}>
+      ${columns.map((column) => `<td class="${column.numeric ? `num ${column.format === "signed_percent" ? (Number(row[column.key] || 0) >= 0 ? "good" : "bad") : ""}` : ""}">${formatRepeatCell(row[column.key], column.format)}</td>`).join("")}
+    </tr>
+  `).join("");
+  container.innerHTML = `<table class="data-table compact-table"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
+  if (kind === "product") {
+    container.querySelectorAll("[data-repeat-product]").forEach((row) => {
+      row.addEventListener("click", () => {
+        const productName = row.dataset.repeatProduct;
+        const productRow = (state.payload?.product_health || []).find((item) => (item.product_name || "") === productName);
+        openProductDrilldown(productRow?.product_category || "", productName);
+      });
+    });
+  }
+}
+
+function formatRepeatCell(value, format) {
+  if (format === "percent") return fmtPct(value || 0);
+  if (format === "signed_percent") return formatSignedPct(value || 0);
+  if (format === "days") return `${fmtNum(value || 0)}d`;
+  if (format === "number") return fmtNum(value || 0);
+  return escHtml(String(value ?? "Unknown"));
 }
 
 function renderIssueBoard(issueViews) {

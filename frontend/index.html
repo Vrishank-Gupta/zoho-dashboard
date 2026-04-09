@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=restyle12">
+  <link rel="stylesheet" href="./styles.css?v=restyle13">
 </head>
 <body>
   <main class="board-shell">
@@ -145,6 +145,46 @@
     <section class="panel" data-dashboard-panel="true">
       <div class="panel-top">
         <div>
+          <div class="section-label">Repeats</div>
+          <h2 class="panel-title">Repeat analysis</h2>
+        </div>
+      </div>
+      <div class="repeat-overview" id="repeatOverview"></div>
+      <div class="dashboard-grid dashboard-grid-split repeat-grid">
+        <div>
+          <div class="mini-title">Return aging</div>
+          <div id="repeatAging"></div>
+        </div>
+        <div>
+          <div class="mini-title">Same issue vs different issue</div>
+          <div class="donut-host" id="repeatIssueMix"></div>
+        </div>
+      </div>
+      <div class="dashboard-grid dashboard-grid-split repeat-grid">
+        <div>
+          <div class="mini-title">Products with highest repeat demand</div>
+          <div id="repeatProducts"></div>
+        </div>
+        <div>
+          <div class="mini-title">EFCs with highest repeat demand</div>
+          <div id="repeatEfcs"></div>
+        </div>
+      </div>
+      <div class="dashboard-grid dashboard-grid-split repeat-grid">
+        <div>
+          <div class="mini-title">First resolution fallout</div>
+          <div id="repeatResolutionFallout"></div>
+        </div>
+        <div>
+          <div class="mini-title">First EFC to return EFC transitions</div>
+          <div id="repeatTransitions"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" data-dashboard-panel="true">
+      <div class="panel-top">
+        <div>
           <div class="section-label">Issues</div>
           <h2 class="panel-title">Issue concentration</h2>
         </div>
@@ -255,6 +295,6 @@
   </div>
 
   <script src="./config.js?v=restyle11"></script>
-  <script src="./app.js?v=restyle12"></script>
+  <script src="./app.js?v=restyle13"></script>
 </body>
 </html>

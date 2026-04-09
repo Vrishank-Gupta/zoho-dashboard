@@ -166,6 +166,57 @@ class ClickHouseAnalyticsRepository:
         """
         return self._query(sql)
 
+    def fetch_repeat_rows(self, start_date: date, end_date: date, filters: DashboardFilters) -> list[dict]:
+        sql = f"""
+        SELECT
+            return_created_date AS metric_date,
+            product_category,
+            product_name,
+            product_family,
+            aging_bucket,
+            days_to_return,
+            first_executive_fault_code,
+            first_fault_code_level_1,
+            first_fault_code_level_2,
+            return_executive_fault_code,
+            return_fault_code_level_1,
+            return_fault_code_level_2,
+            first_resolution,
+            return_resolution,
+            first_channel,
+            return_channel,
+            first_bot_action,
+            return_bot_action,
+            same_efc,
+            same_fc2,
+            count() AS repeat_returns
+        FROM {settings.clickhouse_repeat_events_table}
+        WHERE {self._repeat_filters(filters, start_date, end_date)}
+        GROUP BY
+            metric_date,
+            product_category,
+            product_name,
+            product_family,
+            aging_bucket,
+            days_to_return,
+            first_executive_fault_code,
+            first_fault_code_level_1,
+            first_fault_code_level_2,
+            return_executive_fault_code,
+            return_fault_code_level_1,
+            return_fault_code_level_2,
+            first_resolution,
+            return_resolution,
+            first_channel,
+            return_channel,
+            first_bot_action,
+            return_bot_action,
+            same_efc,
+            same_fc2
+        ORDER BY metric_date, repeat_returns DESC
+        """
+        return self._query(sql)
+
     def fetch_product_drilldown(self, filters: DashboardFilters, category: str, product_name: str) -> dict[str, list[dict]]:
         current_start, current_end = self._resolve_date_range(filters)
         previous_start, previous_end = self._previous_period(current_start, current_end)
@@ -743,6 +794,40 @@ class ClickHouseAnalyticsRepository:
         if filters.exclude_unclassified_blank:
             clauses.append("lowerUTF8(trim(BOTH ' ' FROM product_name)) NOT IN ('blank product', 'blankproduct', '-')")
             clauses.append("lowerUTF8(trim(BOTH ' ' FROM executive_fault_code)) NOT IN ('blank', 'unclassified')")
+        return " AND ".join(clauses) if clauses else "1 = 1"
+
+    def _repeat_filters(self, filters: DashboardFilters, start_date: date | None, end_date: date | None) -> str:
+        clauses: list[str] = []
+        date_start, date_end = (start_date, end_date) if start_date and end_date else self._resolve_date_range(filters)
+        clauses.append(f"return_created_date BETWEEN toDate({self._quote_date(date_start)}) AND toDate({self._quote_date(date_end)})")
+        clauses.extend(self._in_filter("product_category", filters.categories))
+        clauses.extend(self._in_filter("product_name", filters.products))
+        clauses.extend(self._in_filter("return_executive_fault_code", filters.efcs))
+        clauses.extend(self._in_filter("return_fault_code_level_2", filters.issue_details))
+        clauses.extend(self._in_filter("return_channel", filters.channels))
+        clauses.extend(self._in_filter("return_bot_action", filters.bot_actions))
+        clauses.extend(self._multi_filters(
+            "return_fault_code_level_1",
+            filters.include_fc1,
+            filters.exclude_fc1,
+        ))
+        clauses.extend(self._multi_filters(
+            "return_fault_code_level_2",
+            filters.include_fc2,
+            filters.exclude_fc2,
+        ))
+        clauses.extend(self._multi_filters(
+            "return_bot_action",
+            filters.include_bot_action,
+            filters.exclude_bot_action,
+        ))
+        if filters.exclude_installation:
+            clauses.append("(positionCaseInsensitive(return_fault_code_level_1, 'instal') = 0 AND positionCaseInsensitive(return_fault_code_level_2, 'instal') = 0)")
+        if filters.exclude_blank_chat:
+            clauses.append("return_bot_action != 'Blank chat'")
+        if filters.exclude_unclassified_blank:
+            clauses.append("lowerUTF8(trim(BOTH ' ' FROM product_name)) NOT IN ('blank product', 'blankproduct', '-')")
+            clauses.append("lowerUTF8(trim(BOTH ' ' FROM return_executive_fault_code)) NOT IN ('blank', 'unclassified')")
         return " AND ".join(clauses) if clauses else "1 = 1"
 
     def _multi_filters(self, column: str, include_values: list[str], exclude_values: list[str]) -> list[str]:
