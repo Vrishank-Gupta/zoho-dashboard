@@ -1409,7 +1409,7 @@ class AnalyticsService:
             return latest - timedelta(days=29)
         if preset == "history":
             return latest - timedelta(days=580)
-        return latest - timedelta(days=59)
+        return latest - timedelta(days=89)
 
     def _build_seeded(self, filters: DashboardFilters, error: str) -> dict[str, Any]:
         return {
@@ -1472,10 +1472,10 @@ class AnalyticsService:
     def _resolve_window(self, filters: DashboardFilters, min_date: date | None, max_date: date | None) -> tuple[date, date]:
         if not max_date:
             today = date.today()
-            return today - timedelta(days=59), today
+            return today - timedelta(days=89), today
         if not min_date:
             min_date = max_date
-        start_date = self._parse_date(filters.date_start) or max(min_date, max_date - timedelta(days=59))
+        start_date = self._parse_date(filters.date_start) or max(min_date, max_date - timedelta(days=89))
         end_date = self._parse_date(filters.date_end) or max_date
         if start_date < min_date:
             start_date = min_date

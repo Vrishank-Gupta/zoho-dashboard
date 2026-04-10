@@ -167,7 +167,7 @@ const state = {
   timelineMetric: "tickets",
   timelineBucket: "daily",
   botBucket: "daily",
-  activePreset: "60d",
+  activePreset: "90d",
   advancedFiltersOpen: false,
   defaultSelectionsApplied: false,
   activeView: IS_ADMIN_MODE ? "mapping" : "dashboard",
@@ -316,7 +316,7 @@ function bindEvents() {
   els.resetFilters.addEventListener("click", () => {
     state.filters = structuredClone(DEFAULT_FILTERS);
     state.searches = {};
-    state.activePreset = "60d";
+    state.activePreset = "90d";
     syncDashboardBucketModes();
     state.advancedFiltersOpen = false;
     state.defaultSelectionsApplied = false;
@@ -560,7 +560,7 @@ function renderDateToolbar() {
   els.dateStart.max = bounds.max || "";
   els.dateEnd.min = bounds.min || "";
   els.dateEnd.max = bounds.max || "";
-  if (!state.filters.date_start && bounds.max) state.filters.date_start = clampIsoDate(shiftIsoDate(bounds.max, -59), bounds.min, bounds.max);
+  if (!state.filters.date_start && bounds.max) state.filters.date_start = clampIsoDate(shiftIsoDate(bounds.max, -89), bounds.min, bounds.max);
   if (!state.filters.date_end && bounds.max) state.filters.date_end = bounds.max;
   els.dateStart.value = state.filters.date_start || "";
   els.dateEnd.value = state.filters.date_end || "";
