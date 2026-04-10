@@ -476,6 +476,57 @@ def issue_drilldown(
     return service.get_issue_drilldown(filters, issue_id)
 
 
+@app.get("/api/drilldown/repeat")
+def repeat_drilldown(
+    kind: str = Query(...),
+    label: str = Query(...),
+    secondary: str | None = Query(default=None),
+    date_start: str | None = Query(default=None),
+    date_end: str | None = Query(default=None),
+    exclude_installation: bool = Query(default=False),
+    exclude_blank_chat: bool = Query(default=False),
+    exclude_unclassified_blank: bool = Query(default=False),
+    categories: list[str] = Query(default=[]),
+    products: list[str] = Query(default=[]),
+    departments: list[str] = Query(default=[]),
+    channels: list[str] = Query(default=[]),
+    efcs: list[str] = Query(default=[]),
+    issue_details: list[str] = Query(default=[]),
+    statuses: list[str] = Query(default=[]),
+    bot_actions: list[str] = Query(default=[]),
+    include_fc1: list[str] = Query(default=[]),
+    exclude_fc1: list[str] = Query(default=[]),
+    include_fc2: list[str] = Query(default=[]),
+    exclude_fc2: list[str] = Query(default=[]),
+    include_bot_action: list[str] = Query(default=[]),
+    exclude_bot_action: list[str] = Query(default=[]),
+    mapping_overrides: str | None = Query(default=None),
+) -> dict:
+    filters = build_filters(
+        date_start=date_start,
+        date_end=date_end,
+        exclude_installation=exclude_installation,
+        exclude_blank_chat=exclude_blank_chat,
+        exclude_unclassified_blank=exclude_unclassified_blank,
+        categories=categories,
+        products=products,
+        departments=departments,
+        channels=channels,
+        efcs=efcs,
+        issue_details=issue_details,
+        statuses=statuses,
+        bot_actions=bot_actions,
+        include_fc1=include_fc1,
+        exclude_fc1=exclude_fc1,
+        include_fc2=include_fc2,
+        exclude_fc2=exclude_fc2,
+        include_bot_action=include_bot_action,
+        exclude_bot_action=exclude_bot_action,
+        mapping_overrides=mapping_overrides,
+    )
+    return service.get_repeat_drilldown(filters, kind, label, secondary)
+
+
 @app.get("/api/tickets")
 def tickets(
     query: str = Query(default=""),

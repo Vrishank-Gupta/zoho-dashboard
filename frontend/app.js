@@ -2,7 +2,7 @@ const DEFAULT_FILTERS = {
   date_start: "",
   date_end: "",
   exclude_installation: false,
-  exclude_blank_chat: false,
+  exclude_blank_chat: true,
   exclude_unclassified_blank: false,
   categories: [],
   products: [],
@@ -77,6 +77,9 @@ const DRILLDOWN_TABS = {
   issue: [
     { key: "overview", label: "Overview" },
     { key: "analysis", label: "Actions & outcomes" },
+  ],
+  repeat: [
+    { key: "overview", label: "Overview" },
   ],
 };
 
@@ -869,20 +872,17 @@ function renderRepeatTable(container, rows, kind, columns) {
   }
   const header = columns.map((column) => `<th class="${column.numeric ? "num" : ""}">${escHtml(column.label)}</th>`).join("");
   const body = rows.slice(0, 10).map((row) => `
-    <tr class="${kind === "product" ? "click-row" : ""}" ${kind === "product" ? `data-repeat-product="${escHtml(row.label || "")}"` : ""}>
+    <tr class="click-row"
+      data-repeat-kind="${escHtml(kind)}"
+      data-repeat-label="${escHtml(row.label || row.first_efc || "")}"
+      data-repeat-secondary="${escHtml(row.return_efc || "")}">
       ${columns.map((column) => `<td class="${column.numeric ? `num ${column.format === "signed_percent" ? (Number(row[column.key] || 0) >= 0 ? "good" : "bad") : ""}` : ""}">${formatRepeatCell(row[column.key], column.format)}</td>`).join("")}
     </tr>
   `).join("");
   container.innerHTML = `<table class="data-table compact-table"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
-  if (kind === "product") {
-    container.querySelectorAll("[data-repeat-product]").forEach((row) => {
-      row.addEventListener("click", () => {
-        const productName = row.dataset.repeatProduct;
-        const productRow = (state.payload?.product_health || []).find((item) => (item.product_name || "") === productName);
-        openProductDrilldown(productRow?.product_category || "", productName);
-      });
-    });
-  }
+  container.querySelectorAll("[data-repeat-kind]").forEach((row) => {
+    row.addEventListener("click", () => openRepeatDrilldown(row.dataset.repeatKind || "", row.dataset.repeatLabel || "", row.dataset.repeatSecondary || ""));
+  });
 }
 
 function formatRepeatCell(value, format) {
@@ -1119,10 +1119,10 @@ function renderBotTrend(points) {
         const barH = ((item.tickets || 0) / maxTickets) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `${renderChartBar({ x, y, barW, barH, color: METRIC_VISUALS.tickets.fill, stroke: METRIC_VISUALS.tickets.stroke, radius: 4 })}${showValueLabels ? renderChartValueLabel(x + barW / 2, y - 10, fmtNum(item.tickets || 0)) : ""}${shouldShowAxisLabel(index, bucketed.length, mode) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>` : ""}`;
+        return `${renderChartBar({ x, y, barW, barH, color: METRIC_VISUALS.tickets.fill, stroke: METRIC_VISUALS.tickets.stroke, radius: 4, title: `${item.label}: ${fmtNum(item.tickets || 0)} tickets, ${fmtPct(linePoints[index].pct)} bot resolved` })}${showValueLabels ? renderChartValueLabel(x + barW / 2, y - 10, fmtNum(item.tickets || 0)) : ""}${shouldShowAxisLabel(index, bucketed.length, mode) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>` : ""}`;
       }).join("")}
       <path d="${linePath}" fill="none" stroke="${VISUAL_THEME.teal}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path>
-      ${linePoints.map((point, index) => `${renderChartPoint(point.x, point.y, VISUAL_THEME.teal)}${shouldShowDeltaLabel(index, bucketed.length, mode) ? renderChartPercentLabel(point.x, point.y - 16, point.pct) : ""}`).join("")}
+      ${linePoints.map((point, index) => `${renderChartPoint(point.x, point.y, VISUAL_THEME.teal, `${point.label}: ${fmtPct(point.pct)} bot resolved`) }${shouldShowDeltaLabel(index, bucketed.length, mode) ? renderChartPercentLabel(point.x, point.y - 16, point.pct) : ""}`).join("")}
     </svg></div>`;
 }
 
@@ -1146,35 +1146,7 @@ function renderMixList(container, rows) {
 }
 
 function renderDonut(container, rows, label) {
-  if (!rows.length) {
-    container.innerHTML = `<div class="empty-state">No ${escHtml(label.toLowerCase())} data for this view.</div>`;
-    return;
-  }
-  const palette = [VISUAL_THEME.blue, VISUAL_THEME.green, VISUAL_THEME.amber, VISUAL_THEME.purple, VISUAL_THEME.red, VISUAL_THEME.teal, VISUAL_THEME.slate];
-  const items = rows.slice(0, 5);
-  const total = items.reduce((sum, row) => sum + Number(row.count || 0), 0) || 1;
-  let current = 0;
-  const radius = 52;
-  const circumference = 2 * Math.PI * radius;
-  const arcs = items.map((row, index) => {
-    const share = Number(row.count || 0) / total;
-    const length = share * circumference;
-    const arc = `<circle cx="70" cy="70" r="${radius}" fill="none" stroke="${palette[index % palette.length]}" stroke-width="18" stroke-dasharray="${length} ${circumference - length}" stroke-dashoffset="${-current}" transform="rotate(-90 70 70)"></circle>`;
-    current += length;
-    return arc;
-  }).join("");
-  container.innerHTML = `
-    <div class="donut-card">
-      <svg viewBox="0 0 140 140" width="180" height="180" aria-label="${escHtml(label)} breakdown">
-        <circle cx="70" cy="70" r="${radius}" fill="none" stroke="${VISUAL_THEME.donutTrack}" stroke-width="18"></circle>
-        ${arcs}
-        <text x="70" y="64" text-anchor="middle" font-size="11" fill="${VISUAL_THEME.muted}">${escHtml(label)}</text>
-        <text x="70" y="82" text-anchor="middle" font-size="18" font-weight="800" fill="${VISUAL_THEME.text}">${fmtNum(total)}</text>
-      </svg>
-      <div class="donut-legend">
-        ${items.map((row, index) => `<div class="donut-legend-item"><span class="donut-swatch" style="background:${palette[index % palette.length]}"></span><span>${escHtml(formatBotActionLabel(row.label || "Unknown"))}</span><strong>${fmtPct(row.share)}</strong></div>`).join("")}
-      </div>
-    </div>`;
+  container.innerHTML = renderDonutHtml(rows, label);
 }
 
 function renderPipeline(pipeline) {
@@ -1425,6 +1397,22 @@ async function openCategoryDrilldown(category) {
   await refreshCurrentDrilldown();
 }
 
+async function openRepeatDrilldown(kind, label, secondary = "") {
+  state.drilldownFilters = structuredClone(state.filters);
+  state.currentDrilldownMeta = { kind, label, secondary };
+  state.currentDrilldownKind = "repeat";
+  state.currentDrilldownTab = "overview";
+  els.drilldownModal.classList.remove("hidden");
+  els.drilldownEyebrow.textContent = "Repeat drilldown";
+  els.drilldownTitle.textContent = label || "Repeat detail";
+  els.drilldownSubtitle.textContent = secondary
+    ? `${kindLabel(kind)} → ${secondary}`
+    : `${kindLabel(kind)} repeat return analysis`;
+  els.drilldownBody.innerHTML = '<div class="empty-state">Loading details...</div>';
+  renderDrilldownFilters();
+  await refreshCurrentDrilldown();
+}
+
 async function openIssueDrilldown(issueId, options = {}) {
   state.drilldownFilters = structuredClone(state.filters);
   state.drilldownIssueTrendFilters.product = { efc: "", fc1: "", fc2: "", query: "" };
@@ -1471,6 +1459,7 @@ async function openIssueDrilldown(issueId, options = {}) {
 }
 
 function getDrilldownControlDefinitions() {
+  if (state.currentDrilldownKind === "repeat") return [];
   const controls = [
     { key: "efcs", label: "EFC", optionsKey: "efcs" },
     { key: "include_fc1", label: "FC1", optionsKey: "fc1" },
@@ -1687,6 +1676,17 @@ async function refreshCurrentDrilldown() {
     els.drilldownSubtitle.textContent = `${issue.product_name || "Other"} · ${issue.executive_fault_code || "Others"} · ${issue.fault_code_level_1 || "Unclassified"}`;
     state.currentDrilldown = payload.drilldown || {};
     renderDrilldownPanels(state.currentDrilldown);
+    return;
+  }
+  if (state.currentDrilldownKind === "repeat") {
+    const params = buildQueryParams(state.drilldownFilters || state.filters);
+    params.set("kind", state.currentDrilldownMeta?.kind || "");
+    params.set("label", state.currentDrilldownMeta?.label || "");
+    if (state.currentDrilldownMeta?.secondary) params.set("secondary", state.currentDrilldownMeta.secondary);
+    const response = await fetch(`${apiUrl("/api/drilldown/repeat")}?${params.toString()}`);
+    const payload = await response.json();
+    state.currentDrilldown = payload.drilldown || {};
+    renderRepeatDrilldownPanels(state.currentDrilldown);
   }
 }
 
@@ -1869,8 +1869,144 @@ function renderDrilldownTabs() {
   renderSegmented(els.drilldownTabs, tabs, state.currentDrilldownTab, (value) => {
     state.currentDrilldownTab = value;
     if (state.currentDrilldownKind === "category") renderCategoryDrilldownPanels(state.currentCategoryDrilldown || {});
+    else if (state.currentDrilldownKind === "repeat") renderRepeatDrilldownPanels(state.currentDrilldown || {});
     else if (state.currentDrilldownKind === "product" || state.currentDrilldownKind === "issue") renderDrilldownPanels(state.currentDrilldown || {});
   });
+}
+
+function renderRepeatDrilldownPanels(drilldown) {
+  renderDrilldownTabs();
+  const overview = drilldown.overview || {};
+  const trend = (drilldown.trend || []).map((row) => ({
+    date: row.date,
+    tickets: row.repeat_returns || 0,
+    installation_tickets: 0,
+    bot_resolved_tickets: row.same_fc2_returns || 0,
+    repeat_tickets: row.repeat_returns || 0,
+  }));
+  els.drilldownBody.innerHTML = `
+    <section class="drilldown-section">
+      <div class="section-label">Snapshot</div>
+      <div class="mini-summary-grid">
+        ${renderSnapshotStat("Repeat returns", overview.repeat_returns?.value || 0, null, metricPreviousValue(overview.repeat_returns))}
+        ${renderSnapshotStat("Repeat customer events", overview.repeat_customer_events?.value || 0, null, metricPreviousValue(overview.repeat_customer_events))}
+        ${renderSnapshotStat("Median return days", overview.median_return_days?.value || 0, null, metricPreviousValue(overview.median_return_days))}
+        ${renderSnapshotStat("Within 7 days", overview.within_7d_share?.value || 0, overview.within_7d_share?.value || 0, metricPreviousValue(overview.within_7d_share))}
+      </div>
+    </section>
+    <section class="drilldown-section">
+      <div class="section-label">Trend</div>
+      <div class="panel-actions">${renderCategoryBucketTabs()}</div>
+      <div class="mini-panel feature-panel">${renderMiniChartSvg(bucketTimeline(trend, state.categoryDrilldownBucket), state.categoryDrilldownBucket)}</div>
+    </section>
+    <section class="drilldown-section">
+      <div class="section-label">Breakdown</div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel">
+          <h3>Return aging</h3>
+          ${renderMixListHtml(drilldown.aging || [])}
+        </div>
+        <div class="mini-panel">
+          <h3>Same issue vs different issue</h3>
+          <div class="donut-host inline-donut">${renderDonutHtml(drilldown.same_issue_mix || [], "Repeat mix")}</div>
+        </div>
+      </div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel"><h3>Return EFCs</h3>${renderMiniTable(drilldown.return_efcs || [], [
+          { key: "label", label: "EFC" },
+          { key: "repeat_returns", label: "Returns", format: "number" },
+          { key: "repeat_rate", label: "Repeat %", format: "percent" },
+          { key: "median_days", label: "Median days", format: "number" },
+          { key: "change_rate", label: "Change", format: "signedPercent" },
+        ])}</div>
+        <div class="mini-panel"><h3>Return FC2</h3>${renderMiniTable(drilldown.return_fc2 || [], [
+          { key: "label", label: "FC2" },
+          { key: "repeat_returns", label: "Returns", format: "number" },
+          { key: "top_secondary", label: "Return resolution" },
+          { key: "change_rate", label: "Change", format: "signedPercent" },
+        ])}</div>
+      </div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel"><h3>Resolution fallout</h3>${renderMiniTable(drilldown.resolution_fallout || [], [
+          { key: "label", label: "First resolution" },
+          { key: "repeat_returns", label: "Returns", format: "number" },
+          { key: "median_days", label: "Median days", format: "number" },
+          { key: "top_return_efc", label: "Top return EFC" },
+          { key: "top_return_resolution", label: "Return resolution" },
+        ])}</div>
+        <div class="mini-panel"><h3>Channel transitions</h3>${renderMiniTable(drilldown.channel_transitions || [], [
+          { key: "first_channel", label: "First channel" },
+          { key: "return_channel", label: "Return channel" },
+          { key: "repeat_returns", label: "Returns", format: "number" },
+        ])}</div>
+      </div>
+      <div class="mini-panel"><h3>EFC transitions</h3>${renderMiniTable(drilldown.transitions || [], [
+        { key: "first_efc", label: "First EFC" },
+        { key: "return_efc", label: "Return EFC" },
+        { key: "repeat_returns", label: "Returns", format: "number" },
+        { key: "median_days", label: "Median days", format: "number" },
+      ])}</div>
+    </section>`;
+  els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.categoryDrilldownBucket = button.dataset.categoryBucket || "daily";
+      renderRepeatDrilldownPanels(state.currentDrilldown || drilldown);
+    });
+  });
+}
+
+function renderMixListHtml(rows) {
+  if (!rows.length) return '<div class="empty-state">No data for this view.</div>';
+  const max = Math.max(...rows.map((row) => Number(row.count || 0)), 1);
+  return `<div class="mix-list">${rows.slice(0, 8).map((row) => `
+    <div class="mix-row">
+      <div>
+        <div class="mix-row-head">
+          <span class="mix-label">${escHtml(row.label || "Unknown")}</span>
+          <span class="mix-value">${fmtPct(row.share)}</span>
+        </div>
+        <div class="mix-bar"><div class="mix-fill" style="width:${(Number(row.count || 0) / max) * 100}%"></div></div>
+      </div>
+      <div class="mix-value">${fmtNum(row.count)}</div>
+    </div>`).join("")}</div>`;
+}
+
+function renderDonutHtml(rows, label) {
+  if (!rows.length) return `<div class="empty-state">No ${escHtml(label.toLowerCase())} data for this view.</div>`;
+  const palette = [VISUAL_THEME.blue, VISUAL_THEME.green, VISUAL_THEME.amber, VISUAL_THEME.purple, VISUAL_THEME.red, VISUAL_THEME.teal, VISUAL_THEME.slate];
+  const items = rows.slice(0, 5);
+  const total = items.reduce((sum, row) => sum + Number(row.count || 0), 0) || 1;
+  let current = 0;
+  const radius = 52;
+  const circumference = 2 * Math.PI * radius;
+  const arcs = items.map((row, index) => {
+    const share = Number(row.count || 0) / total;
+    const length = share * circumference;
+    const title = `${row.label || "Unknown"}: ${fmtNum(row.count || 0)} (${fmtPct(row.share)})`;
+    const arc = `<circle cx="70" cy="70" r="${radius}" fill="none" stroke="${palette[index % palette.length]}" stroke-width="18" stroke-dasharray="${length} ${circumference - length}" stroke-dashoffset="${-current}" transform="rotate(-90 70 70)"><title>${escHtml(title)}</title></circle>`;
+    current += length;
+    return arc;
+  }).join("");
+  return `
+    <div class="donut-card">
+      <svg viewBox="0 0 140 140" width="180" height="180" aria-label="${escHtml(label)} breakdown">
+        <circle cx="70" cy="70" r="${radius}" fill="none" stroke="${VISUAL_THEME.donutTrack}" stroke-width="18"></circle>
+        ${arcs}
+        <text x="70" y="64" text-anchor="middle" font-size="11" fill="${VISUAL_THEME.muted}">${escHtml(label)}</text>
+        <text x="70" y="82" text-anchor="middle" font-size="18" font-weight="800" fill="${VISUAL_THEME.text}">${fmtNum(total)}</text>
+      </svg>
+      <div class="donut-legend">
+        ${items.map((row, index) => `<div class="donut-legend-item"><span class="donut-swatch" style="background:${palette[index % palette.length]}"></span><span>${escHtml(formatBotActionLabel(row.label || "Unknown"))}</span><strong>${fmtPct(row.share)}</strong></div>`).join("")}
+      </div>
+    </div>`;
+}
+
+function kindLabel(kind) {
+  if (kind === "product") return "Product";
+  if (kind === "efc") return "EFC";
+  if (kind === "resolution") return "Resolution";
+  if (kind === "transition") return "Transition";
+  return "Repeat";
 }
 
 function renderInsightCard(label, title, value) {
@@ -2125,9 +2261,19 @@ function renderMiniTable(rows, columns) {
 function formatMiniCell(row, column) {
   const value = row[column.key];
   if (column.format === "number") return escHtml(fmtNum(value || 0));
+  if (column.format === "percent") return escHtml(fmtPct(value || 0));
   if (column.format === "percentOfTickets") return escHtml(fmtPct(ratio(value, row.tickets)));
   if (column.format === "signedPercent") return `<span class="${Number(value || 0) >= 0 ? "good" : "bad"}">${escHtml(formatSignedPct(value || 0))}</span>`;
   return escHtml(formatBotActionLabelIfNeeded(column.key, value));
+}
+
+function metricPreviousValue(metric) {
+  const value = Number(metric?.value || 0);
+  const change = Number(metric?.change || 0);
+  if (!Number.isFinite(change)) return 0;
+  const denominator = 1 + change;
+  if (denominator <= 0) return 0;
+  return value / denominator;
 }
 
 function renderMiniStat(label, value, isPercent = false) {
@@ -2159,7 +2305,7 @@ function renderMiniChartSvg(points, mode = "daily") {
       const barH = (value / max) * innerH;
       const x = pad.left + step * index + (step - barW) / 2;
       const y = pad.top + innerH - barH;
-      return `${renderChartBar({ x, y, barW, barH, color: METRIC_VISUALS.tickets.fill, stroke: METRIC_VISUALS.tickets.stroke, radius: 4 })}${showValueLabels ? renderChartValueLabel(x + barW / 2, y - 10, fmtNum(value)) : ""}${shouldShowAxisLabel(index, series.length, mode) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
+      return `${renderChartBar({ x, y, barW, barH, color: METRIC_VISUALS.tickets.fill, stroke: METRIC_VISUALS.tickets.stroke, radius: 4, title: `${point.label}: ${fmtNum(value)}` })}${showValueLabels ? renderChartValueLabel(x + barW / 2, y - 10, fmtNum(value)) : ""}${shouldShowAxisLabel(index, series.length, mode) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
     }).join("")}
     ${renderDeltaLine(series.map((point) => ({ tickets: point.tickets, previous_delta: point.previous_delta, label: point.label })), mode, width, height, pad, innerW, innerH)}
   </svg></div>`;
@@ -2215,15 +2361,15 @@ function renderBarChart(container, { points, mode, visual, yLabel }) {
         const barH = (value / max) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `${renderChartBar({ x, y, barW, barH, color: visual.fill, stroke: visual.stroke, radius: 4 })}${showValueLabels ? renderChartValueLabel(x + barW / 2, y - 12, fmtNum(value)) : ""}${shouldShowAxisLabel(index, points.length, mode) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
+        return `${renderChartBar({ x, y, barW, barH, color: visual.fill, stroke: visual.stroke, radius: 4, title: `${point.label}: ${fmtNum(value)}` })}${showValueLabels ? renderChartValueLabel(x + barW / 2, y - 12, fmtNum(value)) : ""}${shouldShowAxisLabel(index, points.length, mode) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(point.label)}</text>` : ""}`;
       }).join("")}
       ${renderDeltaLine(points.map((point) => ({ tickets: point.value, previous_delta: point.previous_delta, label: point.label })), mode, width, height, pad, innerW, innerH)}
     </svg>
     </div>`;
 }
 
-function renderChartBar({ x, y, barW, barH, color, stroke, radius }) {
-  return `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="${radius}" fill="${color}" stroke="${stroke}" stroke-width="1.15"></rect><line x1="${x + 1}" x2="${x + barW - 1}" y1="${y + 1.5}" y2="${y + 1.5}" stroke="rgba(255,255,255,0.24)" stroke-width="1"></line>`;
+function renderChartBar({ x, y, barW, barH, color, stroke, radius, title = "" }) {
+  return `<g>${title ? `<title>${escHtml(title)}</title>` : ""}<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="${radius}" fill="${color}" stroke="${stroke}" stroke-width="1.15"></rect><line x1="${x + 1}" x2="${x + barW - 1}" y1="${y + 1.5}" y2="${y + 1.5}" stroke="rgba(255,255,255,0.24)" stroke-width="1"></line></g>`;
 }
 
 function renderChartValueLabel(x, y, text) {
@@ -2248,8 +2394,8 @@ function renderChartBadge(x, y, text, tone = "neutral") {
   return `<g transform="translate(${x - width / 2} ${y - height})"><rect width="${width}" height="${height}" rx="6" fill="${fill}" stroke="${stroke}"></rect><text x="${width / 2}" y="12.5" text-anchor="middle" font-size="10" font-weight="800" fill="${textFill}">${escHtml(text)}</text></g>`;
 }
 
-function renderChartPoint(x, y, fill) {
-  return `<circle cx="${x}" cy="${y}" r="4.2" fill="${fill}" stroke="${VISUAL_THEME.badgeBg}" stroke-width="1.5"></circle>`;
+function renderChartPoint(x, y, fill, title = "") {
+  return `<circle cx="${x}" cy="${y}" r="4.2" fill="${fill}" stroke="${VISUAL_THEME.badgeBg}" stroke-width="1.5">${title ? `<title>${escHtml(title)}</title>` : ""}</circle>`;
 }
 
 function renderChartPercentLabel(x, y, pct) {
@@ -2302,6 +2448,8 @@ function renderDeltaLine(points, mode, width, height, pad, innerW, innerH) {
         x: pad.left + step * index + step / 2,
         y: deltaToY(Number(point.previous_delta || 0)),
         delta: Number(point.previous_delta || 0),
+        label: point.label || "",
+        tickets: Number(point.tickets || 0),
       };
     })
     .filter(Boolean);
@@ -2313,7 +2461,7 @@ function renderDeltaLine(points, mode, width, height, pad, innerW, innerH) {
     ${linePoints.map((point, index) => {
       const tone = point.delta >= 0 ? "good" : "bad";
       const absoluteIndex = index + 1;
-      return `${renderChartPoint(point.x, point.y, point.delta >= 0 ? VISUAL_THEME.green : VISUAL_THEME.red)}${shouldShowDeltaLabel(absoluteIndex, points.length, mode) ? renderChartBadge(point.x, point.y - 12, formatSignedPct(point.delta), tone) : ""}`;
+      return `${renderChartPoint(point.x, point.y, point.delta >= 0 ? VISUAL_THEME.green : VISUAL_THEME.red, `${point.label}: ${fmtNum(point.tickets)} (${formatSignedPct(point.delta)} vs previous)`)}${shouldShowDeltaLabel(absoluteIndex, points.length, mode) ? renderChartBadge(point.x, point.y - 12, formatSignedPct(point.delta), tone) : ""}`;
     }).join("")}`;
 }
 
@@ -2591,7 +2739,8 @@ async function uploadActiveMappingCsv(event) {
 }
 
 function apiUrl(path) {
-  return `${state.apiBaseUrl}${path}`;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${state.apiBaseUrl}${path}${separator}_ts=${Date.now()}`;
 }
 
 function fmtNum(value) {

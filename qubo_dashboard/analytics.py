@@ -146,6 +146,32 @@ class AnalyticsService:
             }
         return {"issue": issue, "drilldown": {}}
 
+    def get_repeat_drilldown(self, filters: DashboardFilters, kind: str, label: str, secondary: str | None = None) -> dict[str, Any]:
+        if not (self._clickhouse and settings.analytics_backend == "clickhouse"):
+            return {"meta": {"kind": kind, "label": label, "secondary": secondary}, "drilldown": {}}
+        min_date = self._clickhouse.fetch_min_metric_date()
+        max_date = self._clickhouse.fetch_max_metric_date()
+        if not min_date or not max_date:
+            return {"meta": {"kind": kind, "label": label, "secondary": secondary}, "drilldown": {}}
+        start_date, end_date = self._resolve_window(filters, min_date, max_date)
+        previous_start, previous_end = self._previous_period(start_date, end_date)
+        current_rows = self._filter_repeat_drilldown_rows(self._clickhouse.fetch_repeat_rows(start_date, end_date, filters), kind, label, secondary)
+        previous_rows = self._filter_repeat_drilldown_rows(self._clickhouse.fetch_repeat_rows(previous_start, previous_end, filters), kind, label, secondary)
+        return {
+            "meta": {"kind": kind, "label": label, "secondary": secondary},
+            "drilldown": {
+                "overview": self._agg_repeat_drilldown_overview(current_rows, previous_rows),
+                "aging": self._agg_repeat_aging(current_rows),
+                "same_issue_mix": self._agg_repeat_same_issue_mix(current_rows),
+                "trend": self._agg_repeat_trend(current_rows),
+                "return_efcs": self._agg_repeat_dimension(current_rows, previous_rows, "return_executive_fault_code", "return_fault_code_level_2", self._repeat_base_lookup(current_rows, "return_executive_fault_code"), self._repeat_base_lookup(previous_rows, "return_executive_fault_code")),
+                "return_fc2": self._agg_repeat_dimension(current_rows, previous_rows, "return_fault_code_level_2", "return_resolution", self._repeat_base_lookup(current_rows, "return_fault_code_level_2"), self._repeat_base_lookup(previous_rows, "return_fault_code_level_2")),
+                "resolution_fallout": self._agg_repeat_resolution_fallout(current_rows),
+                "transitions": self._agg_repeat_transitions(current_rows),
+                "channel_transitions": self._agg_repeat_channel_transitions(current_rows),
+            },
+        }
+
     def search_tickets(self, filters: DashboardFilters, query: str = "") -> list[dict[str, Any]]:
         if self._clickhouse and settings.analytics_backend == "clickhouse":
             return self._clickhouse.search_tickets(filters, query)
@@ -421,7 +447,7 @@ class AnalyticsService:
         }
 
     def _agg_repeat_aging(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        order = ["0-7 days", "8-15 days", "16-30 days", "31-60 days", "61-90 days", "90+ days"]
+        order = ["0-2 days", "3-7 days", "8-15 days", "16-30 days", "31-60 days", "60+ days"]
         grouped: dict[str, int] = defaultdict(int)
         total = 0
         for row in rows:
@@ -572,6 +598,45 @@ class AnalyticsService:
                 }
             )
         return sorted(items, key=lambda item: item["repeat_returns"], reverse=True)[:12]
+
+    def _filter_repeat_drilldown_rows(self, rows: list[dict[str, Any]], kind: str, label: str, secondary: str | None = None) -> list[dict[str, Any]]:
+        filtered: list[dict[str, Any]] = []
+        for row in rows:
+            if kind == "product" and str(row.get("product_name") or "") == label:
+                filtered.append(row)
+            elif kind == "efc" and str(row.get("return_executive_fault_code") or "") == label:
+                filtered.append(row)
+            elif kind == "resolution" and str(row.get("first_resolution") or "") == label:
+                filtered.append(row)
+            elif kind == "transition" and str(row.get("first_executive_fault_code") or "") == label and str(row.get("return_executive_fault_code") or "") == str(secondary or ""):
+                filtered.append(row)
+        return filtered
+
+    def _agg_repeat_drilldown_overview(self, current_rows: list[dict[str, Any]], previous_rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+        current_returns = sum(int(row.get("repeat_returns", 0) or 0) for row in current_rows)
+        previous_returns = sum(int(row.get("repeat_returns", 0) or 0) for row in previous_rows)
+        current_customers = len({(str(row.get("customer_key") or ""), str(row.get("return_ticket_id") or "")) for row in current_rows})
+        previous_customers = len({(str(row.get("customer_key") or ""), str(row.get("return_ticket_id") or "")) for row in previous_rows})
+        return {
+            "repeat_returns": self._metric(current_returns, previous_returns),
+            "repeat_customer_events": self._metric(current_customers, previous_customers),
+            "median_return_days": self._metric(self._median_days(current_rows), self._median_days(previous_rows)),
+            "within_7d_share": self._metric_ratio(
+                self._bucket_total(current_rows, {"0-2 days", "3-7 days"}),
+                current_returns,
+                self._bucket_total(previous_rows, {"0-2 days", "3-7 days"}),
+                previous_returns,
+            ),
+        }
+
+    def _agg_repeat_channel_transitions(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[tuple[str, str], int] = defaultdict(int)
+        for row in rows:
+            grouped[(str(row.get("first_channel") or "Unknown"), str(row.get("return_channel") or "Unknown"))] += int(row.get("repeat_returns", 0) or 0)
+        return [
+            {"first_channel": first_channel, "return_channel": return_channel, "repeat_returns": repeat_returns}
+            for (first_channel, return_channel), repeat_returns in sorted(grouped.items(), key=lambda item: item[1], reverse=True)[:12]
+        ]
 
     def _bucket_total(self, rows: list[dict[str, Any]], accepted_buckets: set[str]) -> int:
         return sum(int(row.get("repeat_returns", 0) or 0) for row in rows if str(row.get("aging_bucket") or "") in accepted_buckets)

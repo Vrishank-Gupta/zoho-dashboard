@@ -143,14 +143,14 @@ def _is_resolved_like(ticket: RepeatSourceTicket) -> bool:
 
 
 def _aging_bucket(days_to_return: int) -> str:
+    if days_to_return <= 2:
+        return "0-2 days"
     if days_to_return <= 7:
-        return "0-7 days"
+        return "3-7 days"
     if days_to_return <= 15:
         return "8-15 days"
     if days_to_return <= 30:
         return "16-30 days"
     if days_to_return <= 60:
         return "31-60 days"
-    if days_to_return <= 90:
-        return "61-90 days"
-    return "90+ days"
+    return "60+ days"
