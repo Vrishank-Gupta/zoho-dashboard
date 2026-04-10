@@ -414,7 +414,8 @@ function bindEvents() {
 }
 
 async function loadDashboard() {
-  renderLoading();
+  const hadPayload = Boolean(state.payload);
+  if (!hadPayload) renderLoading();
   const params = buildQueryParams(state.filters, { includeOverrides: false });
   try {
     const response = await fetch(`${apiUrl("/api/dashboard")}?${params.toString()}`);
@@ -436,12 +437,21 @@ async function loadDashboard() {
     reconcileIssueWidgetFilters();
     renderDateToolbar();
     renderTimeBucketControls();
-    renderFilterControls();
-    renderDashboard(payload);
-  } catch (error) {
-    renderError(error);
+      renderFilterControls();
+      renderDashboard(payload);
+    } catch (error) {
+      if (!hadPayload) {
+        renderError(error);
+        return;
+      }
+      console.warn("Dashboard refresh failed; preserving previous payload.", error);
+      prependPipelineMessage(
+        "warn",
+        "Refresh delayed",
+        error?.message || "Latest dashboard refresh failed temporarily. Keeping the previous view on screen.",
+      );
+    }
   }
-}
 
 function applyDefaultSelections() {
   if (state.defaultSelectionsApplied) return false;
@@ -1346,6 +1356,18 @@ function renderMappingTable({ rows, idKey, valueKey, selectKey, labelColumns, va
       </div>`;
 }
 
+function prependPipelineMessage(kind, title, detail) {
+  if (!els.pipelineHealth) return;
+  const detailHtml = escHtml(detail || "");
+  const messageHtml = `
+    <div class="pipeline-summary soft-warning">
+      <span class="pipeline-dot ${kind}"></span>
+      <strong>${escHtml(title)}</strong>
+      <span class="mix-value">${detailHtml}</span>
+    </div>`;
+  els.pipelineHealth.insertAdjacentHTML("afterbegin", messageHtml);
+}
+
 async function loadMappingStudio() {
   state.mappingStudioLoading = true;
   renderMappingStudio(state.mappingStudioData || {});
@@ -1369,17 +1391,46 @@ async function runPipeline() {
   els.runPipelineBtn.disabled = true;
   els.runPipelineBtn.textContent = "Starting...";
   try {
-    await fetch(apiUrl("/api/pipeline/run"), { method: "POST" });
+    const response = await fetch(apiUrl("/api/pipeline/run"), { method: "POST" });
+    if (!response.ok) throw new Error(`API ${response.status}`);
     els.runPipelineBtn.textContent = "Running...";
-    setTimeout(() => {
-      els.runPipelineBtn.disabled = false;
-      els.runPipelineBtn.textContent = "Run pipeline";
-      loadDashboard();
-    }, 4000);
-  } catch {
+    prependPipelineMessage("warn", "Pipeline running", "Waiting for ETL to complete before refreshing the board.");
+    await waitForPipelineCompletion();
+    els.runPipelineBtn.textContent = "Refreshing...";
+    await loadDashboard();
+  } catch (error) {
+    console.warn("Pipeline run failed.", error);
+    if (!state.payload) {
+      renderError(error);
+    } else {
+      prependPipelineMessage("error", "Pipeline check failed", error?.message || "Unable to confirm pipeline completion.");
+    }
+  } finally {
     els.runPipelineBtn.disabled = false;
     els.runPipelineBtn.textContent = "Run pipeline";
   }
+}
+
+async function waitForPipelineCompletion(timeoutMs = 240000, intervalMs = 2500) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const response = await fetch(apiUrl("/api/pipeline/status"), { cache: "no-store" });
+    if (!response.ok) throw new Error(`API ${response.status}`);
+    const payload = await response.json();
+    renderPipeline({
+      status: payload.running ? "running" : payload.last_status || "Unknown",
+      last_run_at: payload.last_finished_at || payload.last_started_at || "",
+      rows_inserted: payload.history?.[0]?.rows_inserted || 0,
+      recent_runs: (payload.history || []).slice(0, 5),
+    });
+    if (!payload.running) return payload;
+    await sleep(intervalMs);
+  }
+  throw new Error("Pipeline is taking longer than expected.");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function openProductDrilldown(category, productName) {
