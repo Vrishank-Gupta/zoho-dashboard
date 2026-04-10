@@ -8,6 +8,9 @@ from ..models import DashboardFilters
 
 
 class ClickHouseAnalyticsRepository:
+    def __init__(self) -> None:
+        self._metric_bounds_cache: tuple[datetime, tuple[date | None, date | None]] | None = None
+
     def _client(self):
         import clickhouse_connect
 
@@ -31,19 +34,31 @@ class ClickHouseAnalyticsRepository:
         except Exception:
             return False
 
-    def fetch_max_metric_date(self) -> date | None:
+    def _fetch_metric_bounds(self) -> tuple[date | None, date | None]:
+        now = datetime.utcnow()
+        if self._metric_bounds_cache and (now - self._metric_bounds_cache[0]).total_seconds() <= 120:
+            return self._metric_bounds_cache[1]
         rows = self._query(
-            f"SELECT nullIf(max(metric_date), toDate('1970-01-01')) AS max_date FROM {settings.clickhouse_daily_summary_table}"
+            f"""
+            SELECT
+                nullIf(min(metric_date), toDate('1970-01-01')) AS min_date,
+                nullIf(max(metric_date), toDate('1970-01-01')) AS max_date
+            FROM {settings.clickhouse_daily_summary_table}
+            """
         )
-        value = rows[0]["max_date"] if rows else None
-        return value or None
+        min_date = rows[0]["min_date"] if rows else None
+        max_date = rows[0]["max_date"] if rows else None
+        bounds = (min_date or None, max_date or None)
+        self._metric_bounds_cache = (now, bounds)
+        return bounds
+
+    def fetch_max_metric_date(self) -> date | None:
+        _, max_date = self._fetch_metric_bounds()
+        return max_date
 
     def fetch_min_metric_date(self) -> date | None:
-        rows = self._query(
-            f"SELECT nullIf(min(metric_date), toDate('1970-01-01')) AS min_date FROM {settings.clickhouse_daily_summary_table}"
-        )
-        value = rows[0]["min_date"] if rows else None
-        return value or None
+        min_date, _ = self._fetch_metric_bounds()
+        return min_date
 
     def fetch_daily_rows(self, start_date: date, end_date: date, filters: DashboardFilters) -> list[dict]:
         sql = f"""

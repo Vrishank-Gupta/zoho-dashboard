@@ -1658,6 +1658,15 @@ function renderDrilldownFilters() {
       ${defs.map(renderSelect).join("")}
     </div>`;
   els.drilldownFilters.querySelectorAll("[data-drilldown-date]").forEach((input) => {
+    const openPicker = () => {
+      if (typeof input.showPicker === "function") {
+        try {
+          input.showPicker();
+        } catch {}
+      }
+    };
+    input.addEventListener("click", openPicker);
+    input.addEventListener("focus", openPicker);
     input.addEventListener("change", () => {
       state.drilldownFilters[input.dataset.drilldownDate] = input.value;
       scheduleDrilldownRefresh();

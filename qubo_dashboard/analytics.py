@@ -61,7 +61,7 @@ class AnalyticsService:
         self._repository = repository
         self._clickhouse = ClickHouseAnalyticsRepository() if settings.has_clickhouse else None
         self._display_tz = ZoneInfo(settings.normalized_etl_timezone)
-        self._cache_ttl_seconds = 20
+        self._cache_ttl_seconds = 60
         self._cache: dict[str, tuple[float, Any]] = {}
         self._freshness_ttl_seconds = 300
         self._freshness_cache: tuple[float, dict[str, str]] | None = None
