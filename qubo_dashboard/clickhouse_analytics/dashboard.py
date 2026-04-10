@@ -750,7 +750,14 @@ class ClickHouseAnalyticsRepository:
             filters.exclude_bot_action,
         ))
         if filters.exclude_installation:
-            clauses.append("(positionCaseInsensitive(fault_code_level_1, 'instal') = 0 AND positionCaseInsensitive(fault_code_level_2, 'instal') = 0)")
+            clauses.append(
+                self._exclude_non_product_issue_clause(
+                    fc1_col="fault_code_level_1",
+                    fc2_col="fault_code_level_2",
+                    efc_col="executive_fault_code",
+                    product_category_col="product_category",
+                )
+            )
         if filters.exclude_blank_chat:
             clauses.append("normalized_bot_action != 'Blank chat'")
         if filters.exclude_unclassified_blank:
@@ -787,7 +794,14 @@ class ClickHouseAnalyticsRepository:
             filters.exclude_bot_action,
         ))
         if filters.exclude_installation:
-            clauses.append("(positionCaseInsensitive(normalized_fault_code_l1, 'instal') = 0 AND positionCaseInsensitive(normalized_fault_code_l2, 'instal') = 0)")
+            clauses.append(
+                self._exclude_non_product_issue_clause(
+                    fc1_col="normalized_fault_code_l1",
+                    fc2_col="normalized_fault_code_l2",
+                    efc_col="executive_fault_code",
+                    product_category_col="product_category",
+                )
+            )
         if filters.exclude_blank_chat:
             clauses.append("normalized_bot_action != 'Blank chat'")
         if filters.exclude_unclassified_blank:
@@ -821,7 +835,14 @@ class ClickHouseAnalyticsRepository:
             filters.exclude_bot_action,
         ))
         if filters.exclude_installation:
-            clauses.append("(positionCaseInsensitive(return_fault_code_level_1, 'instal') = 0 AND positionCaseInsensitive(return_fault_code_level_2, 'instal') = 0)")
+            clauses.append(
+                self._exclude_non_product_issue_clause(
+                    fc1_col="return_fault_code_level_1",
+                    fc2_col="return_fault_code_level_2",
+                    efc_col="return_executive_fault_code",
+                    product_category_col="product_category",
+                )
+            )
         if filters.exclude_blank_chat:
             clauses.append("return_bot_action != 'Blank chat'")
         if filters.exclude_unclassified_blank:
@@ -844,6 +865,49 @@ class ClickHouseAnalyticsRepository:
         if not filtered:
             return []
         return [f"{column} IN ({self._quote_join(filtered)})"]
+
+    def _exclude_non_product_issue_clause(
+        self,
+        *,
+        fc1_col: str,
+        fc2_col: str,
+        efc_col: str,
+        product_category_col: str,
+    ) -> str:
+        combined = (
+            f"lowerUTF8(concat(ifNull({fc1_col}, ''), ' ', ifNull({fc2_col}, ''), ' ', ifNull({efc_col}, '')))"
+        )
+        business_noise_terms = [
+            "instal",
+            "sales",
+            "marketing",
+            "logistic",
+            "order",
+            "fulfilment",
+            "fulfillment",
+            "delivery",
+            "shipment",
+            "subscription",
+            "billing",
+            "monetisation",
+            "monetization",
+            "enquiry",
+            "inquiry",
+            "pre-purchase",
+            "pre purchase",
+            "prepurchase",
+            "non product",
+            "non-product",
+        ]
+        keyword_checks = " AND ".join(
+            [f"positionCaseInsensitive({combined}, {self._quote(term)}) = 0" for term in business_noise_terms]
+        )
+        return (
+            "("
+            f"lowerUTF8(trim(BOTH ' ' FROM ifNull({product_category_col}, ''))) NOT IN ('others', 'other', 'blank product', 'blankproduct', '-')"
+            f" AND {keyword_checks}"
+            ")"
+        )
 
     def _parse_issue_id(self, issue_id: str) -> tuple[str, str, str, str]:
         parts = issue_id.split("|")

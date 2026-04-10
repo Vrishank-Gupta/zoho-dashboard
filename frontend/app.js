@@ -580,7 +580,7 @@ function renderDateToolbar() {
 
 function renderReportingShortcuts() {
   const shortcuts = [
-    { key: "exclude_installation", label: "Exclude installation tickets" },
+    { key: "exclude_installation", label: "Exclude installation, marketing & non-product issues" },
     { key: "exclude_blank_chat", label: "Exclude blank chats" },
     { key: "exclude_unclassified_blank", label: "Exclude blank products & unclassified EFC" },
   ];
