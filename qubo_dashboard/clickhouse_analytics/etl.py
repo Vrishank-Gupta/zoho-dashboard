@@ -184,10 +184,22 @@ class ClickHouseETLJob:
         start_date = self._source_start_date()
         if yesterday < start_date:
             return []
-        if previous_sync is None:
+        last_loaded_date = self.get_last_loaded_created_date()
+        if last_loaded_date is None:
             days = (yesterday - start_date).days + 1
             return [start_date + timedelta(days=index) for index in range(days)]
-        return [yesterday]
+        refresh_start = max(start_date, last_loaded_date)
+        if refresh_start > yesterday:
+            return []
+        days = (yesterday - refresh_start).days + 1
+        return [refresh_start + timedelta(days=index) for index in range(days)]
+
+    def get_last_loaded_created_date(self) -> date | None:
+        rows = self._query(
+            f"SELECT nullIf(max(created_date), toDate('1970-01-01')) AS max_created_date FROM {settings.clickhouse_fact_table}"
+        )
+        value = rows[0]["max_created_date"] if rows else None
+        return value or None
 
     def day_window(self, target_date: date) -> tuple[datetime, datetime]:
         start = datetime.combine(target_date, time.min)

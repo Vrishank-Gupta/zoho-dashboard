@@ -169,6 +169,7 @@ class AnalyticsService:
                 "resolution_fallout": self._agg_repeat_resolution_fallout(current_rows),
                 "transitions": self._agg_repeat_transitions(current_rows),
                 "channel_transitions": self._agg_repeat_channel_transitions(current_rows),
+                "rows": current_rows,
             },
         }
 

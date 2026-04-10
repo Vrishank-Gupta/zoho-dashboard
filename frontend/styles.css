@@ -931,6 +931,108 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   margin-top: 18px;
 }
 
+.repeat-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.repeat-filter-field {
+  display: grid;
+  gap: 6px;
+}
+
+.repeat-filter-field span {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.repeat-filter-field select,
+.repeat-filter-field input {
+  height: 38px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--text);
+  padding: 0 12px;
+  border-radius: 4px;
+}
+
+.repeat-filter-search {
+  grid-column: span 2;
+}
+
+.repeat-matrix-panel {
+  margin-top: 14px;
+  overflow: hidden;
+}
+
+.repeat-matrix-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.repeat-matrix-header h3 {
+  margin: 0 0 4px;
+}
+
+.repeat-matrix-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.repeat-matrix-wrap {
+  overflow-x: auto;
+}
+
+.repeat-matrix-table {
+  min-width: 1100px;
+}
+
+.repeat-matrix-table th,
+.repeat-matrix-table td {
+  white-space: nowrap;
+}
+
+.repeat-matrix-issue {
+  min-width: 280px;
+  white-space: normal !important;
+}
+
+.repeat-matrix-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.repeat-matrix-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.repeat-matrix-cell,
+.repeat-matrix-total {
+  text-align: center !important;
+}
+
+.repeat-matrix-count {
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.repeat-matrix-delta {
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
 .donut-host {
   min-height: 220px;
 }

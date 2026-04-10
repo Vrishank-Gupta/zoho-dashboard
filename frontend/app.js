@@ -186,6 +186,16 @@ const state = {
     product: { efc: "", fc1: "", fc2: "", query: "" },
     category: { product: "", efc: "", fc1: "", fc2: "", query: "" },
   },
+  repeatDrilldownFilters: {
+    efc: "",
+    fc1: "",
+    fc2: "",
+    firstResolution: "",
+    returnResolution: "",
+    firstChannel: "",
+    returnChannel: "",
+    query: "",
+  },
   drilldownRefreshTimer: null,
   currentDrilldownMeta: null,
 };
@@ -1399,6 +1409,16 @@ async function openCategoryDrilldown(category) {
 
 async function openRepeatDrilldown(kind, label, secondary = "") {
   state.drilldownFilters = structuredClone(state.filters);
+  state.repeatDrilldownFilters = {
+    efc: "",
+    fc1: "",
+    fc2: "",
+    firstResolution: "",
+    returnResolution: "",
+    firstChannel: "",
+    returnChannel: "",
+    query: "",
+  };
   state.currentDrilldownMeta = { kind, label, secondary };
   state.currentDrilldownKind = "repeat";
   state.currentDrilldownTab = "overview";
@@ -1853,6 +1873,16 @@ function closeDrilldown() {
   state.drilldownSearches = {};
   state.drilldownIssueTrendFilters.product = { efc: "", fc1: "", fc2: "", query: "" };
   state.drilldownIssueTrendFilters.category = { product: "", efc: "", fc1: "", fc2: "", query: "" };
+  state.repeatDrilldownFilters = {
+    efc: "",
+    fc1: "",
+    fc2: "",
+    firstResolution: "",
+    returnResolution: "",
+    firstChannel: "",
+    returnChannel: "",
+    query: "",
+  };
   state.drilldownRefreshTimer = null;
   state.currentDrilldownMeta = null;
   if (els.drilldownFilters) els.drilldownFilters.innerHTML = "";
@@ -1877,13 +1907,11 @@ function renderDrilldownTabs() {
 function renderRepeatDrilldownPanels(drilldown) {
   renderDrilldownTabs();
   const overview = drilldown.overview || {};
-  const trend = (drilldown.trend || []).map((row) => ({
-    date: row.date,
-    tickets: row.repeat_returns || 0,
-    installation_tickets: 0,
-    bot_resolved_tickets: row.same_fc2_returns || 0,
-    repeat_tickets: row.repeat_returns || 0,
-  }));
+  const rawRows = drilldown.rows || [];
+  const localOptions = getRepeatDrilldownLocalOptions(rawRows);
+  const filteredRows = filterRepeatDrilldownRows(rawRows);
+  const trend = buildRepeatDrilldownTrend(filteredRows, state.categoryDrilldownBucket);
+  const matrix = buildRepeatTrendMatrix(filteredRows, state.categoryDrilldownBucket);
   els.drilldownBody.innerHTML = `
     <section class="drilldown-section">
       <div class="section-label">Snapshot</div>
@@ -1896,8 +1924,19 @@ function renderRepeatDrilldownPanels(drilldown) {
     </section>
     <section class="drilldown-section">
       <div class="section-label">Trend</div>
+      ${renderRepeatDrilldownLocalFilters(localOptions)}
       <div class="panel-actions">${renderCategoryBucketTabs()}</div>
-      <div class="mini-panel feature-panel">${renderMiniChartSvg(bucketTimeline(trend, state.categoryDrilldownBucket), state.categoryDrilldownBucket)}</div>
+      <div class="mini-panel feature-panel">${renderMiniChartSvg(trend, state.categoryDrilldownBucket)}</div>
+      <div class="mini-panel repeat-matrix-panel">
+        <div class="repeat-matrix-header">
+          <div>
+            <h3>Issue recurrence matrix</h3>
+            <p>Compare repeat issues period by period with resolution and channel context.</p>
+          </div>
+          <div class="mix-value">${fmtNum(matrix.rows.length)} issues</div>
+        </div>
+        ${renderRepeatTrendMatrix(matrix)}
+      </div>
     </section>
     <section class="drilldown-section">
       <div class="section-label">Breakdown</div>
@@ -1947,12 +1986,226 @@ function renderRepeatDrilldownPanels(drilldown) {
         { key: "median_days", label: "Median days", format: "number" },
       ])}</div>
     </section>`;
+  bindRepeatDrilldownLocalFilters();
   els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
     button.addEventListener("click", () => {
       state.categoryDrilldownBucket = button.dataset.categoryBucket || "daily";
       renderRepeatDrilldownPanels(state.currentDrilldown || drilldown);
     });
   });
+}
+
+function getRepeatDrilldownLocalOptions(rows) {
+  const unique = (getter) => [...new Set((rows || []).map(getter).map((value) => String(value || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return {
+    efcs: unique((row) => row.return_executive_fault_code),
+    fc1: unique((row) => row.return_fault_code_level_1),
+    fc2: unique((row) => row.return_fault_code_level_2),
+    firstResolutions: unique((row) => row.first_resolution),
+    returnResolutions: unique((row) => row.return_resolution),
+    firstChannels: unique((row) => row.first_channel),
+    returnChannels: unique((row) => row.return_channel),
+  };
+}
+
+function renderRepeatDrilldownLocalFilters(options) {
+  const filters = state.repeatDrilldownFilters || {};
+  const renderSelect = (key, label, values) => `
+    <label class="repeat-filter-field">
+      <span>${escHtml(label)}</span>
+      <select data-repeat-filter="${escHtml(key)}">
+        <option value="">All</option>
+        ${values.map((value) => `<option value="${escHtml(value)}" ${filters[key] === value ? "selected" : ""}>${escHtml(value)}</option>`).join("")}
+      </select>
+    </label>`;
+  return `
+    <div class="repeat-filter-grid">
+      ${renderSelect("efc", "Return EFC", options.efcs)}
+      ${renderSelect("fc1", "Return FC1", options.fc1)}
+      ${renderSelect("fc2", "Return FC2", options.fc2)}
+      ${renderSelect("firstResolution", "First resolution", options.firstResolutions)}
+      ${renderSelect("returnResolution", "Return resolution", options.returnResolutions)}
+      ${renderSelect("firstChannel", "First channel", options.firstChannels)}
+      ${renderSelect("returnChannel", "Return channel", options.returnChannels)}
+      <label class="repeat-filter-field repeat-filter-search">
+        <span>Issue search</span>
+        <input type="search" data-repeat-filter-query="true" value="${escHtml(filters.query || "")}" placeholder="Search issue or resolution">
+      </label>
+    </div>`;
+}
+
+function bindRepeatDrilldownLocalFilters() {
+  els.drilldownBody.querySelectorAll("[data-repeat-filter]").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.repeatDrilldownFilters[input.dataset.repeatFilter] = input.value;
+      renderRepeatDrilldownPanels(state.currentDrilldown || {});
+    });
+  });
+  const queryInput = els.drilldownBody.querySelector("[data-repeat-filter-query]");
+  if (queryInput) {
+    queryInput.addEventListener("input", () => {
+      state.repeatDrilldownFilters.query = queryInput.value;
+      renderRepeatDrilldownPanels(state.currentDrilldown || {});
+      const next = els.drilldownBody.querySelector("[data-repeat-filter-query]");
+      if (next) {
+        next.focus();
+        next.setSelectionRange(queryInput.value.length, queryInput.value.length);
+      }
+    });
+  }
+}
+
+function filterRepeatDrilldownRows(rows) {
+  const filters = state.repeatDrilldownFilters || {};
+  const query = String(filters.query || "").trim().toLowerCase();
+  return (rows || []).filter((row) => {
+    if (filters.efc && String(row.return_executive_fault_code || "") !== filters.efc) return false;
+    if (filters.fc1 && String(row.return_fault_code_level_1 || "") !== filters.fc1) return false;
+    if (filters.fc2 && String(row.return_fault_code_level_2 || "") !== filters.fc2) return false;
+    if (filters.firstResolution && String(row.first_resolution || "") !== filters.firstResolution) return false;
+    if (filters.returnResolution && String(row.return_resolution || "") !== filters.returnResolution) return false;
+    if (filters.firstChannel && String(row.first_channel || "") !== filters.firstChannel) return false;
+    if (filters.returnChannel && String(row.return_channel || "") !== filters.returnChannel) return false;
+    if (query) {
+      const haystack = [
+        row.return_executive_fault_code,
+        row.return_fault_code_level_1,
+        row.return_fault_code_level_2,
+        row.first_resolution,
+        row.return_resolution,
+        row.first_channel,
+        row.return_channel,
+      ].map((value) => String(value || "").toLowerCase()).join(" ");
+      if (!haystack.includes(query)) return false;
+    }
+    return true;
+  });
+}
+
+function buildRepeatDrilldownTrend(rows, bucketMode) {
+  const grouped = new Map();
+  (rows || []).forEach((row) => {
+    const rawDate = toDate(row.metric_date);
+    if (!rawDate) return;
+    const key = bucketKeyForDate(rawDate, bucketMode);
+    const label = bucketLabelForDate(rawDate, bucketMode);
+    if (!grouped.has(key)) grouped.set(key, { label, tickets: 0, installation_tickets: 0, bot_resolved_tickets: 0, repeat_tickets: 0, _dates: new Set() });
+    const current = grouped.get(key);
+    current.tickets += Number(row.repeat_returns || 0);
+    current.bot_resolved_tickets += Number(row.same_fc2 ? row.repeat_returns || 0 : 0);
+    current.repeat_tickets += Number(row.repeat_returns || 0);
+    current._dates.add(isoDate(rawDate));
+  });
+  let entries = [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  if ((bucketMode === "weekly" || bucketMode === "monthly") && entries.length > 2) {
+    entries = entries.filter(([key, value], index) => {
+      if (index !== 0 && index !== entries.length - 1) return true;
+      const distinctDates = value._dates?.size || 0;
+      if (bucketMode === "weekly") return distinctDates >= 7;
+      const [year, month] = key.split("-").map(Number);
+      return distinctDates >= daysInMonth(year, month);
+    });
+  }
+  return entries.map(([, value]) => {
+    delete value._dates;
+    return value;
+  });
+}
+
+function buildRepeatTrendMatrix(rows, bucketMode) {
+  const grouped = new Map();
+  const periodMap = new Map();
+  (rows || []).forEach((row) => {
+    const rawDate = toDate(row.metric_date);
+    if (!rawDate) return;
+    const periodKey = bucketKeyForDate(rawDate, bucketMode);
+    const periodLabel = bucketLabelForDate(rawDate, bucketMode);
+    periodMap.set(periodKey, periodLabel);
+    const issueLabel = String(row.return_fault_code_level_2 || row.return_executive_fault_code || "Unknown");
+    const groupKey = [
+      issueLabel,
+      String(row.return_executive_fault_code || "Others"),
+      String(row.first_resolution || "Unknown"),
+      String(row.return_resolution || "Unknown"),
+      String(row.first_channel || "Unknown"),
+      String(row.return_channel || "Unknown"),
+    ].join("|");
+    if (!grouped.has(groupKey)) {
+      grouped.set(groupKey, {
+        issue_label: issueLabel,
+        efc: String(row.return_executive_fault_code || "Others"),
+        first_resolution: String(row.first_resolution || "Unknown"),
+        return_resolution: String(row.return_resolution || "Unknown"),
+        channel_path: `${String(row.first_channel || "Unknown")} → ${String(row.return_channel || "Unknown")}`,
+        totals: new Map(),
+        total: 0,
+      });
+    }
+    const current = grouped.get(groupKey);
+    const next = (current.totals.get(periodKey) || 0) + Number(row.repeat_returns || 0);
+    current.totals.set(periodKey, next);
+    current.total += Number(row.repeat_returns || 0);
+  });
+  const periods = [...periodMap.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, label]) => ({ key, label }));
+  const rowsOut = [...grouped.values()]
+    .map((row) => {
+      let previous = 0;
+      const cells = periods.map((period, index) => {
+        const value = Number(row.totals.get(period.key) || 0);
+        const delta = index === 0 ? 0 : previous > 0 ? (value - previous) / previous : 0;
+        previous = value;
+        return { key: period.key, value, delta };
+      });
+      const latest = cells[cells.length - 1] || { value: 0, delta: 0 };
+      return {
+        ...row,
+        cells,
+        latest_value: latest.value,
+        latest_delta: latest.delta,
+      };
+    })
+    .sort((a, b) => b.total - a.total || b.latest_value - a.latest_value || a.issue_label.localeCompare(b.issue_label))
+    .slice(0, 15);
+  return { periods, rows: rowsOut };
+}
+
+function renderRepeatTrendMatrix(model) {
+  if (!model.periods.length || !model.rows.length) {
+    return '<div class="empty-state">No repeat issue movement available for the current local filters.</div>';
+  }
+  const cols = model.periods.map((period) => `<th>${escHtml(period.label)}</th>`).join("");
+  const body = model.rows.map((row) => `
+    <tr>
+      <td class="repeat-matrix-issue">
+        <div class="repeat-matrix-title">${escHtml(row.issue_label)}</div>
+        <div class="repeat-matrix-meta">${escHtml(row.efc)} · ${escHtml(row.first_resolution)} → ${escHtml(row.return_resolution)}</div>
+        <div class="repeat-matrix-meta">${escHtml(row.channel_path)}</div>
+      </td>
+      ${row.cells.map((cell) => `
+        <td class="repeat-matrix-cell">
+          <div class="repeat-matrix-count">${fmtNum(cell.value)}</div>
+          <div class="repeat-matrix-delta ${cell.delta >= 0 ? "good" : "bad"}">${cell.value && cell.delta ? escHtml(formatSignedPct(cell.delta)) : "—"}</div>
+        </td>`).join("")}
+      <td class="repeat-matrix-total">
+        <div class="repeat-matrix-count">${fmtNum(row.total)}</div>
+        <div class="repeat-matrix-delta ${row.latest_delta >= 0 ? "good" : "bad"}">${row.latest_value && row.latest_delta ? escHtml(formatSignedPct(row.latest_delta)) : "—"}</div>
+      </td>
+    </tr>`).join("");
+  return `
+    <div class="mini-table-wrap repeat-matrix-wrap">
+      <table class="mini-table repeat-matrix-table">
+        <thead>
+          <tr>
+            <th>Return issue</th>
+            ${cols}
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderMixListHtml(rows) {
@@ -2545,6 +2798,26 @@ function toggleFilterValue(key, value, checked) {
   }
 }
 
+function bucketKeyForDate(rawDate, bucketMode) {
+  if (bucketMode === "monthly") {
+    return `${rawDate.getFullYear()}-${String(rawDate.getMonth() + 1).padStart(2, "0")}`;
+  }
+  if (bucketMode === "weekly") {
+    return isoDate(startOfWeek(rawDate));
+  }
+  return isoDate(rawDate);
+}
+
+function bucketLabelForDate(rawDate, bucketMode) {
+  if (bucketMode === "monthly") {
+    return rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", month: "short", year: "2-digit" });
+  }
+  if (bucketMode === "weekly") {
+    return startOfWeek(rawDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
+  }
+  return rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
+}
+
 function bucketTimeline(points, mode) {
   if (!points.length) return [];
   const bucketMode = resolveBucketMode(points, mode);
@@ -2552,16 +2825,8 @@ function bucketTimeline(points, mode) {
   points.forEach((point) => {
     const rawDate = toDate(point.date || point.metric_date);
     if (!rawDate) return;
-    const key = bucketMode === "monthly"
-      ? `${rawDate.getFullYear()}-${String(rawDate.getMonth() + 1).padStart(2, "0")}`
-      : bucketMode === "weekly"
-        ? isoDate(startOfWeek(rawDate))
-        : isoDate(rawDate);
-    const label = bucketMode === "monthly"
-      ? rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", month: "short", year: "2-digit" })
-      : bucketMode === "weekly"
-        ? startOfWeek(rawDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" })
-        : rawDate.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
+    const key = bucketKeyForDate(rawDate, bucketMode);
+    const label = bucketLabelForDate(rawDate, bucketMode);
     if (!grouped.has(key)) grouped.set(key, {
       label,
       tickets: 0,
