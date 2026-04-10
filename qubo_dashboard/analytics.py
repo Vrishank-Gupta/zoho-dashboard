@@ -1347,6 +1347,11 @@ class AnalyticsService:
     def _ratio(self, numerator: int, denominator: int) -> float:
         return numerator / denominator if denominator else 0.0
 
+    def _previous_period(self, start_date: date, end_date: date) -> tuple[date, date]:
+        previous_end = start_date - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=(end_date - start_date).days)
+        return previous_start, previous_end
+
     def _issue_payload(self, issue: AggregateIssue) -> dict[str, Any]:
         return {
             "issue_id": issue.issue_id,
