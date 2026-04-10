@@ -978,6 +978,18 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   margin-bottom: 12px;
 }
 
+.repeat-matrix-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.repeat-matrix-sort-tabs .segment-btn {
+  min-width: 132px;
+}
+
 .repeat-matrix-header h3 {
   margin: 0 0 4px;
 }

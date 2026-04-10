@@ -96,6 +96,12 @@ const BUCKET_MODES = [
   { key: "monthly", label: "Monthly" },
 ];
 
+const REPEAT_MATRIX_SORTS = [
+  { key: "latest_delta", label: "Latest change" },
+  { key: "total", label: "Total returns" },
+  { key: "latest_value", label: "Latest period" },
+];
+
 const NONE_SENTINEL = "__NONE__";
 
 const QUICK_PRESETS = [
@@ -196,6 +202,7 @@ const state = {
     returnChannel: "",
     query: "",
   },
+  repeatMatrixSort: "latest_delta",
   drilldownRefreshTimer: null,
   currentDrilldownMeta: null,
 };
@@ -1419,6 +1426,7 @@ async function openRepeatDrilldown(kind, label, secondary = "") {
     returnChannel: "",
     query: "",
   };
+  state.repeatMatrixSort = "latest_delta";
   state.currentDrilldownMeta = { kind, label, secondary };
   state.currentDrilldownKind = "repeat";
   state.currentDrilldownTab = "overview";
@@ -1883,6 +1891,7 @@ function closeDrilldown() {
     returnChannel: "",
     query: "",
   };
+  state.repeatMatrixSort = "latest_delta";
   state.drilldownRefreshTimer = null;
   state.currentDrilldownMeta = null;
   if (els.drilldownFilters) els.drilldownFilters.innerHTML = "";
@@ -1933,7 +1942,10 @@ function renderRepeatDrilldownPanels(drilldown) {
             <h3>Issue recurrence matrix</h3>
             <p>Compare repeat issues period by period with resolution and channel context.</p>
           </div>
-          <div class="mix-value">${fmtNum(matrix.rows.length)} issues</div>
+          <div class="repeat-matrix-actions">
+            <div class="mix-value">${fmtNum(matrix.rows.length)} issues</div>
+            <div class="segmented repeat-matrix-sort-tabs" id="repeatMatrixSortTabs"></div>
+          </div>
         </div>
         ${renderRepeatTrendMatrix(matrix)}
       </div>
@@ -1987,6 +1999,15 @@ function renderRepeatDrilldownPanels(drilldown) {
       ])}</div>
     </section>`;
   bindRepeatDrilldownLocalFilters();
+  renderSegmented(
+    els.drilldownBody.querySelector("#repeatMatrixSortTabs"),
+    REPEAT_MATRIX_SORTS,
+    state.repeatMatrixSort,
+    (value) => {
+      state.repeatMatrixSort = value;
+      renderRepeatDrilldownPanels(state.currentDrilldown || {});
+    },
+  );
   els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
     button.addEventListener("click", () => {
       state.categoryDrilldownBucket = button.dataset.categoryBucket || "daily";
@@ -2166,9 +2187,20 @@ function buildRepeatTrendMatrix(rows, bucketMode) {
         latest_delta: latest.delta,
       };
     })
-    .sort((a, b) => b.total - a.total || b.latest_value - a.latest_value || a.issue_label.localeCompare(b.issue_label))
+    .sort((a, b) => compareRepeatMatrixRows(a, b))
     .slice(0, 15);
   return { periods, rows: rowsOut };
+}
+
+function compareRepeatMatrixRows(a, b) {
+  const sortKey = state.repeatMatrixSort || "latest_delta";
+  if (sortKey === "total") {
+    return b.total - a.total || b.latest_value - a.latest_value || b.latest_delta - a.latest_delta || a.issue_label.localeCompare(b.issue_label);
+  }
+  if (sortKey === "latest_value") {
+    return b.latest_value - a.latest_value || b.total - a.total || b.latest_delta - a.latest_delta || a.issue_label.localeCompare(b.issue_label);
+  }
+  return b.latest_delta - a.latest_delta || b.latest_value - a.latest_value || b.total - a.total || a.issue_label.localeCompare(b.issue_label);
 }
 
 function renderRepeatTrendMatrix(model) {
