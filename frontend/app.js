@@ -205,6 +205,8 @@ const state = {
   repeatMatrixSort: "latest_delta",
   drilldownRefreshTimer: null,
   currentDrilldownMeta: null,
+  dashboardRequestId: 0,
+  warmCacheSignature: "",
 };
 state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
 
@@ -414,13 +416,16 @@ function bindEvents() {
 }
 
 async function loadDashboard() {
+  const requestId = ++state.dashboardRequestId;
   const hadPayload = Boolean(state.payload);
   if (!hadPayload) renderLoading();
+  setDashboardBusy(true);
   const params = buildQueryParams(state.filters, { includeOverrides: false });
   try {
     const response = await fetch(`${apiUrl("/api/dashboard")}?${params.toString()}`);
     if (!response.ok) throw new Error(`API ${response.status}`);
     const payload = await response.json();
+    if (requestId !== state.dashboardRequestId) return;
     state.payload = payload;
     state.mappingStudioData = null;
     state.options = payload.filter_options || {};
@@ -439,7 +444,9 @@ async function loadDashboard() {
     renderTimeBucketControls();
       renderFilterControls();
       renderDashboard(payload);
+      warmCommonDashboardWindows();
     } catch (error) {
+      if (requestId !== state.dashboardRequestId) return;
       if (!hadPayload) {
         renderError(error);
         return;
@@ -450,8 +457,64 @@ async function loadDashboard() {
         "Refresh delayed",
         error?.message || "Latest dashboard refresh failed temporarily. Keeping the previous view on screen.",
       );
+    } finally {
+      if (requestId === state.dashboardRequestId) setDashboardBusy(false);
     }
   }
+
+function setDashboardBusy(isBusy) {
+  document.body.classList.toggle("dashboard-busy", Boolean(isBusy));
+  if (els.quickPresets) {
+    els.quickPresets.querySelectorAll("button").forEach((button) => {
+      button.disabled = Boolean(isBusy);
+    });
+  }
+}
+
+function warmCommonDashboardWindows() {
+  const bounds = state.options.date_bounds || {};
+  if (!bounds.max) return;
+  const filterFingerprint = JSON.stringify({
+    exclude_installation: state.filters.exclude_installation,
+    exclude_blank_chat: state.filters.exclude_blank_chat,
+    exclude_unclassified_blank: state.filters.exclude_unclassified_blank,
+    categories: state.filters.categories,
+    products: state.filters.products,
+    efcs: state.filters.efcs,
+    departments: state.filters.departments,
+    channels: state.filters.channels,
+    bot_actions: state.filters.bot_actions,
+    include_fc1: state.filters.include_fc1,
+    exclude_fc1: state.filters.exclude_fc1,
+    include_fc2: state.filters.include_fc2,
+    exclude_fc2: state.filters.exclude_fc2,
+    include_bot_action: state.filters.include_bot_action,
+    exclude_bot_action: state.filters.exclude_bot_action,
+    max: bounds.max,
+  });
+  if (state.warmCacheSignature === filterFingerprint) return;
+  state.warmCacheSignature = filterFingerprint;
+  const presets = QUICK_PRESETS.filter((preset) => preset.key !== state.activePreset);
+  const warmNext = (index) => {
+    const preset = presets[index];
+    if (!preset) return;
+    const warmedFilters = structuredClone(state.filters);
+    if (preset.key === "all") {
+      warmedFilters.date_start = bounds.min || bounds.max;
+      warmedFilters.date_end = bounds.max;
+    } else {
+      warmedFilters.date_start = clampIsoDate(shiftIsoDate(bounds.max, -(preset.days || 0)), bounds.min, bounds.max);
+      warmedFilters.date_end = bounds.max;
+    }
+    const params = buildQueryParams(warmedFilters, { includeOverrides: false });
+    window.setTimeout(() => {
+      fetch(`${apiUrl("/api/dashboard")}?${params.toString()}`, { cache: "no-store" })
+        .catch(() => {})
+        .finally(() => warmNext(index + 1));
+    }, index === 0 ? 1000 : 200);
+  };
+  warmNext(0);
+}
 
 function applyDefaultSelections() {
   if (state.defaultSelectionsApplied) return false;

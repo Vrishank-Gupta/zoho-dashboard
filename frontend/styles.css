@@ -286,6 +286,27 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   transition: 140ms ease;
 }
 
+.dashboard-busy .board-panel,
+.dashboard-busy .chart-panel,
+.dashboard-busy .kpi-card {
+  cursor: progress;
+}
+
+.dashboard-busy .preset-btn {
+  opacity: 0.58;
+  cursor: progress;
+}
+
+.dashboard-busy .source-pill::after {
+  content: "Refreshing...";
+  margin-left: 10px;
+  color: var(--accent);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .ghost-btn,
 .primary-btn,
 .preset-btn,
