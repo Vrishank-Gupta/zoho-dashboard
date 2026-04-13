@@ -579,7 +579,7 @@ def tickets(
 @app.api_route("/", methods=["GET", "HEAD"])
 def index():
     if settings.serve_frontend:
-        return FileResponse(FRONTEND_DIR / "index.html")
+        return _frontend_file("index.html")
     return {
         "service": "Qubo Support Health API",
         "status": "ok",
@@ -593,28 +593,39 @@ def index():
 def admin_index():
     if not settings.serve_frontend:
         raise HTTPException(status_code=404, detail="Not Found")
-    return FileResponse(FRONTEND_DIR / "index.html")
+    return _frontend_file("index.html")
 
 
 @app.api_route("/styles.css", methods=["GET", "HEAD"])
 def frontend_styles():
     if not settings.serve_frontend:
         raise HTTPException(status_code=404, detail="Not Found")
-    return FileResponse(FRONTEND_DIR / "styles.css")
+    return _frontend_file("styles.css")
 
 
 @app.api_route("/app.js", methods=["GET", "HEAD"])
 def frontend_app():
     if not settings.serve_frontend:
         raise HTTPException(status_code=404, detail="Not Found")
-    return FileResponse(FRONTEND_DIR / "app.js")
+    return _frontend_file("app.js")
 
 
 @app.api_route("/config.js", methods=["GET", "HEAD"])
 def frontend_config():
     if not settings.serve_frontend:
         raise HTTPException(status_code=404, detail="Not Found")
-    return FileResponse(FRONTEND_DIR / "config.js")
+    return _frontend_file("config.js")
+
+
+def _frontend_file(filename: str) -> FileResponse:
+    return FileResponse(
+        FRONTEND_DIR / filename,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/api/pipeline/status")

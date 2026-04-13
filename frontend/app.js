@@ -422,11 +422,15 @@ async function loadDashboard() {
   setDashboardBusy(true);
   normalizeAllSelectedFiltersInPlace();
   const params = buildQueryParams(state.filters, { includeOverrides: false });
+  params.set("_request_id", String(requestId));
   try {
-    const response = await fetch(`${apiUrl("/api/dashboard")}?${params.toString()}`);
+    const response = await fetch(`${apiUrl("/api/dashboard")}?${params.toString()}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`API ${response.status}`);
     const payload = await response.json();
     if (requestId !== state.dashboardRequestId) return;
+    if (!payloadMatchesSelectedWindow(payload)) {
+      throw new Error(`Date response mismatch: selected ${state.filters.date_start || "open"} to ${state.filters.date_end || "open"}, received ${payload?.meta?.window_start || "unknown"} to ${payload?.meta?.window_end || "unknown"}`);
+    }
     state.payload = payload;
     state.mappingStudioData = null;
     state.options = payload.filter_options || {};
@@ -460,7 +464,14 @@ async function loadDashboard() {
     } finally {
       if (requestId === state.dashboardRequestId) setDashboardBusy(false);
     }
-  }
+}
+
+function payloadMatchesSelectedWindow(payload) {
+  const meta = payload?.meta || {};
+  if (state.filters.date_start && meta.window_start && state.filters.date_start !== meta.window_start) return false;
+  if (state.filters.date_end && meta.window_end && state.filters.date_end !== meta.window_end) return false;
+  return true;
+}
 
 function setDashboardBusy(isBusy) {
   document.body.classList.toggle("dashboard-busy", Boolean(isBusy));
