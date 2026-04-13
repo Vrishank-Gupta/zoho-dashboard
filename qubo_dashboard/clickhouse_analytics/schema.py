@@ -218,6 +218,6 @@ def bootstrap_statements() -> list[str]:
         )
         ENGINE = ReplacingMergeTree(generated_at)
         ORDER BY (cache_group, cache_key)
-        TTL expires_at
+        TTL toDateTime(expires_at)
         """.strip(),
     ]
