@@ -424,7 +424,7 @@ async function loadDashboard() {
   const params = buildQueryParams(state.filters, { includeOverrides: false });
   params.set("_request_id", String(requestId));
   try {
-    const response = await fetch(`${apiUrl("/api/dashboard")}?${params.toString()}`, { cache: "no-store" });
+    const response = await fetch(apiUrlWithParams("/api/dashboard", params), { cache: "no-store" });
     if (!response.ok) throw new Error(`API ${response.status}`);
     const payload = await response.json();
     if (requestId !== state.dashboardRequestId) return;
@@ -519,7 +519,7 @@ function warmCommonDashboardWindows() {
     }
     const params = buildQueryParams(warmedFilters, { includeOverrides: false });
     window.setTimeout(() => {
-      fetch(`${apiUrl("/api/dashboard")}?${params.toString()}`, { cache: "no-store" })
+      fetch(apiUrlWithParams("/api/dashboard", params), { cache: "no-store" })
         .catch(() => {})
         .finally(() => warmNext(index + 1));
     }, index === 0 ? 1000 : 200);
@@ -1450,7 +1450,7 @@ async function loadMappingStudio() {
   renderMappingStudio(state.mappingStudioData || {});
   try {
     const params = buildQueryParams(state.filters, { includeOverrides: false });
-    const response = await fetch(`${apiUrl("/api/mapping-studio")}?${params.toString()}`);
+    const response = await fetch(apiUrlWithParams("/api/mapping-studio", params));
     if (!response.ok) throw new Error(`API ${response.status}`);
     const payload = await response.json();
     state.mappingStudioData = payload.mapping_studio || {};
@@ -1601,7 +1601,7 @@ async function openIssueDrilldown(issueId, options = {}) {
   return;
   try {
     const params = buildQueryParams(state.filters);
-    const response = await fetch(`${apiUrl(`/api/drilldown/issue/${encodeURIComponent(issueId)}`)}?${params.toString()}`);
+    const response = await fetch(apiUrlWithParams(`/api/drilldown/issue/${encodeURIComponent(issueId)}`, params));
     const payload = await response.json();
     const issue = payload.issue || {};
     els.drilldownTitle.textContent = issue.fault_code_level_2 || "Issue detail";
@@ -1814,7 +1814,7 @@ async function refreshCurrentDrilldown() {
     const params = buildQueryParams(state.drilldownFilters || state.filters);
     params.set("category", state.currentDrilldownMeta?.category || "");
     params.set("product_name", state.currentDrilldownMeta?.product_name || "");
-    const response = await fetch(`${apiUrl("/api/drilldown/product")}?${params.toString()}`);
+    const response = await fetch(apiUrlWithParams("/api/drilldown/product", params));
     const payload = await response.json();
     state.currentDrilldown = payload.drilldown || {};
     renderDrilldownFilters();
@@ -1824,7 +1824,7 @@ async function refreshCurrentDrilldown() {
   if (state.currentDrilldownKind === "category") {
     const params = buildQueryParams(state.drilldownFilters || state.filters);
     params.set("category", state.currentDrilldownMeta?.category || "");
-    const response = await fetch(`${apiUrl("/api/drilldown/category")}?${params.toString()}`);
+    const response = await fetch(apiUrlWithParams("/api/drilldown/category", params));
     const payload = await response.json();
     state.currentCategoryDrilldown = payload.drilldown || {};
     state.currentDrilldown = state.currentCategoryDrilldown;
@@ -1834,7 +1834,7 @@ async function refreshCurrentDrilldown() {
   }
   if (state.currentDrilldownKind === "issue") {
     const params = buildQueryParams(state.drilldownFilters || state.filters);
-    const response = await fetch(`${apiUrl(`/api/drilldown/issue/${encodeURIComponent(state.currentDrilldownMeta?.issue_id || "")}`)}?${params.toString()}`);
+    const response = await fetch(apiUrlWithParams(`/api/drilldown/issue/${encodeURIComponent(state.currentDrilldownMeta?.issue_id || "")}`, params));
     const payload = await response.json();
     const issue = payload.issue || {};
     els.drilldownTitle.textContent = issue.fault_code_level_2 || "Issue detail";
@@ -1848,7 +1848,7 @@ async function refreshCurrentDrilldown() {
     params.set("kind", state.currentDrilldownMeta?.kind || "");
     params.set("label", state.currentDrilldownMeta?.label || "");
     if (state.currentDrilldownMeta?.secondary) params.set("secondary", state.currentDrilldownMeta.secondary);
-    const response = await fetch(`${apiUrl("/api/drilldown/repeat")}?${params.toString()}`);
+    const response = await fetch(apiUrlWithParams("/api/drilldown/repeat", params));
     const payload = await response.json();
     state.currentDrilldown = payload.drilldown || {};
     renderRepeatDrilldownPanels(state.currentDrilldown);
@@ -3213,6 +3213,13 @@ async function uploadActiveMappingCsv(event) {
 function apiUrl(path) {
   const separator = path.includes("?") ? "&" : "?";
   return `${state.apiBaseUrl}${path}${separator}_ts=${Date.now()}`;
+}
+
+function apiUrlWithParams(path, params) {
+  const base = apiUrl(path);
+  const query = params.toString();
+  if (!query) return base;
+  return `${base}&${query}`;
 }
 
 function fmtNum(value) {
