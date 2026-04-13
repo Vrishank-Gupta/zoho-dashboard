@@ -188,7 +188,8 @@ class ClickHouseETLJob:
         if last_loaded_date is None:
             days = (yesterday - start_date).days + 1
             return [start_date + timedelta(days=index) for index in range(days)]
-        refresh_start = max(start_date, last_loaded_date)
+        lookback_days = max(1, settings.etl_refresh_lookback_days)
+        refresh_start = max(start_date, last_loaded_date - timedelta(days=lookback_days - 1))
         if refresh_start > yesterday:
             return []
         days = (yesterday - refresh_start).days + 1

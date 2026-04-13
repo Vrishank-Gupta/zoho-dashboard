@@ -70,6 +70,7 @@ class Settings:
     etl_batch_size: int = int(os.getenv("QUBO_ETL_BATCH_SIZE", "5000"))
     etl_backfill_days: int = int(os.getenv("QUBO_ETL_BACKFILL_DAYS", "90"))
     etl_overlap_hours: int = int(os.getenv("QUBO_ETL_OVERLAP_HOURS", "24"))
+    etl_refresh_lookback_days: int = int(os.getenv("QUBO_ETL_REFRESH_LOOKBACK_DAYS", "7"))
     etl_job_name: str = os.getenv("QUBO_ETL_JOB_NAME", "mysql_to_clickhouse")
     agg_daily_tickets_table: str = os.getenv("QUBO_AGG_DAILY_TICKETS_TABLE", "agg_daily_tickets")
     agg_fc_weekly_table: str = os.getenv("QUBO_AGG_FC_WEEKLY_TABLE", "agg_fc_weekly")
