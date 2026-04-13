@@ -444,7 +444,6 @@ async function loadDashboard() {
     renderTimeBucketControls();
       renderFilterControls();
       renderDashboard(payload);
-      warmCommonDashboardWindows();
     } catch (error) {
       if (requestId !== state.dashboardRequestId) return;
       if (!hadPayload) {
@@ -2875,7 +2874,8 @@ function renderDeltaLine(points, mode, width, height, pad, innerW, innerH) {
 
 function buildQueryParams(filters, options = {}) {
   const params = new URLSearchParams();
-  Object.entries(filters).forEach(([key, value]) => {
+  const effectiveFilters = getEffectiveQueryFilters(filters);
+  Object.entries(effectiveFilters).forEach(([key, value]) => {
     if (Array.isArray(value)) value.forEach((item) => params.append(key, item));
     else if (value) params.set(key, value);
   });
@@ -2884,6 +2884,31 @@ function buildQueryParams(filters, options = {}) {
     params.set("mapping_overrides", JSON.stringify(overrides));
   }
   return params;
+}
+
+function getEffectiveQueryFilters(filters) {
+  const effective = structuredClone(filters);
+  CONTROLS.forEach((control) => {
+    const value = effective[control.key];
+    if (!Array.isArray(value) || !value.length) return;
+    if (control.key.startsWith("exclude_")) return;
+    const available = getControlOptions(control).map((item) => item.label);
+    if (available.length && isSameSelection(value, available)) {
+      effective[control.key] = [];
+    }
+  });
+  return effective;
+}
+
+function isSameSelection(selected, available) {
+  const normalize = (value) => String(value || "").trim();
+  const selectedSet = new Set(selected.map(normalize).filter(Boolean));
+  const availableSet = new Set(available.map(normalize).filter(Boolean));
+  if (selectedSet.size !== availableSet.size) return false;
+  for (const item of availableSet) {
+    if (!selectedSet.has(item)) return false;
+  }
+  return true;
 }
 
 function reconcileFilterState() {
