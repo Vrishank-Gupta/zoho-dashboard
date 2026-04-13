@@ -208,4 +208,16 @@ def bootstrap_statements() -> list[str]:
         PARTITION BY toYYYYMM(started_at)
         ORDER BY (job_name, started_at)
         """.strip(),
+        f"""
+        CREATE TABLE IF NOT EXISTS {settings.clickhouse.database}.{settings.clickhouse_dashboard_cache_table} (
+            cache_key String,
+            cache_group LowCardinality(String),
+            generated_at DateTime64(3, 'UTC'),
+            expires_at DateTime64(3, 'UTC'),
+            payload String
+        )
+        ENGINE = ReplacingMergeTree(generated_at)
+        ORDER BY (cache_group, cache_key)
+        TTL expires_at
+        """.strip(),
     ]

@@ -28,7 +28,7 @@ FRONTEND_DIR = BASE_DIR / "frontend"
 
 repository = TicketRepository()
 service = AnalyticsService(repository)
-pipeline_manager = PipelineManager()
+pipeline_manager = PipelineManager(after_success=service.precompute_standard_dashboard_cache)
 
 
 def build_filters(

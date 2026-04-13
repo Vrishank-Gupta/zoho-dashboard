@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from contextlib import closing
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+import json
 
 from ..config import settings
 from ..models import DashboardFilters
@@ -33,6 +34,50 @@ class ClickHouseAnalyticsRepository:
             return bool(self._query("SELECT 1 AS ok")[0]["ok"])
         except Exception:
             return False
+
+    def fetch_dashboard_cache(self, cache_key: str) -> dict | None:
+        try:
+            rows = self._query(
+                f"""
+                SELECT payload
+                FROM {settings.clickhouse_dashboard_cache_table} FINAL
+                WHERE cache_key = {self._quote(cache_key)}
+                  AND expires_at > now64(3)
+                ORDER BY generated_at DESC
+                LIMIT 1
+                """
+            )
+        except Exception:
+            return None
+        if not rows:
+            return None
+        try:
+            return json.loads(rows[0]["payload"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+
+    def store_dashboard_cache(self, cache_key: str, cache_group: str, payload: dict, ttl_hours: int = 24) -> None:
+        generated_at = datetime.now(UTC)
+        expires_at = generated_at + timedelta(hours=ttl_hours)
+        try:
+            with closing(self._client()) as client:
+                client.insert(
+                    settings.clickhouse_dashboard_cache_table,
+                    [[cache_key, cache_group, generated_at, expires_at, json.dumps(payload, default=str)]],
+                    column_names=["cache_key", "cache_group", "generated_at", "expires_at", "payload"],
+                )
+        except Exception:
+            return
+
+    def clear_dashboard_cache(self, cache_group: str = "dashboard") -> None:
+        try:
+            with closing(self._client()) as client:
+                client.command(
+                    f"ALTER TABLE {settings.clickhouse_dashboard_cache_table} DELETE WHERE cache_group = {self._quote(cache_group)}",
+                    settings={"mutations_sync": 1},
+                )
+        except Exception:
+            return
 
     def _fetch_metric_bounds(self) -> tuple[date | None, date | None]:
         now = datetime.utcnow()

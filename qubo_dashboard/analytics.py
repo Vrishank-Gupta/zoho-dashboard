@@ -80,12 +80,65 @@ class AnalyticsService:
             return cached
         if self._clickhouse and settings.analytics_backend == "clickhouse":
             try:
+                cache_filters = self._dashboard_cache_filters(filters)
+                cache_key = self._cache_key("dashboard", cache_filters)
+                persistent_cached = self._clickhouse.fetch_dashboard_cache(cache_key)
+                if persistent_cached is not None:
+                    self._cache_set("dashboard", filters, persistent_cached)
+                    return persistent_cached
                 payload = self._build_from_clickhouse(filters)
                 self._cache_set("dashboard", filters, payload)
+                self._clickhouse.store_dashboard_cache(cache_key, "dashboard", payload)
                 return payload
             except Exception as exc:
                 return self._build_seeded(filters, str(exc))
         return self._build_seeded(filters, "ClickHouse is not configured.")
+
+    def precompute_standard_dashboard_cache(self) -> int:
+        if not (self._clickhouse and settings.analytics_backend == "clickhouse"):
+            return 0
+        self.invalidate_cache()
+        self._clickhouse.clear_dashboard_cache("dashboard")
+        max_date = self._clickhouse.fetch_max_metric_date()
+        min_date = self._clickhouse.fetch_min_metric_date()
+        if not max_date or not min_date:
+            return 0
+        presets = [
+            ("30d", max(min_date, max_date - timedelta(days=29)), max_date),
+            ("60d", max(min_date, max_date - timedelta(days=59)), max_date),
+            ("90d", max(min_date, max_date - timedelta(days=89)), max_date),
+            ("all", min_date, max_date),
+        ]
+        shortcut_states = []
+        for exclude_installation in (False, True):
+            for exclude_blank_chat in (False, True):
+                for exclude_unclassified_blank in (False, True):
+                    shortcut_states.append((exclude_installation, exclude_blank_chat, exclude_unclassified_blank))
+        count = 0
+        for _, start_date, end_date in presets:
+            for exclude_installation, exclude_blank_chat, exclude_unclassified_blank in shortcut_states:
+                filters = DashboardFilters(
+                    date_start=start_date.isoformat(),
+                    date_end=end_date.isoformat(),
+                    exclude_installation=exclude_installation,
+                    exclude_blank_chat=exclude_blank_chat,
+                    exclude_unclassified_blank=exclude_unclassified_blank,
+                )
+                payload = self._build_from_clickhouse(filters)
+                cache_key = self._cache_key("dashboard", filters)
+                self._clickhouse.store_dashboard_cache(cache_key, "dashboard", payload)
+                self._cache_set("dashboard", filters, payload)
+                count += 1
+        return count
+
+    def _dashboard_cache_filters(self, filters: DashboardFilters) -> DashboardFilters:
+        """Use the resolved date window as the cache key so first-load defaults hit precomputed views."""
+        if not self._clickhouse:
+            return filters
+        max_date = self._clickhouse.fetch_max_metric_date()
+        min_date = self._clickhouse.fetch_min_metric_date()
+        start_date, end_date = self._resolve_window(filters, min_date, max_date)
+        return replace(filters, date_start=start_date.isoformat(), date_end=end_date.isoformat())
 
     def get_issue_tickets(self, filters: DashboardFilters, issue_id: str) -> dict[str, Any]:
         issue = self._find_issue(filters, issue_id)

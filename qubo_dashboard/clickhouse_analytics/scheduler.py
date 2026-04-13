@@ -17,6 +17,14 @@ def run_job() -> None:
     LOGGER.info("Starting ETL job %s", settings.etl_job_name)
     result = ClickHouseETLJob().run()
     LOGGER.info(result.message)
+    try:
+        from ..analytics import AnalyticsService
+        from ..repository import TicketRepository
+
+        cached = AnalyticsService(TicketRepository()).precompute_standard_dashboard_cache()
+        LOGGER.info("Precomputed %s dashboard views", cached)
+    except Exception:
+        LOGGER.exception("Dashboard cache precompute failed")
 
 
 def main() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from threading import Lock, Thread
-from typing import Any
+from typing import Any, Callable
 
 from ..clickhouse_analytics import ClickHouseETLJob
 from ..config import settings
@@ -23,9 +23,10 @@ class PipelineState:
 
 
 class PipelineManager:
-    def __init__(self) -> None:
+    def __init__(self, after_success: Callable[[], Any] | None = None) -> None:
         self._lock = Lock()
         self._state = PipelineState()
+        self._after_success = after_success
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -66,6 +67,10 @@ class PipelineManager:
                 message = result.message
             else:
                 run_pipeline()
+            if self._after_success:
+                cached = self._after_success()
+                if cached:
+                    message = f"{message}; precomputed_dashboard_views={cached}"
         except Exception as exc:
             status = "Failed"
             message = str(exc)

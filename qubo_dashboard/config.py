@@ -63,6 +63,7 @@ class Settings:
     clickhouse_daily_summary_table: str = os.getenv("QUBO_CLICKHOUSE_DAILY_SUMMARY_TABLE", "tickets_daily_summary")
     clickhouse_issues_summary_table: str = os.getenv("QUBO_CLICKHOUSE_ISSUES_SUMMARY_TABLE", "issues_daily_summary")
     clickhouse_repeat_events_table: str = os.getenv("QUBO_CLICKHOUSE_REPEAT_EVENTS_TABLE", "repeat_ticket_events")
+    clickhouse_dashboard_cache_table: str = os.getenv("QUBO_CLICKHOUSE_DASHBOARD_CACHE_TABLE", "dashboard_precomputed_cache")
     clickhouse_sync_state_table: str = os.getenv("QUBO_CLICKHOUSE_SYNC_STATE_TABLE", "etl_sync_state")
     clickhouse_run_log_table: str = os.getenv("QUBO_CLICKHOUSE_RUN_LOG_TABLE", "etl_run_log")
     etl_schedule: str = os.getenv("QUBO_ETL_SCHEDULE", "0 2 * * *")
