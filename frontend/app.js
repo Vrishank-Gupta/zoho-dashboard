@@ -645,6 +645,7 @@ function renderDateToolbar() {
     button.addEventListener("click", () => {
       if (!bounds.max) return;
       state.activePreset = button.dataset.preset || "";
+      els.quickPresets.querySelectorAll("button").forEach((btn) => btn.classList.toggle("active", btn === button));
       if (state.activePreset === "all") {
         state.filters.date_start = bounds.min || bounds.max;
         state.filters.date_end = bounds.max;
