@@ -65,10 +65,14 @@ class AnalyticsService:
         self._cache: dict[str, tuple[float, Any]] = {}
         self._freshness_ttl_seconds = 300
         self._freshness_cache: tuple[float, dict[str, str]] | None = None
+        self._product_category_cache: dict[tuple[str, str, tuple[tuple[str, str], ...]], str] = {}
+        self._efc_cache: dict[tuple[str, str, tuple[tuple[str, str], ...]], str] = {}
 
     def invalidate_cache(self) -> None:
         self._cache.clear()
         self._freshness_cache = None
+        self._product_category_cache.clear()
+        self._efc_cache.clear()
 
     def build_dashboard(self, filters: DashboardFilters) -> dict[str, Any]:
         cached = self._cache_get("dashboard", filters)
@@ -1092,12 +1096,22 @@ class AnalyticsService:
         product_name = str(mapped.get("product_name") or mapped.get("product") or mapped.get("product_family") or "Blank Product")
         product_family = str(mapped.get("product_family") or mapped.get("canonical_product") or "")
         mapped["product_name"] = product_name
-        mapped["product_category"] = map_product_category(product_name, product_family, filters.product_category_overrides)
-        mapped["executive_fault_code"] = map_executive_fault_code(
-            mapped.get("fault_code_level_1") or mapped.get("normalized_fault_code_l1"),
-            mapped.get("fault_code_level_2") or mapped.get("normalized_fault_code_l2"),
-            filters.efc_overrides,
-        )
+        product_overrides = tuple(sorted((filters.product_category_overrides or {}).items()))
+        product_key = (product_name, product_family, product_overrides)
+        product_category = self._product_category_cache.get(product_key)
+        if product_category is None:
+            product_category = map_product_category(product_name, product_family, filters.product_category_overrides)
+            self._product_category_cache[product_key] = product_category
+        mapped["product_category"] = product_category
+        fc1 = str(mapped.get("fault_code_level_1") or mapped.get("normalized_fault_code_l1") or "")
+        fc2 = str(mapped.get("fault_code_level_2") or mapped.get("normalized_fault_code_l2") or "")
+        efc_overrides = tuple(sorted((filters.efc_overrides or {}).items()))
+        efc_key = (fc1, fc2, efc_overrides)
+        efc = self._efc_cache.get(efc_key)
+        if efc is None:
+            efc = map_executive_fault_code(fc1, fc2, filters.efc_overrides)
+            self._efc_cache[efc_key] = efc
+        mapped["executive_fault_code"] = efc
         return mapped
 
     def _matches_mapping_filters(self, row: dict[str, Any], filters: DashboardFilters) -> bool:
