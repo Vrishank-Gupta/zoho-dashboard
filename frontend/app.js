@@ -420,6 +420,7 @@ async function loadDashboard() {
   const hadPayload = Boolean(state.payload);
   if (!hadPayload) renderLoading();
   setDashboardBusy(true);
+  normalizeAllSelectedFiltersInPlace();
   const params = buildQueryParams(state.filters, { includeOverrides: false });
   try {
     const response = await fetch(`${apiUrl("/api/dashboard")}?${params.toString()}`);
@@ -588,7 +589,7 @@ function renderDashboard(payload) {
   els.lastUpdated.textContent = `Last refresh: ${fmtDateTime(pipeline.last_run_at || meta.window_end || "")}`;
   const freshness = meta.freshness || {};
   const freshnessText = freshness.source_max_date && freshness.clickhouse_max_date
-    ? `Source max date: ${prettyIsoDate(freshness.source_max_date)} | ClickHouse max date: ${prettyIsoDate(freshness.clickhouse_max_date)} | Status: ${freshness.status || "Unavailable"}`
+    ? `Dashboard window: ${prettyIsoDate(meta.window_start || "")} to ${prettyIsoDate(meta.window_end || "")} | Source max date: ${prettyIsoDate(freshness.source_max_date)} | ClickHouse max date: ${prettyIsoDate(freshness.clickhouse_max_date)} | Status: ${freshness.status || "Unavailable"}`
     : "";
   if (freshnessText) {
     els.freshnessNote.classList.remove("hidden");
@@ -641,6 +642,7 @@ function renderDateToolbar() {
         state.filters.date_start = clampIsoDate(shiftIsoDate(bounds.max, -(preset?.days || 0)), bounds.min, bounds.max);
         state.filters.date_end = bounds.max;
       }
+      normalizeAllSelectedFiltersInPlace();
       syncDashboardBucketModes();
       els.dateStart.value = state.filters.date_start;
       els.dateEnd.value = state.filters.date_end;
@@ -664,6 +666,7 @@ function renderReportingShortcuts() {
       const key = button.dataset.shortcut;
       state.filters[key] = !state.filters[key];
       if (key === "exclude_unclassified_blank") applyBlankUnclassifiedShortcut(state.filters[key]);
+      normalizeAllSelectedFiltersInPlace();
       loadDashboard();
     });
   });
@@ -2898,6 +2901,18 @@ function getEffectiveQueryFilters(filters) {
     }
   });
   return effective;
+}
+
+function normalizeAllSelectedFiltersInPlace() {
+  CONTROLS.forEach((control) => {
+    const value = state.filters[control.key];
+    if (!Array.isArray(value) || !value.length) return;
+    if (control.key.startsWith("exclude_")) return;
+    const available = getControlOptions(control).map((item) => item.label);
+    if (available.length && isSameSelection(value, available)) {
+      state.filters[control.key] = [];
+    }
+  });
 }
 
 function isSameSelection(selected, available) {
