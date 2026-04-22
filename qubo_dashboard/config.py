@@ -48,6 +48,14 @@ class Settings:
     app_host: str = os.getenv("QUBO_APP_HOST", "127.0.0.1")
     app_port: int = int(os.getenv("QUBO_APP_PORT", "8000"))
     app_reload: bool = os.getenv("QUBO_APP_RELOAD", "true").lower() == "true"
+    app_log_level: str = os.getenv("QUBO_APP_LOG_LEVEL", "INFO").upper()
+    app_log_dir: str = os.getenv("QUBO_APP_LOG_DIR", "logs")
+    app_access_log_name: str = os.getenv("QUBO_APP_ACCESS_LOG_NAME", "access.log")
+    app_audit_log_name: str = os.getenv("QUBO_APP_AUDIT_LOG_NAME", "audit.log")
+    app_runtime_log_name: str = os.getenv("QUBO_APP_RUNTIME_LOG_NAME", "runtime.log")
+    app_log_max_bytes: int = int(os.getenv("QUBO_APP_LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+    app_log_backup_count: int = int(os.getenv("QUBO_APP_LOG_BACKUP_COUNT", "10"))
+    app_trust_forwarded_headers: bool = os.getenv("QUBO_APP_TRUST_FORWARDED_HEADERS", "true").lower() == "true"
     serve_frontend: bool = os.getenv("QUBO_SERVE_FRONTEND", "false").lower() == "true"
     use_sample_data: bool = os.getenv("QUBO_USE_SAMPLE_DATA", "false").lower() == "true"
     analytics_backend: str = os.getenv("QUBO_ANALYTICS_BACKEND", "clickhouse").lower()
@@ -57,6 +65,7 @@ class Settings:
     zoho_primary_key: str = os.getenv("QUBO_ZOHO_PRIMARY_KEY", "Ticket_Id")
     zoho_created_column: str = os.getenv("QUBO_ZOHO_CREATED_COLUMN", "Created_Time")
     zoho_modified_column: str = os.getenv("QUBO_ZOHO_MODIFIED_COLUMN", "Modified_Time")
+    zoho_software_version_column: str = os.getenv("QUBO_ZOHO_SOFTWARE_VERSION_COLUMN", "Software_Version")
     source_start_date: str = os.getenv("QUBO_SOURCE_START_DATE", "2026-01-01")
     mapping_workbook_path: str | None = os.getenv("QUBO_MAPPING_WORKBOOK")
     clickhouse_fact_table: str = os.getenv("QUBO_CLICKHOUSE_FACT_TABLE", "tickets_fact_recent")

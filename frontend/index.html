@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=restyle22">
+  <link rel="stylesheet" href="./styles.css?v=restyle30">
 </head>
 <body>
   <main class="board-shell">
@@ -140,6 +140,28 @@
         </div>
       </div>
       <div id="productHealthTable"></div>
+    </section>
+
+    <section class="dashboard-grid dashboard-grid-split hidden" data-dashboard-panel="true" id="dimensionBoards">
+      <div class="panel hidden" id="modelHealthPanel">
+        <div class="panel-top">
+          <div>
+            <div class="section-label">Models</div>
+            <h2 class="panel-title">Model risk board</h2>
+          </div>
+        </div>
+        <div id="modelHealthTable"></div>
+      </div>
+
+      <div class="panel hidden" id="firmwareWatchPanel">
+        <div class="panel-top">
+          <div>
+            <div class="section-label">Firmware</div>
+            <h2 class="panel-title">Firmware watchlist</h2>
+          </div>
+        </div>
+        <div id="firmwareWatchlist"></div>
+      </div>
     </section>
 
     <section class="panel" data-dashboard-panel="true">
@@ -295,6 +317,6 @@
   </div>
 
   <script src="./config.js?v=restyle11"></script>
-  <script src="./app.js?v=restyle26"></script>
+  <script src="./app.js?v=restyle30"></script>
 </body>
 </html>

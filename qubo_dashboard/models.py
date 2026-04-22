@@ -204,6 +204,8 @@ class DashboardFilters:
     exclude_unclassified_blank: bool = False
     categories: list[str] = field(default_factory=list)
     products: list[str] = field(default_factory=list)
+    device_models: list[str] = field(default_factory=list)
+    software_versions: list[str] = field(default_factory=list)
     departments: list[str] = field(default_factory=list)
     channels: list[str] = field(default_factory=list)
     efcs: list[str] = field(default_factory=list)

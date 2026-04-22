@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from time import perf_counter
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,11 +22,14 @@ from .mapping import (
     replace_efc_mapping,
     replace_product_mapping,
 )
+from .logging_utils import log_access, log_audit, make_request_id, runtime_logger, setup_logging
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 
+setup_logging()
+LOGGER = runtime_logger()
 repository = TicketRepository()
 service = AnalyticsService(repository)
 pipeline_manager = PipelineManager(after_success=service.precompute_standard_dashboard_cache)
@@ -39,6 +43,8 @@ def build_filters(
     exclude_unclassified_blank: bool = False,
     categories: list[str] | None = None,
     products: list[str] | None = None,
+    device_models: list[str] | None = None,
+    software_versions: list[str] | None = None,
     departments: list[str] | None = None,
     channels: list[str] | None = None,
     efcs: list[str] | None = None,
@@ -62,6 +68,8 @@ def build_filters(
         exclude_unclassified_blank=exclude_unclassified_blank,
         categories=categories or [],
         products=products or [],
+        device_models=device_models or [],
+        software_versions=software_versions or [],
         departments=departments or [],
         channels=channels or [],
         efcs=efcs or [],
@@ -110,11 +118,34 @@ app.add_middleware(
 
 @app.middleware("http")
 async def add_no_store_for_api(request: Request, call_next):
-    response = await call_next(request)
+    request_id = make_request_id()
+    request.state.request_id = request_id
+    started = perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        log_access(
+            request,
+            status_code=500,
+            duration_ms=(perf_counter() - started) * 1000,
+            request_id=request_id,
+        )
+        LOGGER.exception(
+            "request_failed",
+            extra={"extra_fields": {"event": "request_failed", "request_id": request_id, "path": request.url.path}},
+        )
+        raise
+    response.headers["X-Request-ID"] = request_id
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+    log_access(
+        request,
+        status_code=response.status_code,
+        duration_ms=(perf_counter() - started) * 1000,
+        request_id=request_id,
+    )
     return response
 
 @app.get("/api/dashboard")
@@ -126,6 +157,8 @@ def dashboard(
     exclude_unclassified_blank: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
+    device_models: list[str] = Query(default=[]),
+    software_versions: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
     channels: list[str] = Query(default=[]),
     efcs: list[str] = Query(default=[]),
@@ -148,6 +181,8 @@ def dashboard(
         exclude_unclassified_blank=exclude_unclassified_blank,
         categories=categories,
         products=products,
+        device_models=device_models,
+        software_versions=software_versions,
         departments=departments,
         channels=channels,
         efcs=efcs,
@@ -174,6 +209,8 @@ def mapping_studio(
     exclude_unclassified_blank: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
+    device_models: list[str] = Query(default=[]),
+    software_versions: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
     channels: list[str] = Query(default=[]),
     efcs: list[str] = Query(default=[]),
@@ -196,6 +233,8 @@ def mapping_studio(
         exclude_unclassified_blank=exclude_unclassified_blank,
         categories=categories,
         products=products,
+        device_models=device_models,
+        software_versions=software_versions,
         departments=departments,
         channels=channels,
         efcs=efcs,
@@ -240,11 +279,17 @@ async def save_mapping_overrides(request: Request) -> dict:
     )
     clear_mapping_cache()
     service.invalidate_cache()
+    log_audit(
+        request,
+        action="mapping_save",
+        details={"product_rows": len(product_rows), "fc2_rows": len(fc2_rows)},
+    )
     return {"status": "ok"}
 
 
 @app.get("/api/admin/mapping/product.csv")
-def download_product_mapping_csv() -> Response:
+def download_product_mapping_csv(request: Request) -> Response:
+    log_audit(request, action="mapping_product_csv_download")
     return Response(
         content=export_product_mapping_csv(),
         media_type="text/csv",
@@ -253,7 +298,8 @@ def download_product_mapping_csv() -> Response:
 
 
 @app.get("/api/admin/mapping/efc.csv")
-def download_efc_mapping_csv() -> Response:
+def download_efc_mapping_csv(request: Request) -> Response:
+    log_audit(request, action="mapping_efc_csv_download")
     return Response(
         content=export_efc_mapping_csv(),
         media_type="text/csv",
@@ -268,6 +314,7 @@ async def upload_product_mapping_csv(request: Request) -> dict:
     replace_product_mapping(rows)
     clear_mapping_cache()
     service.invalidate_cache()
+    log_audit(request, action="mapping_product_csv_upload", details={"rows": len(rows), "bytes": len(content.encode("utf-8"))})
     return {"status": "ok", "rows": len(rows)}
 
 
@@ -278,6 +325,7 @@ async def upload_efc_mapping_csv(request: Request) -> dict:
     replace_efc_mapping(rows)
     clear_mapping_cache()
     service.invalidate_cache()
+    log_audit(request, action="mapping_efc_csv_upload", details={"rows": len(rows), "bytes": len(content.encode("utf-8"))})
     return {"status": "ok", "rows": len(rows)}
 
 
@@ -290,6 +338,8 @@ def issue_details(
     exclude_blank_chat: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
+    device_models: list[str] = Query(default=[]),
+    software_versions: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
     channels: list[str] = Query(default=[]),
     efcs: list[str] = Query(default=[]),
@@ -311,6 +361,8 @@ def issue_details(
         exclude_blank_chat=exclude_blank_chat,
         categories=categories,
         products=products,
+        device_models=device_models,
+        software_versions=software_versions,
         departments=departments,
         channels=channels,
         efcs=efcs,
@@ -339,6 +391,8 @@ def product_drilldown(
     exclude_unclassified_blank: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
+    device_models: list[str] = Query(default=[]),
+    software_versions: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
     channels: list[str] = Query(default=[]),
     efcs: list[str] = Query(default=[]),
@@ -361,6 +415,8 @@ def product_drilldown(
         exclude_unclassified_blank=exclude_unclassified_blank,
         categories=categories,
         products=products,
+        device_models=device_models,
+        software_versions=software_versions,
         departments=departments,
         channels=channels,
         efcs=efcs,
@@ -388,6 +444,8 @@ def category_drilldown(
     exclude_unclassified_blank: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
+    device_models: list[str] = Query(default=[]),
+    software_versions: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
     channels: list[str] = Query(default=[]),
     efcs: list[str] = Query(default=[]),
@@ -410,6 +468,8 @@ def category_drilldown(
         exclude_unclassified_blank=exclude_unclassified_blank,
         categories=categories,
         products=products,
+        device_models=device_models,
+        software_versions=software_versions,
         departments=departments,
         channels=channels,
         efcs=efcs,
@@ -437,6 +497,8 @@ def issue_drilldown(
     exclude_unclassified_blank: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
+    device_models: list[str] = Query(default=[]),
+    software_versions: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
     channels: list[str] = Query(default=[]),
     efcs: list[str] = Query(default=[]),
@@ -459,6 +521,8 @@ def issue_drilldown(
         exclude_unclassified_blank=exclude_unclassified_blank,
         categories=categories,
         products=products,
+        device_models=device_models,
+        software_versions=software_versions,
         departments=departments,
         channels=channels,
         efcs=efcs,
@@ -488,6 +552,8 @@ def repeat_drilldown(
     exclude_unclassified_blank: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
+    device_models: list[str] = Query(default=[]),
+    software_versions: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
     channels: list[str] = Query(default=[]),
     efcs: list[str] = Query(default=[]),
@@ -510,6 +576,8 @@ def repeat_drilldown(
         exclude_unclassified_blank=exclude_unclassified_blank,
         categories=categories,
         products=products,
+        device_models=device_models,
+        software_versions=software_versions,
         departments=departments,
         channels=channels,
         efcs=efcs,
@@ -537,6 +605,8 @@ def tickets(
     exclude_unclassified_blank: bool = Query(default=False),
     categories: list[str] = Query(default=[]),
     products: list[str] = Query(default=[]),
+    device_models: list[str] = Query(default=[]),
+    software_versions: list[str] = Query(default=[]),
     departments: list[str] = Query(default=[]),
     channels: list[str] = Query(default=[]),
     efcs: list[str] = Query(default=[]),
@@ -559,6 +629,8 @@ def tickets(
         exclude_unclassified_blank=exclude_unclassified_blank,
         categories=categories,
         products=products,
+        device_models=device_models,
+        software_versions=software_versions,
         departments=departments,
         channels=channels,
         efcs=efcs,
@@ -629,13 +701,21 @@ def _frontend_file(filename: str) -> FileResponse:
 
 
 @app.get("/api/pipeline/status")
-def pipeline_status() -> dict:
+def pipeline_status(request: Request) -> dict:
+    log_audit(request, action="pipeline_status_view")
     return pipeline_manager.status()
 
 
 @app.post("/api/pipeline/run")
-def pipeline_run() -> dict:
-    return pipeline_manager.start(requested_by="dashboard")
+def pipeline_run(request: Request) -> dict:
+    result = pipeline_manager.start(requested_by="dashboard")
+    log_audit(
+        request,
+        action="pipeline_run",
+        outcome="accepted" if result.get("accepted") else "rejected",
+        details={"reason": result.get("reason", "")},
+    )
+    return result
 
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])

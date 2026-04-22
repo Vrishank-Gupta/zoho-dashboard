@@ -111,7 +111,9 @@ class ClickHouseAnalyticsRepository:
             metric_date,
             product_category,
             product_name,
+            device_model,
             product_family,
+            software_version,
             executive_fault_code,
             fault_code,
             fault_code_level_1,
@@ -147,7 +149,9 @@ class ClickHouseAnalyticsRepository:
             metric_date,
             product_category,
             product_name,
+            device_model,
             product_family,
+            software_version,
             executive_fault_code,
             fault_code,
             fault_code_level_1,
@@ -167,7 +171,9 @@ class ClickHouseAnalyticsRepository:
             metric_date,
             product_category,
             product_name,
+            device_model,
             product_family,
+            software_version,
             executive_fault_code,
             fault_code,
             fault_code_level_1,
@@ -193,7 +199,9 @@ class ClickHouseAnalyticsRepository:
             metric_date,
             product_category,
             product_name,
+            device_model,
             product_family,
+            software_version,
             executive_fault_code,
             fault_code,
             fault_code_level_1,
@@ -352,6 +360,17 @@ class ClickHouseAnalyticsRepository:
                 ORDER BY tickets DESC
                 """
             ),
+            "software_versions": self._query(
+                f"""
+                SELECT
+                    ifNull(nullIf(trim(BOTH ' ' FROM normalized_software_version), ''), 'Not available in source') AS label,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
               "efcs": self._query(
                   f"""
                   SELECT executive_fault_code AS label, count() AS tickets
@@ -401,11 +420,13 @@ class ClickHouseAnalyticsRepository:
                     executive_fault_code,
                     normalized_fault_code_l1 AS fault_code_level_1,
                     normalized_fault_code_l2 AS issue_detail,
+                    ifNull(nullIf(trim(BOTH ' ' FROM device_model), ''), 'Unknown') AS device_model,
+                    ifNull(nullIf(trim(BOTH ' ' FROM normalized_software_version), ''), 'Not available in source') AS software_version,
                     normalized_resolution AS resolution,
                     count() AS tickets
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE {where_sql}
-                GROUP BY metric_date, executive_fault_code, fault_code_level_1, issue_detail, resolution
+                GROUP BY metric_date, executive_fault_code, fault_code_level_1, issue_detail, device_model, software_version, resolution
                 ORDER BY metric_date, tickets DESC
                 """
             ),
@@ -419,6 +440,8 @@ class ClickHouseAnalyticsRepository:
                 "timeline": [],
                 "products": [],
                 "products_previous": [],
+                "device_models": [],
+                "device_models_previous": [],
                 "bot_actions": [],
                 "resolutions": [],
                 "statuses": [],
@@ -426,6 +449,9 @@ class ClickHouseAnalyticsRepository:
                 "fc1": [],
                 "issues": [],
                 "resolution_by_product": [],
+                "device_model_fault_daily": [],
+                "software_versions": [],
+                "software_version_fault_daily": [],
             }
         current_start, current_end = self._resolve_date_range(filters)
         previous_start, previous_end = self._previous_period(current_start, current_end)
@@ -498,6 +524,30 @@ class ClickHouseAnalyticsRepository:
                 ORDER BY tickets DESC
                 """
             ),
+            "device_models": self._query(
+                f"""
+                SELECT
+                    ifNull(nullIf(trim(BOTH ' ' FROM device_model), ''), 'Unknown') AS label,
+                    count() AS tickets,
+                    countIf(is_bot_resolved = 1) AS bot_resolved_tickets,
+                    countIf(match(lower(ifNull(status, '')), 'open|escal|pending|progress|wip')) AS open_tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+            "device_models_previous": self._query(
+                f"""
+                SELECT
+                    ifNull(nullIf(trim(BOTH ' ' FROM device_model), ''), 'Unknown') AS label,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {self._fact_filters(filters, previous_start, previous_end)} AND product_name IN ({self._quote_join(product_names)})
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
             "bot_actions": self._query(
                 f"""
                 SELECT normalized_bot_action AS label, count() AS tickets
@@ -519,6 +569,17 @@ class ClickHouseAnalyticsRepository:
             "statuses": self._query(
                 f"""
                 SELECT ifNull(status, 'Unknown') AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+            "software_versions": self._query(
+                f"""
+                SELECT
+                    ifNull(nullIf(trim(BOTH ' ' FROM normalized_software_version), ''), 'Not available in source') AS label,
+                    count() AS tickets
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE {where_sql}
                 GROUP BY label
@@ -583,6 +644,38 @@ class ClickHouseAnalyticsRepository:
                 WHERE {where_sql}
                 GROUP BY metric_date, product_name, executive_fault_code, fault_code_level_1, fault_code_level_2, resolution
                 ORDER BY product_name, metric_date, tickets DESC
+                """
+            ),
+            "device_model_fault_daily": self._query(
+                f"""
+                SELECT
+                    created_date AS metric_date,
+                    ifNull(nullIf(trim(BOTH ' ' FROM device_model), ''), 'Unknown') AS device_model,
+                    executive_fault_code,
+                    normalized_fault_code_l1 AS fault_code_level_1,
+                    normalized_fault_code_l2 AS fault_code_level_2,
+                    normalized_resolution AS resolution,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY metric_date, device_model, executive_fault_code, fault_code_level_1, fault_code_level_2, resolution
+                ORDER BY device_model, metric_date, tickets DESC
+                """
+            ),
+            "software_version_fault_daily": self._query(
+                f"""
+                SELECT
+                    created_date AS metric_date,
+                    ifNull(nullIf(trim(BOTH ' ' FROM normalized_software_version), ''), 'Not available in source') AS software_version,
+                    executive_fault_code,
+                    normalized_fault_code_l1 AS fault_code_level_1,
+                    normalized_fault_code_l2 AS fault_code_level_2,
+                    normalized_resolution AS resolution,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY metric_date, software_version, executive_fault_code, fault_code_level_1, fault_code_level_2, resolution
+                ORDER BY software_version, metric_date, tickets DESC
                 """
             ),
         }
@@ -669,6 +762,56 @@ class ClickHouseAnalyticsRepository:
                 WHERE {where_sql}
                 GROUP BY label
                 ORDER BY tickets DESC
+                """
+            ),
+            "channels": self._query(
+                f"""
+                SELECT normalized_channel AS label, count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+            "software_versions": self._query(
+                f"""
+                SELECT
+                    ifNull(nullIf(trim(BOTH ' ' FROM normalized_software_version), ''), 'Not available in source') AS label,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+            "models": self._query(
+                f"""
+                SELECT
+                    ifNull(nullIf(trim(BOTH ' ' FROM device_model), ''), 'Unknown') AS label,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY label
+                ORDER BY tickets DESC
+                """
+            ),
+            "issue_daily": self._query(
+                f"""
+                SELECT
+                    created_date AS metric_date,
+                    executive_fault_code,
+                    normalized_fault_code_l1 AS fault_code_level_1,
+                    normalized_fault_code_l2 AS issue_detail,
+                    ifNull(nullIf(trim(BOTH ' ' FROM device_model), ''), 'Unknown') AS device_model,
+                    ifNull(nullIf(trim(BOTH ' ' FROM normalized_software_version), ''), 'Not available in source') AS software_version,
+                    normalized_resolution AS resolution,
+                    normalized_department AS department,
+                    normalized_channel AS channel,
+                    count() AS tickets
+                FROM {settings.clickhouse_fact_table} FINAL
+                WHERE {where_sql}
+                GROUP BY metric_date, executive_fault_code, fault_code_level_1, issue_detail, device_model, software_version, resolution, department, channel
+                ORDER BY metric_date, tickets DESC
                 """
             ),
         }
@@ -788,7 +931,10 @@ class ClickHouseAnalyticsRepository:
         clauses: list[str] = []
         date_start, date_end = (start_date, end_date) if start_date and end_date else self._resolve_date_range(filters)
         clauses.append(f"metric_date BETWEEN toDate({self._quote_date(date_start)}) AND toDate({self._quote_date(date_end)})")
+        clauses.extend(self._in_filter("product_category", filters.categories))
         clauses.extend(self._in_filter("product_name", filters.products))
+        clauses.extend(self._in_filter("device_model", filters.device_models))
+        clauses.extend(self._in_filter("software_version", filters.software_versions))
         clauses.extend(self._in_filter("department_name", filters.departments))
         clauses.extend(self._in_filter("channel", filters.channels))
         clauses.extend(self._in_filter("fault_code_level_2", filters.issue_details))
@@ -832,7 +978,10 @@ class ClickHouseAnalyticsRepository:
         clauses: list[str] = []
         date_start, date_end = (start_date, end_date) if start_date and end_date else self._resolve_date_range(filters)
         clauses.append(f"created_date BETWEEN toDate({self._quote_date(date_start)}) AND toDate({self._quote_date(date_end)})")
+        clauses.extend(self._in_filter("product_category", filters.categories))
         clauses.extend(self._in_filter("product_name", filters.products))
+        clauses.extend(self._in_filter("ifNull(nullIf(trim(BOTH ' ' FROM device_model), ''), 'Unknown')", filters.device_models))
+        clauses.extend(self._in_filter("ifNull(nullIf(trim(BOTH ' ' FROM normalized_software_version), ''), 'Not available in source')", filters.software_versions))
         clauses.extend(self._in_filter("normalized_department", filters.departments))
         clauses.extend(self._in_filter("normalized_channel", filters.channels))
         clauses.extend(self._in_filter("normalized_fault_code_l2", filters.issue_details))

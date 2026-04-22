@@ -6,6 +6,8 @@ const DEFAULT_FILTERS = {
   exclude_unclassified_blank: false,
   categories: [],
   products: [],
+  device_models: [],
+  software_versions: [],
   efcs: [],
   departments: [],
   channels: [],
@@ -29,6 +31,8 @@ const KPI_CONFIG = [
 const CONTROLS = [
   { key: "categories", label: "Category", optionsKey: "categories" },
   { key: "products", label: "Product", optionsKey: "products" },
+  { key: "device_models", label: "Device model", optionsKey: "device_models", capabilityKey: "device_model" },
+  { key: "software_versions", label: "Firmware version", optionsKey: "software_versions", capabilityKey: "software_version" },
   { key: "efcs", label: "EFC", optionsKey: "efcs" },
   { key: "departments", label: "Support team", optionsKey: "departments" },
   { key: "channels", label: "Channel", optionsKey: "channels" },
@@ -41,7 +45,7 @@ const CONTROLS = [
   { key: "exclude_bot_action", label: "Bot action exclude", optionsKey: "bot_actions", oppositeKey: "include_bot_action" },
 ];
 
-const PRIMARY_CONTROL_KEYS = new Set(["categories", "products", "efcs", "departments", "channels", "bot_actions"]);
+const PRIMARY_CONTROL_KEYS = new Set(["categories", "products", "device_models", "efcs", "departments", "channels", "bot_actions"]);
 
 const ISSUE_VIEWS = [
   { key: "highest_volume", label: "By volume" },
@@ -69,14 +73,12 @@ const MAPPING_STUDIO_TABS = [
 const DRILLDOWN_TABS = {
   product: [
     { key: "overview", label: "Overview" },
-    { key: "analysis", label: "Issue analysis" },
   ],
   category: [
     { key: "overview", label: "Overview" },
   ],
   issue: [
     { key: "overview", label: "Overview" },
-    { key: "analysis", label: "Actions & outcomes" },
   ],
   repeat: [
     { key: "overview", label: "Overview" },
@@ -158,6 +160,7 @@ const state = {
   filters: structuredClone(DEFAULT_FILTERS),
   payload: null,
   options: {},
+  capabilities: { device_model: false, software_version: false },
   openFilter: null,
   searches: {},
   issueView: "highest_volume",
@@ -244,6 +247,11 @@ const els = {
   kpiStrip: document.getElementById("kpiStrip"),
   timelineChart: document.getElementById("timelineChart"),
   productHealthTable: document.getElementById("productHealthTable"),
+  dimensionBoards: document.getElementById("dimensionBoards"),
+  modelHealthPanel: document.getElementById("modelHealthPanel"),
+  modelHealthTable: document.getElementById("modelHealthTable"),
+  firmwareWatchPanel: document.getElementById("firmwareWatchPanel"),
+  firmwareWatchlist: document.getElementById("firmwareWatchlist"),
   repeatOverview: document.getElementById("repeatOverview"),
   repeatAging: document.getElementById("repeatAging"),
   repeatIssueMix: document.getElementById("repeatIssueMix"),
@@ -434,6 +442,7 @@ async function loadDashboard() {
     state.payload = payload;
     state.mappingStudioData = null;
     state.options = payload.filter_options || {};
+    state.capabilities = payload?.meta?.capabilities || { device_model: false, software_version: false };
     const appliedDefaults = applyDefaultSelections();
     if (appliedDefaults) {
       if (state.filters.exclude_unclassified_blank) applyBlankUnclassifiedShortcut(true);
@@ -491,6 +500,8 @@ function warmCommonDashboardWindows() {
     exclude_unclassified_blank: state.filters.exclude_unclassified_blank,
     categories: state.filters.categories,
     products: state.filters.products,
+    device_models: state.filters.device_models,
+    software_versions: state.filters.software_versions,
     efcs: state.filters.efcs,
     departments: state.filters.departments,
     channels: state.filters.channels,
@@ -593,6 +604,7 @@ function applyBlankUnclassifiedShortcut(active) {
 function renderDashboard(payload) {
   const meta = payload.meta || {};
   const pipeline = payload.pipeline_health || {};
+  state.capabilities = meta.capabilities || { device_model: false, software_version: false };
   els.headline.textContent = meta.title || "Qubo Support Executive Board";
   els.summary.textContent = meta.subtitle || "";
   els.sourceBadge.textContent = meta.source_mode === "clickhouse" ? "Live data" : "Sample data";
@@ -614,6 +626,8 @@ function renderDashboard(payload) {
   renderKpis(payload.kpis || {});
   renderTimeline(payload.timeline || []);
   renderProductHealth();
+  renderModelHealth();
+  renderFirmwareWatchlist(payload.firmware_watchlist || []);
   renderRepeatAnalysis(payload.repeat_analysis || {});
     renderIssueWidgetFilters();
     renderIssueBoard(payload.issue_views || {});
@@ -626,6 +640,54 @@ function renderDashboard(payload) {
   renderMixList(els.installationMix, payload.service_ops?.installation_mix || []);
   renderPipeline(pipeline);
   renderActiveView();
+}
+
+function renderWorkspaceScope(kind) {
+  const filters = state.drilldownFilters || {};
+  const meta = state.currentDrilldownMeta || {};
+  const chips = [];
+  const pushChip = (label, value) => {
+    const text = String(value || "").trim();
+    if (!text) return;
+    chips.push(`<span class="scope-chip"><span class="scope-chip-label">${escHtml(label)}</span><span class="scope-chip-value">${escHtml(text)}</span></span>`);
+  };
+  if (kind === "product") {
+    pushChip("Category", meta.category || "");
+    pushChip("Product", meta.product_name || "");
+  } else if (kind === "category") {
+    pushChip("Category", meta.category || "");
+  } else if (kind === "issue") {
+    pushChip("Issue", els.drilldownTitle?.textContent || "Issue detail");
+  } else if (kind === "repeat") {
+    pushChip("Focus", meta.label || "");
+  }
+  if (filters.date_start || filters.date_end) {
+    pushChip("Window", `${prettyIsoDate(filters.date_start || "")} to ${prettyIsoDate(filters.date_end || "")}`);
+  }
+  if (Array.isArray(filters.device_models) && filters.device_models.length && !filters.device_models.includes(NONE_SENTINEL)) {
+    pushChip("Device model", summarizeScopeValues(filters.device_models));
+  }
+  if (Array.isArray(filters.products) && filters.products.length && !filters.products.includes(NONE_SENTINEL) && kind !== "product") {
+    pushChip("Product filter", summarizeScopeValues(filters.products));
+  }
+  if (Array.isArray(filters.efcs) && filters.efcs.length && !filters.efcs.includes(NONE_SENTINEL)) {
+    pushChip("EFC", summarizeScopeValues(filters.efcs));
+  }
+  if (Array.isArray(filters.include_fc2) && filters.include_fc2.length && !filters.include_fc2.includes(NONE_SENTINEL)) {
+    pushChip("FC2", summarizeScopeValues(filters.include_fc2));
+  }
+  return `
+    <section class="drilldown-section scope-section">
+      <div class="section-label">Scope</div>
+      <div class="scope-chip-row">${chips.length ? chips.join("") : '<span class="scope-empty">Using inherited dashboard filters.</span>'}</div>
+    </section>`;
+}
+
+function summarizeScopeValues(values) {
+  const cleaned = (values || []).filter((value) => value && value !== NONE_SENTINEL);
+  if (!cleaned.length) return "";
+  if (cleaned.length <= 2) return cleaned.join(", ");
+  return `${cleaned.slice(0, 2).join(", ")} +${cleaned.length - 2}`;
 }
 
 function renderDateToolbar() {
@@ -689,6 +751,7 @@ function renderFilterControls() {
   const activeFilterKey = activeElement instanceof HTMLInputElement ? activeElement.dataset.filterSearch || "" : "";
   const activeSelectionStart = activeElement instanceof HTMLInputElement ? activeElement.selectionStart ?? null : null;
   els.toggleAdvancedFilters.textContent = state.advancedFiltersOpen ? "Hide advanced" : "Advanced filters";
+  const visibleControls = CONTROLS.filter((control) => isControlAvailable(control));
   const renderControls = (controls) => controls.map((control) => {
     const options = getControlOptions(control);
     const selected = state.filters[control.key] || [];
@@ -724,8 +787,8 @@ function renderFilterControls() {
       </div>`;
   }).join("");
 
-  els.primaryFilterGrid.innerHTML = renderControls(CONTROLS.filter((control) => PRIMARY_CONTROL_KEYS.has(control.key)));
-  els.secondaryFilterGrid.innerHTML = renderControls(CONTROLS.filter((control) => !PRIMARY_CONTROL_KEYS.has(control.key)));
+  els.primaryFilterGrid.innerHTML = renderControls(visibleControls.filter((control) => PRIMARY_CONTROL_KEYS.has(control.key)));
+  els.secondaryFilterGrid.innerHTML = renderControls(visibleControls.filter((control) => !PRIMARY_CONTROL_KEYS.has(control.key)));
   els.secondaryFilterGrid.classList.toggle("hidden", !state.advancedFiltersOpen);
 
   [els.primaryFilterGrid, els.secondaryFilterGrid].forEach((grid) => {
@@ -774,6 +837,11 @@ function renderFilterControls() {
       }
     }
   }
+}
+
+function isControlAvailable(control) {
+  if (!control.capabilityKey) return true;
+  return Boolean(state.capabilities?.[control.capabilityKey]);
 }
 
 function renderKpis(kpis) {
@@ -888,6 +956,100 @@ function renderProductHealth() {
       renderProductHealth();
     });
   });
+}
+
+function renderModelHealth() {
+  if (!els.modelHealthPanel || !els.modelHealthTable) return;
+  const payload = state.payload || {};
+  const rows = [...(payload.model_health || [])];
+  const visible = Boolean(state.capabilities?.device_model && rows.length);
+  els.modelHealthPanel.classList.toggle("hidden", !visible);
+  toggleDimensionBoards();
+  if (!visible) {
+    els.modelHealthTable.innerHTML = "";
+    return;
+  }
+  const body = rows.slice(0, 12).map((row, index) => `
+    <tr class="click-row" data-model-product="${escHtml(row.product_name || "")}" data-model-category="${escHtml(row.product_category || "")}" data-model-name="${escHtml(row.device_model || "Unknown")}">
+      <td class="num">${index + 1}</td>
+      <td>
+        <div class="name-stack">
+          <div class="name-main">${escHtml(row.device_model || "Unknown")}<span class="row-chevron">></span></div>
+          <div class="name-sub">${escHtml(`${row.product_name || "Other"} · ${row.product_category || "Other"}`)}</div>
+        </div>
+      </td>
+      <td class="num">${fmtNum(row.tickets || 0)}</td>
+      <td class="num ${Number(row.change_rate || 0) >= 0 ? "good" : "bad"}">${formatSignedPct(row.change_rate || 0)}</td>
+      <td class="num">${fmtPct(row.repeat_rate || 0)}</td>
+      <td>${escHtml(row.top_issue_detail || "No issue detail")}</td>
+    </tr>
+  `).join("");
+  els.modelHealthTable.innerHTML = `
+    <table class="data-table compact-table">
+      <thead>
+        <tr>
+          <th class="num">#</th>
+          <th>Device model</th>
+          <th class="num">Tickets</th>
+          <th class="num">Change</th>
+          <th class="num">Repeat %</th>
+          <th>Top issue</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>`;
+  els.modelHealthTable.querySelectorAll("[data-model-product]").forEach((row) => {
+    row.addEventListener("click", () => {
+      openProductDrilldown(row.dataset.modelCategory || "", row.dataset.modelProduct || "", {
+        device_models: [row.dataset.modelName || "Unknown"],
+      });
+    });
+  });
+}
+
+function renderFirmwareWatchlist(rows) {
+  if (!els.firmwareWatchPanel || !els.firmwareWatchlist) return;
+  const enabled = Boolean(state.capabilities?.software_version);
+  els.firmwareWatchPanel.classList.toggle("hidden", !enabled);
+  toggleDimensionBoards();
+  if (!enabled) {
+    els.firmwareWatchlist.innerHTML = "";
+    return;
+  }
+  if (!rows.length) {
+    els.firmwareWatchlist.innerHTML = '<div class="empty-state">Firmware watchlist will populate once software version starts flowing from the source table.</div>';
+    return;
+  }
+  const body = rows.slice(0, 10).map((row, index) => `
+    <tr>
+      <td class="num">${index + 1}</td>
+      <td>${escHtml(row.software_version || "Unknown")}</td>
+      <td class="num">${fmtNum(row.tickets || 0)}</td>
+      <td class="num">${fmtPct(row.repeat_rate || 0)}</td>
+      <td>${escHtml(row.top_issue_detail || "No issue detail")}</td>
+      <td>${escHtml(row.top_product || "Other")}</td>
+    </tr>
+  `).join("");
+  els.firmwareWatchlist.innerHTML = `
+    <table class="data-table compact-table">
+      <thead>
+        <tr>
+          <th class="num">#</th>
+          <th>Firmware</th>
+          <th class="num">Tickets</th>
+          <th class="num">Repeat %</th>
+          <th>Top issue</th>
+          <th>Top product</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>`;
+}
+
+function toggleDimensionBoards() {
+  if (!els.dimensionBoards) return;
+  const show = !els.modelHealthPanel?.classList.contains("hidden") || !els.firmwareWatchPanel?.classList.contains("hidden");
+  els.dimensionBoards.classList.toggle("hidden", !show);
 }
 
 function renderRepeatAnalysis(repeatAnalysis) {
@@ -1510,8 +1672,11 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function openProductDrilldown(category, productName) {
+async function openProductDrilldown(category, productName, localOverrides = {}) {
   state.drilldownFilters = structuredClone(state.filters);
+  Object.entries(localOverrides || {}).forEach(([key, value]) => {
+    state.drilldownFilters[key] = Array.isArray(value) ? [...value] : value;
+  });
   state.drilldownIssueTrendFilters.product = { efc: "", fc1: "", fc2: "", query: "" };
   state.currentDrilldownMeta = { category, product_name: productName };
   state.currentDrilldownKind = "product";
@@ -1574,7 +1739,7 @@ async function openIssueDrilldown(issueId, options = {}) {
   state.drilldownIssueTrendFilters.product = { efc: "", fc1: "", fc2: "", query: "" };
   state.currentDrilldownMeta = { issue_id: issueId };
   state.currentDrilldownKind = "issue";
-  state.currentDrilldownTab = options.focusWeekStart ? "analysis" : "overview";
+  state.currentDrilldownTab = "overview";
   if (options.focusWeekStart) {
     const weekStart = toDate(options.focusWeekStart);
     if (weekStart) {
@@ -1622,6 +1787,9 @@ function getDrilldownControlDefinitions() {
     { key: "include_fc2", label: "FC2", optionsKey: "fc2" },
     { key: "bot_actions", label: "Bot action", optionsKey: "bot_actions" },
   ];
+  if (state.capabilities?.device_model && (state.currentDrilldownKind === "product" || state.currentDrilldownKind === "category" || state.currentDrilldownKind === "issue")) {
+    controls.splice(state.currentDrilldownKind === "category" ? 2 : 1, 0, { key: "device_models", label: "Device model", optionsKey: "device_models" });
+  }
   if (state.currentDrilldownKind === "category") {
     controls.splice(1, 0, { key: "products", label: "Product", optionsKey: "products" });
   }
@@ -1648,6 +1816,9 @@ function getDrilldownOptions(definition) {
     if (definition.key === "products") {
       return rowsToOptions(source.products || source.product_daily || [], (row) => row.label || row.product_name);
     }
+    if (definition.key === "device_models") {
+      return rowsToOptions(source.device_models || source.device_model_fault_daily || [], (row) => row.label || row.device_model);
+    }
     if (definition.key === "efcs") {
       return rowsToOptions(source.efcs || [], (row) => row.label);
     }
@@ -1663,6 +1834,7 @@ function getDrilldownOptions(definition) {
   }
 
   if (state.currentDrilldownKind === "product" || state.currentDrilldownKind === "issue") {
+    if (definition.key === "device_models") return rowsToOptions(source.models || source.issue_daily || [], (row) => row.label || row.device_model);
     if (definition.key === "efcs") return rowsToOptions(source.efcs || [], (row) => row.label);
     if (definition.key === "include_fc1") return rowsToOptions(source.fc1 || [], (row) => row.label);
     if (definition.key === "include_fc2") {
@@ -1856,6 +2028,10 @@ async function refreshCurrentDrilldown() {
 }
 
 function renderDrilldownPanels(drilldown) {
+  if (state.currentDrilldownKind === "issue") {
+    renderIssueWorkspacePanels(drilldown);
+    return;
+  }
   const summary = drilldown.summary?.[0] || {};
   const previousSummary = drilldown.summary_previous?.[0] || {};
   const timeline = bucketTimeline((drilldown.timeline || []).map((row) => ({
@@ -1866,6 +2042,30 @@ function renderDrilldownPanels(drilldown) {
     repeat_tickets: 0,
   })), state.categoryDrilldownBucket);
   const productIssueTrendModel = buildProductIssueTrendModel(drilldown.issue_daily || [], state.categoryDrilldownBucket);
+  const productIssueMatrix = buildIssueMatrixModel(drilldown.issue_daily || [], state.categoryDrilldownBucket, { limit: 14 });
+  const productResolutionMatrix = buildResolutionMatrixModel(drilldown.issue_daily || [], state.categoryDrilldownBucket, { limit: 16 });
+  const productModelLeaderboard = buildProductModelLeaderboard(drilldown.issue_daily || [], state.categoryDrilldownBucket);
+  const productModelFaultMatrices = buildCategoryFaultMatrixModel((drilldown.issue_daily || []).map((row) => ({
+    ...row,
+    product_name: row.device_model || "Unknown",
+    fault_code_level_2: row.issue_detail || "Unclassified",
+  })), state.categoryDrilldownBucket);
+  const productFirmwareRows = buildVariantLeaderboard(
+    (drilldown.issue_daily || []).map((row) => ({ ...row, software_version: row.software_version || "Not available in source" })),
+    state.categoryDrilldownBucket,
+    "software_version",
+    "software_version",
+  );
+  const productFirmwareFaultMatrices = buildCategoryFaultMatrixModel((drilldown.issue_daily || []).map((row) => ({
+    ...row,
+    product_name: row.software_version || "Not available in source",
+    fault_code_level_2: row.issue_detail || "Unclassified",
+  })), state.categoryDrilldownBucket);
+  const productActionItems = buildWorkspaceActionItems({
+    issueRows: productIssueMatrix.rows,
+    resolutionRows: productResolutionMatrix.rows,
+    modelRows: productModelLeaderboard,
+  });
   const productIssueTrendEfcs = [...new Set((drilldown.issue_daily || []).map((row) => row.executive_fault_code || "Others"))].sort((a, b) => a.localeCompare(b));
   const productIssueTrendFc1 = [...new Set((drilldown.issue_daily || []).map((row) => row.fault_code_level_1 || "Unclassified"))].sort((a, b) => a.localeCompare(b));
   const productIssueTrendFc2 = [...new Set((drilldown.issue_daily || []).map((row) => row.issue_detail || "Unclassified"))].sort((a, b) => a.localeCompare(b));
@@ -1883,7 +2083,31 @@ function renderDrilldownPanels(drilldown) {
         renderSnapshotStat("Blank chat", summary.blank_chat_tickets || 0, ratio(summary.blank_chat_tickets, summary.tickets), previousSummary.blank_chat_tickets || 0),
         renderSnapshotStat("Transferred", summary.bot_transferred_tickets || 0, ratio(summary.bot_transferred_tickets, summary.tickets), previousSummary.bot_transferred_tickets || 0),
       ];
+  const firmwareSection = state.capabilities?.software_version
+    ? `
+    <section class="drilldown-section">
+      <div class="section-label">Firmware diagnosis</div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel">
+          <h3>Firmware watchlist</h3>
+          ${renderVariantLeaderboard(productFirmwareRows, { label: "Firmware", valueKey: "software_version" })}
+        </div>
+        <div class="mini-panel">
+          <h3>Firmware x issue heatmap</h3>
+          ${renderCategoryFaultMatrices(productFirmwareFaultMatrices)}
+        </div>
+      </div>
+    </section>`
+    : `
+    <section class="drilldown-section">
+      <div class="section-label">Firmware diagnosis</div>
+      <div class="mini-panel">
+        <h3>Firmware view</h3>
+        <div class="empty-state">Software version is not yet available in the source table, so firmware analysis is intentionally hidden for now.</div>
+      </div>
+    </section>`;
   const overview = `
+    ${renderWorkspaceScope("product")}
     <section class="drilldown-section">
       <div class="section-label">Snapshot</div>
       <div class="mini-summary-grid">
@@ -1902,10 +2126,27 @@ function renderDrilldownPanels(drilldown) {
         ${renderInsightCard("Top resolution", ((drilldown.resolutions || [])[0]?.label || "Unknown"), ((drilldown.resolutions || [])[0]?.tickets || 0))}
         ${renderInsightCard("Top bot action", formatBotActionLabel((drilldown.bot_actions || [])[0]?.label || "No bot action"), ((drilldown.bot_actions || [])[0]?.tickets || 0))}
       </div>
-    </section>`;
-  const analysis = `
+    </section>
     <section class="drilldown-section">
-      <div class="section-label">Breakdown</div>
+      <div class="section-label">Where to act</div>
+      ${renderActionabilityCards(productActionItems)}
+    </section>
+    ${state.capabilities?.device_model ? `
+    <section class="drilldown-section">
+      <div class="section-label">Model diagnosis</div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel">
+          <h3>Device models in scope</h3>
+          ${renderModelLeaderboard(productModelLeaderboard, { clickable: true })}
+        </div>
+        <div class="mini-panel">
+          <h3>Model x issue heatmap</h3>
+          ${renderCategoryFaultMatrices(productModelFaultMatrices)}
+        </div>
+      </div>
+    </section>` : ""}
+    <section class="drilldown-section">
+      <div class="section-label">Diagnosis</div>
       <div class="drilldown-two-col">
         <div class="mini-panel"><h3>Issue distribution</h3>${renderMiniTable(drilldown.issue_matrix || [], [
           { key: "executive_fault_code", label: "EFC" },
@@ -1920,22 +2161,44 @@ function renderDrilldownPanels(drilldown) {
         </div>
       </div>
     </section>
-    ${state.currentDrilldownKind === "product" ? `
     <section class="drilldown-section">
-      <div class="section-label">Volume by period</div>
+      <div class="section-label">Issue matrix</div>
       <div class="mini-panel analysis-panel">
         <div class="analysis-panel-head">
           <div>
             <h3>Issue trend by period</h3>
-              <div class="analysis-caption">Filter and compare issue movement across the selected periods.</div>
+            <div class="analysis-caption">Compare issue movement period by period with EFC and FC2 context.</div>
           </div>
           <div class="panel-actions">${renderCategoryBucketTabs()}</div>
         </div>
         ${renderIssueTrendFilters("product", { efcs: productIssueTrendEfcs, fc1s: productIssueTrendFc1, fc2s: productIssueTrendFc2 })}
-        ${renderProductIssueTrendTable(productIssueTrendModel)}
+        ${renderIssueMatrixTable(productIssueMatrix.rows.length ? productIssueMatrix : productIssueTrendModel)}
       </div>
-    </section>` : ""}`;
-  els.drilldownBody.innerHTML = state.currentDrilldownTab === "analysis" ? analysis : overview;
+    </section>
+    <section class="drilldown-section">
+      <div class="section-label">Resolution matrix</div>
+      <div class="mini-panel analysis-panel">
+        <div class="analysis-panel-head">
+          <div>
+            <h3>FC2 vs resolution</h3>
+            <div class="analysis-caption">See which resolutions dominate each issue and how they are moving over time.</div>
+          </div>
+        </div>
+        ${renderResolutionMatrixTable(productResolutionMatrix)}
+      </div>
+    </section>
+    ${firmwareSection}`;
+  els.drilldownBody.innerHTML = overview;
+  els.drilldownBody.querySelectorAll("[data-model-scope]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const deviceModel = row.dataset.modelScope || "Unknown";
+      if (state.currentDrilldownKind === "product") {
+        openProductDrilldown(state.currentDrilldownMeta?.category || "", state.currentDrilldownMeta?.product_name || "", {
+          device_models: [deviceModel],
+        });
+      }
+    });
+  });
   bindIssueTrendFilters(els.drilldownBody);
   els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1956,13 +2219,69 @@ function renderCategoryDrilldownPanels(drilldown) {
     repeat_tickets: 0,
   })), state.categoryDrilldownBucket);
   const faultMatrices = buildCategoryFaultMatrixModel(drilldown.product_fault_daily || [], state.categoryDrilldownBucket);
+  const deviceModelFaultMatrices = buildCategoryFaultMatrixModel((drilldown.device_model_fault_daily || []).map((row) => ({
+    ...row,
+    product_name: row.device_model || "Unknown",
+  })), state.categoryDrilldownBucket);
+  const firmwareFaultMatrices = buildCategoryFaultMatrixModel((drilldown.software_version_fault_daily || []).map((row) => ({
+    ...row,
+    product_name: row.software_version || "Not available in source",
+  })), state.categoryDrilldownBucket);
+  const categoryIssueMatrix = buildIssueMatrixModel((drilldown.product_fault_daily || []).map((row) => ({
+    ...row,
+    issue_detail: row.fault_code_level_2,
+  })), state.categoryDrilldownBucket, { limit: 16 });
+  const categoryResolutionMatrix = buildResolutionMatrixModel((drilldown.product_fault_daily || []).map((row) => ({
+    ...row,
+    issue_detail: row.fault_code_level_2,
+  })), state.categoryDrilldownBucket, { limit: 18 });
+  const categoryModelRows = buildCategoryModelLeaderboard(drilldown);
+  const categoryActionItems = buildWorkspaceActionItems({
+    issueRows: categoryIssueMatrix.rows,
+    resolutionRows: categoryResolutionMatrix.rows,
+    modelRows: categoryModelRows,
+  });
   const previousProducts = new Map((drilldown.products_previous || []).map((row) => [row.label, Number(row.tickets || 0)]));
   const topResolutionByProduct = new Map();
   (drilldown.resolution_by_product || []).forEach((row) => {
     if (!topResolutionByProduct.has(row.product_name)) topResolutionByProduct.set(row.product_name, row.resolution || "Unknown");
   });
+  const categoryFirmwareRows = (drilldown.software_versions || []).map((row, index, arr) => {
+    const current = Number(row.tickets || 0);
+    const next = Number(arr[index + 1]?.tickets || 0);
+    return {
+      software_version: row.label || "Not available in source",
+      tickets: current,
+      change_rate: next > 0 ? (current - next) / next : current > 0 ? 1 : 0,
+      top_issue: ((drilldown.software_version_fault_daily || []).find((item) => (item.software_version || "Not available in source") === (row.label || "Not available in source"))?.fault_code_level_2) || "Unclassified",
+    };
+  });
   renderDrilldownTabs();
+  const firmwareSection = state.capabilities?.software_version
+    ? `
+    <section class="drilldown-section">
+      <div class="section-label">Firmware diagnosis</div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel">
+          <h3>Firmware watchlist</h3>
+          ${renderVariantLeaderboard(categoryFirmwareRows, { label: "Firmware", valueKey: "software_version" })}
+        </div>
+        <div class="mini-panel">
+          <h3>Firmware x issue heatmap</h3>
+          ${renderCategoryFaultMatrices(firmwareFaultMatrices)}
+        </div>
+      </div>
+    </section>`
+    : `
+    <section class="drilldown-section">
+      <div class="section-label">Firmware diagnosis</div>
+      <div class="mini-panel">
+        <h3>Firmware watchlist</h3>
+        <div class="empty-state">Software version is not yet present in the source table, so firmware analysis is intentionally hidden for now.</div>
+      </div>
+    </section>`;
   const overview = `
+    ${renderWorkspaceScope("category")}
     <section class="drilldown-section">
       <div class="section-label">Snapshot</div>
       <div class="mini-summary-grid">
@@ -1996,14 +2315,183 @@ function renderCategoryDrilldownPanels(drilldown) {
       </div>
     </section>
     <section class="drilldown-section">
+      <div class="section-label">Issue matrix</div>
+      <div class="mini-panel analysis-panel">
+        <div class="analysis-panel-head">
+          <div>
+            <h3>Category issue trend</h3>
+            <div class="analysis-caption">Compare the issues driving this category across the selected periods.</div>
+          </div>
+          <div class="panel-actions">${renderCategoryBucketTabs()}</div>
+        </div>
+        ${renderIssueMatrixTable(categoryIssueMatrix)}
+      </div>
+    </section>
+    <section class="drilldown-section">
+      <div class="section-label">Resolution matrix</div>
+      <div class="mini-panel analysis-panel">
+        <div class="analysis-panel-head">
+          <div>
+            <h3>FC2 vs resolution</h3>
+            <div class="analysis-caption">See which resolution patterns are dominating category issues over time.</div>
+          </div>
+        </div>
+        ${renderResolutionMatrixTable(categoryResolutionMatrix)}
+      </div>
+    </section>
+    <section class="drilldown-section">
       <div class="section-label">Leading signals</div>
       <div class="drilldown-kpi-rail">
         ${renderInsightCard("Top EFC", ((drilldown.efcs || [])[0]?.label || "Others"), ((drilldown.efcs || [])[0]?.tickets || 0))}
         ${renderInsightCard("Top resolution", ((drilldown.resolutions || [])[0]?.label || "Unknown"), ((drilldown.resolutions || [])[0]?.tickets || 0))}
         ${renderInsightCard("Top bot action", formatBotActionLabel((drilldown.bot_actions || [])[0]?.label || "No bot action"), ((drilldown.bot_actions || [])[0]?.tickets || 0))}
       </div>
-    </section>`;
+    </section>
+    <section class="drilldown-section">
+      <div class="section-label">Where to act</div>
+      ${renderActionabilityCards(categoryActionItems)}
+    </section>
+    ${state.capabilities?.device_model ? `
+    <section class="drilldown-section">
+      <div class="section-label">Model diagnosis</div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel"><h3>Device models in category</h3>${renderModelLeaderboard(categoryModelRows, { showBotResolved: true, clickable: true })}</div>
+        <div class="mini-panel"><h3>Model x issue heatmap</h3>${renderCategoryFaultMatrices(deviceModelFaultMatrices)}</div>
+      </div>
+    </section>` : ""}
+    ${firmwareSection}`;
   els.drilldownBody.innerHTML = overview;
+  els.drilldownBody.querySelectorAll("[data-model-scope]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const deviceModel = row.dataset.modelScope || "Unknown";
+      if (state.currentDrilldownKind === "category") {
+        state.drilldownFilters = state.drilldownFilters || structuredClone(state.filters);
+        state.drilldownFilters.device_models = [deviceModel];
+        renderDrilldownFilters();
+        scheduleDrilldownRefresh();
+      }
+    });
+  });
+}
+
+function renderIssueWorkspacePanels(drilldown) {
+  const summary = drilldown.summary?.[0] || {};
+  const previousSummary = drilldown.summary_previous?.[0] || {};
+  const timeline = bucketTimeline((drilldown.timeline || []).map((row) => ({
+    date: row.metric_date,
+    tickets: row.tickets,
+    installation_tickets: row.installation_tickets,
+    bot_resolved_tickets: row.bot_resolved_tickets,
+    repeat_tickets: 0,
+  })), state.categoryDrilldownBucket);
+  const issueDaily = drilldown.issue_daily || [];
+  const modelRows = buildProductModelLeaderboard(issueDaily, state.categoryDrilldownBucket);
+  const firmwareRows = buildVariantLeaderboard(
+    issueDaily.map((row) => ({ ...row, software_version: row.software_version || "Not available in source" })),
+    state.categoryDrilldownBucket,
+    "software_version",
+    "software_version",
+  );
+  const firmwareMatrices = buildCategoryFaultMatrixModel(issueDaily.map((row) => ({
+    ...row,
+    product_name: row.software_version || "Not available in source",
+    fault_code_level_2: row.issue_detail || "Unclassified",
+  })), state.categoryDrilldownBucket);
+  const resolutionMatrix = buildResolutionMatrixModel(issueDaily, state.categoryDrilldownBucket, { limit: 18 });
+  const issueActionItems = buildWorkspaceActionItems({
+    issueRows: [{
+      issue_detail: els.drilldownTitle?.textContent || "Issue detail",
+      executive_fault_code: "Selected issue",
+      total: Number(summary.tickets || 0),
+      latest: Number(timeline[timeline.length - 1]?.tickets || 0),
+      delta_vs_previous: timeline.length > 1
+        ? ratio(Number(timeline[timeline.length - 1]?.tickets || 0) - Number(timeline[timeline.length - 2]?.tickets || 0), Number(timeline[timeline.length - 2]?.tickets || 0))
+        : 0,
+    }],
+    resolutionRows: resolutionMatrix.rows,
+    modelRows,
+  });
+  const departments = toMixRows(drilldown.departments || []);
+  const channels = toMixRows(drilldown.channels || []);
+  const firmwareSection = state.capabilities?.software_version
+    ? `
+    <section class="drilldown-section">
+      <div class="section-label">Firmware diagnosis</div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel">
+          <h3>Firmware impact</h3>
+          ${renderVariantLeaderboard(firmwareRows, { label: "Firmware", valueKey: "software_version" })}
+        </div>
+        <div class="mini-panel">
+          <h3>Firmware x issue heatmap</h3>
+          ${renderCategoryFaultMatrices(firmwareMatrices)}
+        </div>
+      </div>
+    </section>`
+    : `
+    <section class="drilldown-section">
+      <div class="section-label">Firmware diagnosis</div>
+      <div class="mini-panel">
+        <h3>Firmware impact</h3>
+        <div class="empty-state">Software version is not yet present in the source table, so firmware analysis is intentionally hidden for now.</div>
+      </div>
+    </section>`;
+  els.drilldownBody.innerHTML = `
+    ${renderWorkspaceScope("issue")}
+    <section class="drilldown-section">
+      <div class="section-label">Snapshot</div>
+      <div class="mini-summary-grid">
+        ${renderSnapshotStat("Tickets", summary.tickets || 0, null, previousSummary.tickets || 0)}
+        ${renderSnapshotStat("Bot resolved", summary.bot_resolved_tickets || 0, ratio(summary.bot_resolved_tickets, summary.tickets), previousSummary.bot_resolved_tickets || 0)}
+        ${renderSnapshotStat("Transferred", summary.bot_transferred_tickets || 0, ratio(summary.bot_transferred_tickets, summary.tickets), previousSummary.bot_transferred_tickets || 0)}
+        ${renderSnapshotStat("Blank chat", summary.blank_chat_tickets || 0, ratio(summary.blank_chat_tickets, summary.tickets), previousSummary.blank_chat_tickets || 0)}
+      </div>
+    </section>
+    <section class="drilldown-section">
+      <div class="section-label">Trend</div>
+      <div class="panel-actions">${renderCategoryBucketTabs()}</div>
+      <div class="mini-panel feature-panel">${renderMiniChartSvg(timeline, state.categoryDrilldownBucket)}</div>
+    </section>
+    <section class="drilldown-section">
+      <div class="section-label">Concentration</div>
+      <div class="drilldown-two-col">
+        ${state.capabilities?.device_model ? `<div class="mini-panel"><h3>Models carrying this issue</h3>${renderModelLeaderboard(modelRows)}</div>` : ""}
+        <div class="mini-panel"><h3>Support team mix</h3>${renderMixListHtml(departments)}</div>
+        <div class="mini-panel"><h3>Channel mix</h3>${renderMixListHtml(channels)}</div>
+      </div>
+    </section>
+    <section class="drilldown-section">
+      <div class="section-label">Where to act</div>
+      ${renderActionabilityCards(issueActionItems)}
+    </section>
+    <section class="drilldown-section">
+      <div class="section-label">Resolution matrix</div>
+      <div class="mini-panel analysis-panel">
+        <div class="analysis-panel-head">
+          <div>
+            <h3>Resolution movement over time</h3>
+            <div class="analysis-caption">Track which resolutions are being used for this issue and how they are changing period by period.</div>
+          </div>
+          <div class="panel-actions">${renderCategoryBucketTabs()}</div>
+        </div>
+        ${renderResolutionMatrixTable(resolutionMatrix)}
+      </div>
+    </section>
+    <section class="drilldown-section">
+      <div class="section-label">Operational outcome</div>
+      <div class="drilldown-two-col">
+        <div class="mini-panel"><h3>Resolution summary</h3>${renderMiniBars(drilldown.resolutions || [])}</div>
+        <div class="mini-panel"><h3>Bot actions</h3>${renderMiniBars(drilldown.bot_actions || [], formatBotActionLabel)}</div>
+        <div class="mini-panel"><h3>Status mix</h3>${renderMiniBars(drilldown.statuses || [])}</div>
+      </div>
+    </section>
+    ${firmwareSection}`;
+  els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.categoryDrilldownBucket = button.dataset.categoryBucket || "daily";
+      renderIssueWorkspacePanels(state.currentDrilldown || drilldown);
+    });
+  });
 }
 
 function closeDrilldown() {
@@ -2036,7 +2524,7 @@ function closeDrilldown() {
 
 function renderDrilldownTabs() {
   const tabs = DRILLDOWN_TABS[state.currentDrilldownKind] || [];
-  if (!tabs.length) {
+  if (tabs.length <= 1) {
     els.drilldownTabs.innerHTML = "";
     els.drilldownTabs.classList.add("hidden");
     return;
@@ -2059,6 +2547,7 @@ function renderRepeatDrilldownPanels(drilldown) {
   const trend = buildRepeatDrilldownTrend(filteredRows, state.categoryDrilldownBucket);
   const matrix = buildRepeatTrendMatrix(filteredRows, state.categoryDrilldownBucket);
   els.drilldownBody.innerHTML = `
+    ${renderWorkspaceScope("repeat")}
     <section class="drilldown-section">
       <div class="section-label">Snapshot</div>
       <div class="mini-summary-grid">
@@ -2393,6 +2882,15 @@ function renderMixListHtml(rows) {
     </div>`).join("")}</div>`;
 }
 
+function toMixRows(rows) {
+  const items = (rows || []).map((row) => ({
+    label: row.label || "Unknown",
+    count: Number(row.count ?? row.tickets ?? 0),
+  })).filter((row) => row.count > 0);
+  const total = items.reduce((sum, row) => sum + row.count, 0) || 1;
+  return items.map((row) => ({ ...row, share: row.count / total }));
+}
+
 function renderDonutHtml(rows, label) {
   if (!rows.length) return `<div class="empty-state">No ${escHtml(label.toLowerCase())} data for this view.</div>`;
   const palette = [VISUAL_THEME.blue, VISUAL_THEME.green, VISUAL_THEME.amber, VISUAL_THEME.purple, VISUAL_THEME.red, VISUAL_THEME.teal, VISUAL_THEME.slate];
@@ -2433,6 +2931,59 @@ function kindLabel(kind) {
 
 function renderInsightCard(label, title, value) {
   return `<div class="insight-card"><div class="insight-label">${escHtml(label)}</div><div class="insight-title">${escHtml(title || "Unknown")}</div><div class="insight-value">${escHtml(fmtNum(value || 0))}</div></div>`;
+}
+
+function buildWorkspaceActionItems({ issueRows = [], resolutionRows = [], modelRows = [] }) {
+  const items = [];
+  const highestVolumeIssue = [...issueRows].sort((a, b) => (b.total || 0) - (a.total || 0))[0];
+  const fastestRisingIssue = [...issueRows]
+    .filter((row) => Number(row.latest || 0) > 0)
+    .sort((a, b) => (b.delta_vs_previous || 0) - (a.delta_vs_previous || 0))[0];
+  const leadingResolution = [...resolutionRows].sort((a, b) => (b.total || 0) - (a.total || 0))[0];
+  const topModel = [...modelRows].sort((a, b) => (b.tickets || 0) - (a.tickets || 0))[0];
+  if (highestVolumeIssue) {
+    items.push({
+      label: "Highest volume issue",
+      title: highestVolumeIssue.issue_detail || "Unclassified",
+      detail: `${highestVolumeIssue.executive_fault_code || "Others"} · ${fmtNum(highestVolumeIssue.total || 0)} tickets`,
+    });
+  }
+  if (fastestRisingIssue) {
+    items.push({
+      label: "Fastest rising issue",
+      title: fastestRisingIssue.issue_detail || "Unclassified",
+      detail: `${formatSignedPct(fastestRisingIssue.delta_vs_previous || 0)} on latest period · ${fmtNum(fastestRisingIssue.latest || 0)} tickets`,
+    });
+  }
+  if (leadingResolution) {
+    items.push({
+      label: "Leading resolution",
+      title: leadingResolution.resolution || "Unknown",
+      detail: `${leadingResolution.issue_detail || "Unclassified"} · ${fmtNum(leadingResolution.total || 0)} tickets`,
+    });
+  }
+  if (topModel) {
+    items.push({
+      label: "Top impacted model",
+      title: topModel.device_model || "Unknown",
+      detail: `${fmtNum(topModel.tickets || 0)} tickets · ${formatSignedPct(topModel.change_rate || 0)}`,
+    });
+  }
+  return items.slice(0, 4);
+}
+
+function renderActionabilityCards(items) {
+  if (!items.length) return '<div class="empty-state">No actionability signals in the selected scope.</div>';
+  return `
+    <div class="actionability-grid">
+      ${items.map((item) => `
+        <div class="action-card">
+          <div class="action-card-label">${escHtml(item.label || "Signal")}</div>
+          <div class="action-card-title">${escHtml(item.title || "Unknown")}</div>
+          <div class="action-card-detail">${escHtml(item.detail || "")}</div>
+        </div>
+      `).join("")}
+    </div>`;
 }
 
 function renderCategoryBucketTabs() {
@@ -2944,9 +3495,15 @@ function reconcileFilterState() {
   if (bounds.min && (!state.filters.date_start || state.filters.date_start < bounds.min)) {
     state.filters.date_start = clampIsoDate(state.filters.date_start || bounds.min, bounds.min, bounds.max || bounds.min);
   }
+  if (!state.capabilities?.device_model) state.filters.device_models = [];
+  if (!state.capabilities?.software_version) state.filters.software_versions = [];
   const validProducts = new Set(getControlOptions({ key: "products", optionsKey: "products" }).map((item) => item.label));
   state.filters.products = state.filters.products.filter((value) => value === NONE_SENTINEL || validProducts.has(value));
   CONTROLS.forEach((control) => {
+    if (!isControlAvailable(control)) {
+      state.filters[control.key] = [];
+      return;
+    }
     const valid = new Set(getControlOptions(control).map((item) => item.label));
     state.filters[control.key] = (state.filters[control.key] || []).filter((value) => value === NONE_SENTINEL || valid.has(value));
   });
@@ -3663,6 +4220,353 @@ function buildProductIssueTrendModel(issueDailyRows, mode) {
     }));
   });
   return { periods, rows };
+}
+
+function buildIssueMatrixModel(rows, mode, options = {}) {
+  if (!rows.length) return { periods: [], rows: [] };
+  const bucketMode = resolveBucketMode(rows.map((row) => ({ metric_date: row.metric_date })), mode);
+  const periodMap = new Map();
+  const issueMap = new Map();
+  rows.forEach((row) => {
+    const bucket = getBucketDescriptor(row.metric_date, bucketMode);
+    if (!periodMap.has(bucket.key)) periodMap.set(bucket.key, { key: bucket.key, label: bucket.label });
+    const efc = row.executive_fault_code || "Others";
+    const fc1 = row.fault_code_level_1 || "Unclassified";
+    const fc2 = row.issue_detail || row.fault_code_level_2 || "Unclassified";
+    const key = `${efc}||${fc2}`;
+    if (!issueMap.has(key)) {
+      issueMap.set(key, {
+        executive_fault_code: efc,
+        fault_code_level_1: fc1,
+        issue_detail: fc2,
+        totalsByPeriod: new Map(),
+        resolutions: new Map(),
+      });
+    }
+    const current = issueMap.get(key);
+    const tickets = Number(row.tickets || 0);
+    current.totalsByPeriod.set(bucket.key, (current.totalsByPeriod.get(bucket.key) || 0) + tickets);
+    current.resolutions.set(row.resolution || "Unknown", (current.resolutions.get(row.resolution || "Unknown") || 0) + tickets);
+  });
+  const periods = [...periodMap.values()].sort((a, b) => a.key.localeCompare(b.key));
+  const mappedRows = [...issueMap.values()].map((issue) => {
+    const cells = periods.map((period, index) => {
+      const tickets = Number(issue.totalsByPeriod.get(period.key) || 0);
+      const previous = index === 0 ? 0 : Number(issue.totalsByPeriod.get(periods[index - 1].key) || 0);
+      return {
+        key: period.key,
+        label: period.label,
+        tickets,
+        delta_vs_previous: index === 0 ? 0 : previous > 0 ? (tickets - previous) / previous : tickets > 0 ? 1 : 0,
+      };
+    });
+    const total = cells.reduce((sum, cell) => sum + cell.tickets, 0);
+    const latest = cells[cells.length - 1]?.tickets || 0;
+    const previous = cells.length > 1 ? cells[cells.length - 2]?.tickets || 0 : 0;
+    return {
+      executive_fault_code: issue.executive_fault_code,
+      fault_code_level_1: issue.fault_code_level_1,
+      issue_detail: issue.issue_detail,
+      top_resolution: [...issue.resolutions.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "Unknown",
+      total,
+      latest,
+      delta_vs_previous: previous > 0 ? (latest - previous) / previous : latest > 0 ? 1 : 0,
+      cells,
+    };
+  }).sort((a, b) => b.total - a.total || a.issue_detail.localeCompare(b.issue_detail));
+  const rowsOut = (options.limit ? mappedRows.slice(0, options.limit) : mappedRows);
+  const maxCell = Math.max(1, ...rowsOut.flatMap((row) => row.cells.map((cell) => cell.tickets)));
+  rowsOut.forEach((row) => {
+    row.cells = row.cells.map((cell) => ({ ...cell, intensity: cell.tickets / maxCell }));
+  });
+  return { periods, rows: rowsOut };
+}
+
+function buildResolutionMatrixModel(rows, mode, options = {}) {
+  if (!rows.length) return { periods: [], rows: [] };
+  const bucketMode = resolveBucketMode(rows.map((row) => ({ metric_date: row.metric_date })), mode);
+  const periodMap = new Map();
+  const resolutionMap = new Map();
+  rows.forEach((row) => {
+    const bucket = getBucketDescriptor(row.metric_date, bucketMode);
+    if (!periodMap.has(bucket.key)) periodMap.set(bucket.key, { key: bucket.key, label: bucket.label });
+    const fc2 = row.issue_detail || row.fault_code_level_2 || "Unclassified";
+    const resolution = row.resolution || "Unknown";
+    const key = `${fc2}||${resolution}`;
+    if (!resolutionMap.has(key)) {
+      resolutionMap.set(key, {
+        issue_detail: fc2,
+        resolution,
+        totalsByPeriod: new Map(),
+      });
+    }
+    const current = resolutionMap.get(key);
+    const tickets = Number(row.tickets || 0);
+    current.totalsByPeriod.set(bucket.key, (current.totalsByPeriod.get(bucket.key) || 0) + tickets);
+  });
+  const periods = [...periodMap.values()].sort((a, b) => a.key.localeCompare(b.key));
+  const mappedRows = [...resolutionMap.values()].map((entry) => {
+    const cells = periods.map((period, index) => {
+      const tickets = Number(entry.totalsByPeriod.get(period.key) || 0);
+      const previous = index === 0 ? 0 : Number(entry.totalsByPeriod.get(periods[index - 1].key) || 0);
+      return {
+        key: period.key,
+        label: period.label,
+        tickets,
+        delta_vs_previous: index === 0 ? 0 : previous > 0 ? (tickets - previous) / previous : tickets > 0 ? 1 : 0,
+      };
+    });
+    const total = cells.reduce((sum, cell) => sum + cell.tickets, 0);
+    const latest = cells[cells.length - 1]?.tickets || 0;
+    const previous = cells.length > 1 ? cells[cells.length - 2]?.tickets || 0 : 0;
+    return {
+      issue_detail: entry.issue_detail,
+      resolution: entry.resolution,
+      total,
+      latest,
+      delta_vs_previous: previous > 0 ? (latest - previous) / previous : latest > 0 ? 1 : 0,
+      cells,
+    };
+  }).sort((a, b) => b.total - a.total || a.issue_detail.localeCompare(b.issue_detail));
+  const rowsOut = (options.limit ? mappedRows.slice(0, options.limit) : mappedRows);
+  const maxCell = Math.max(1, ...rowsOut.flatMap((row) => row.cells.map((cell) => cell.tickets)));
+  rowsOut.forEach((row) => {
+    row.cells = row.cells.map((cell) => ({ ...cell, intensity: cell.tickets / maxCell }));
+  });
+  return { periods, rows: rowsOut };
+}
+
+function renderIssueMatrixTable(model) {
+  if (!model.rows.length) return '<div class="empty-state">No issue matrix available in the selected range.</div>';
+  return `
+    <div class="heatmap-wrap">
+      <table class="heatmap-table compact issue-trend-table">
+        <thead>
+          <tr>
+            <th>Issue</th>
+            <th>Top resolution</th>
+            ${model.periods.map((period) => `<th>${escHtml(period.label)}</th>`).join("")}
+            <th class="num">Total</th>
+            <th class="num">Latest change</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${model.rows.map((row) => `
+            <tr>
+              <td class="heatmap-row-label">
+                <div class="fault-label-stack">
+                  <strong>${escHtml(row.issue_detail)}</strong>
+                  <span>${escHtml(row.executive_fault_code)} · ${escHtml(row.fault_code_level_1 || "Unclassified")}</span>
+                </div>
+              </td>
+              <td>${escHtml(row.top_resolution || "Unknown")}</td>
+              ${row.cells.map((cell, index) => `
+                <td>
+                  <div class="heat-cell issue" style="background: rgba(98, 180, 171, ${0.10 + cell.intensity * 0.30})">
+                    <strong>${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}</strong>
+                    ${index > 0 && cell.tickets ? `<span class="heat-cell-delta ${cell.delta_vs_previous >= 0 ? "up" : "down"}">${escHtml(formatSignedPct(cell.delta_vs_previous))}</span>` : ""}
+                  </div>
+                </td>
+              `).join("")}
+              <td class="num"><strong>${escHtml(fmtNum(row.total))}</strong></td>
+              <td class="num ${row.delta_vs_previous >= 0 ? "good" : "bad"}"><strong>${escHtml(formatSignedPct(row.delta_vs_previous))}</strong></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderResolutionMatrixTable(model) {
+  if (!model.rows.length) return '<div class="empty-state">No resolution matrix available in the selected range.</div>';
+  return `
+    <div class="heatmap-wrap">
+      <table class="heatmap-table compact issue-trend-table">
+        <thead>
+          <tr>
+            <th>FC2</th>
+            <th>Resolution</th>
+            ${model.periods.map((period) => `<th>${escHtml(period.label)}</th>`).join("")}
+            <th class="num">Total</th>
+            <th class="num">Latest change</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${model.rows.map((row) => `
+            <tr>
+              <td class="heatmap-row-label"><strong>${escHtml(row.issue_detail || "Unclassified")}</strong></td>
+              <td>${escHtml(row.resolution || "Unknown")}</td>
+              ${row.cells.map((cell, index) => `
+                <td>
+                  <div class="heat-cell issue" style="background: rgba(127, 141, 163, ${0.10 + cell.intensity * 0.30})">
+                    <strong>${cell.tickets ? escHtml(fmtNum(cell.tickets)) : "—"}</strong>
+                    ${index > 0 && cell.tickets ? `<span class="heat-cell-delta ${cell.delta_vs_previous >= 0 ? "up" : "down"}">${escHtml(formatSignedPct(cell.delta_vs_previous))}</span>` : ""}
+                  </div>
+                </td>
+              `).join("")}
+              <td class="num"><strong>${escHtml(fmtNum(row.total))}</strong></td>
+              <td class="num ${row.delta_vs_previous >= 0 ? "good" : "bad"}"><strong>${escHtml(formatSignedPct(row.delta_vs_previous))}</strong></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function buildProductModelLeaderboard(issueDailyRows, mode) {
+  if (!issueDailyRows.length) return [];
+  const bucketMode = resolveBucketMode(issueDailyRows.map((row) => ({ metric_date: row.metric_date })), mode);
+  const modelMap = new Map();
+  issueDailyRows.forEach((row) => {
+    const model = row.device_model || "Unknown";
+    const bucket = getBucketDescriptor(row.metric_date, bucketMode);
+    if (!modelMap.has(model)) {
+      modelMap.set(model, {
+        device_model: model,
+        total: 0,
+        byPeriod: new Map(),
+        issues: new Map(),
+        resolutions: new Map(),
+      });
+    }
+    const current = modelMap.get(model);
+    const tickets = Number(row.tickets || 0);
+    current.total += tickets;
+    current.byPeriod.set(bucket.key, (current.byPeriod.get(bucket.key) || 0) + tickets);
+    current.issues.set(row.issue_detail || "Unclassified", (current.issues.get(row.issue_detail || "Unclassified") || 0) + tickets);
+    current.resolutions.set(row.resolution || "Unknown", (current.resolutions.get(row.resolution || "Unknown") || 0) + tickets);
+  });
+  const periods = [...new Set(issueDailyRows.map((row) => getBucketDescriptor(row.metric_date, bucketMode).key))].sort();
+  return [...modelMap.values()].map((item) => {
+    const latestKey = periods[periods.length - 1];
+    const previousKey = periods[periods.length - 2];
+    const latest = Number(item.byPeriod.get(latestKey) || 0);
+    const previous = Number(item.byPeriod.get(previousKey) || 0);
+    return {
+      device_model: item.device_model,
+      tickets: item.total,
+      change_rate: previous > 0 ? (latest - previous) / previous : latest > 0 ? 1 : 0,
+      top_issue: [...item.issues.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "Unclassified",
+      top_resolution: [...item.resolutions.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "Unknown",
+    };
+  }).sort((a, b) => b.tickets - a.tickets || a.device_model.localeCompare(b.device_model));
+}
+
+function buildVariantLeaderboard(issueDailyRows, mode, keyName, outputKey) {
+  if (!issueDailyRows.length) return [];
+  const bucketMode = resolveBucketMode(issueDailyRows.map((row) => ({ metric_date: row.metric_date })), mode);
+  const labelMap = new Map();
+  issueDailyRows.forEach((row) => {
+    const label = row[keyName] || "Unknown";
+    const bucket = getBucketDescriptor(row.metric_date, bucketMode);
+    if (!labelMap.has(label)) {
+      labelMap.set(label, {
+        label,
+        total: 0,
+        byPeriod: new Map(),
+        issues: new Map(),
+      });
+    }
+    const current = labelMap.get(label);
+    const tickets = Number(row.tickets || 0);
+    current.total += tickets;
+    current.byPeriod.set(bucket.key, (current.byPeriod.get(bucket.key) || 0) + tickets);
+    current.issues.set(row.issue_detail || row.fault_code_level_2 || "Unclassified", (current.issues.get(row.issue_detail || row.fault_code_level_2 || "Unclassified") || 0) + tickets);
+  });
+  const periods = [...new Set(issueDailyRows.map((row) => getBucketDescriptor(row.metric_date, bucketMode).key))].sort();
+  return [...labelMap.values()].map((item) => {
+    const latestKey = periods[periods.length - 1];
+    const previousKey = periods[periods.length - 2];
+    const latest = Number(item.byPeriod.get(latestKey) || 0);
+    const previous = Number(item.byPeriod.get(previousKey) || 0);
+    return {
+      [outputKey]: item.label,
+      tickets: item.total,
+      change_rate: previous > 0 ? (latest - previous) / previous : latest > 0 ? 1 : 0,
+      top_issue: [...item.issues.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "Unclassified",
+    };
+  }).sort((a, b) => b.tickets - a.tickets || String(a[outputKey] || "").localeCompare(String(b[outputKey] || "")));
+}
+
+function buildCategoryModelLeaderboard(drilldown) {
+  const previous = new Map((drilldown.device_models_previous || []).map((row) => [row.label, Number(row.tickets || 0)]));
+  const issueByModel = new Map();
+  (drilldown.device_model_fault_daily || []).forEach((row) => {
+    const key = row.device_model || "Unknown";
+    const issue = row.fault_code_level_2 || "Unclassified";
+    const current = issueByModel.get(key) || new Map();
+    current.set(issue, (current.get(issue) || 0) + Number(row.tickets || 0));
+    issueByModel.set(key, current);
+  });
+  return (drilldown.device_models || []).map((row) => {
+    const current = Number(row.tickets || 0);
+    const before = Number(previous.get(row.label) || 0);
+    const issues = [...(issueByModel.get(row.label) || new Map()).entries()].sort((a, b) => b[1] - a[1]);
+    return {
+      device_model: row.label || "Unknown",
+      tickets: current,
+      change_rate: before > 0 ? (current - before) / before : current > 0 ? 1 : 0,
+      bot_resolved_rate: ratio(row.bot_resolved_tickets, row.tickets),
+      top_issue: issues[0]?.[0] || "Unclassified",
+    };
+  }).sort((a, b) => b.tickets - a.tickets || a.device_model.localeCompare(b.device_model));
+}
+
+function renderModelLeaderboard(rows, options = {}) {
+  if (!rows.length) return '<div class="empty-state">No device model data in the selected range.</div>';
+  const showBotResolved = Boolean(options.showBotResolved);
+  return `
+    <table class="data-table compact-table">
+      <thead>
+        <tr>
+          <th class="num">#</th>
+          <th>Device model</th>
+          <th class="num">Tickets</th>
+          <th class="num">Change</th>
+          ${showBotResolved ? '<th class="num">Bot resolved %</th>' : ""}
+          <th>Top issue</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.slice(0, 12).map((row, index) => `
+          <tr class="click-row" ${options.clickable ? `data-model-scope="${escHtml(row.device_model || "Unknown")}"` : ""}>
+            <td class="num">${index + 1}</td>
+            <td>${escHtml(row.device_model || "Unknown")}</td>
+            <td class="num">${fmtNum(row.tickets || 0)}</td>
+            <td class="num ${Number(row.change_rate || 0) >= 0 ? "good" : "bad"}">${formatSignedPct(row.change_rate || 0)}</td>
+            ${showBotResolved ? `<td class="num">${fmtPct(row.bot_resolved_rate || 0)}</td>` : ""}
+            <td>${escHtml(row.top_issue || "Unclassified")}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>`;
+}
+
+function renderVariantLeaderboard(rows, { label = "Firmware version", valueKey = "software_version", emptyMessage = "No firmware data in the selected range." } = {}) {
+  if (!rows.length) return `<div class="empty-state">${escHtml(emptyMessage)}</div>`;
+  return `
+    <table class="data-table compact-table">
+      <thead>
+        <tr>
+          <th class="num">#</th>
+          <th>${escHtml(label)}</th>
+          <th class="num">Tickets</th>
+          <th class="num">Change</th>
+          <th>Top issue</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.slice(0, 12).map((row, index) => `
+          <tr>
+            <td class="num">${index + 1}</td>
+            <td>${escHtml(row[valueKey] || "Unknown")}</td>
+            <td class="num">${fmtNum(row.tickets || 0)}</td>
+            <td class="num ${Number(row.change_rate || 0) >= 0 ? "good" : "bad"}">${formatSignedPct(row.change_rate || 0)}</td>
+            <td>${escHtml(row.top_issue || "Unclassified")}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>`;
 }
 
 function renderProductIssueTrendTable(model) {

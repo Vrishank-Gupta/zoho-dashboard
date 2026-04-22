@@ -11,7 +11,7 @@ from ..config import settings
 from ..models import TicketRecord
 from ..pipeline.transforms import build_ticket_facts
 from ..repeat_analysis import build_repeat_events
-from ..repository import clean_text, connect_mysql, parse_datetime
+from ..repository import clean_text, connect_mysql, parse_datetime, resolve_software_version_column
 from .schema import bootstrap_statements
 
 
@@ -40,6 +40,7 @@ EXTRACT_COLUMNS = [
     "Defect",
     "Repair",
     "First_Commissioning_Date",
+    "Software_Version",
 ]
 
 
@@ -328,8 +329,11 @@ class ClickHouseETLJob:
             available_columns = self.get_available_columns(connection)
             created_column = settings.zoho_created_column if settings.zoho_created_column in available_columns else "Created_Time"
             primary_key = settings.zoho_primary_key if settings.zoho_primary_key in available_columns else "Ticket_Id"
+            software_version_column = resolve_software_version_column(available_columns)
             select_parts = [
-                column if column in available_columns else f"NULL AS {column}"
+                f"`{software_version_column}` AS Software_Version"
+                if column == "Software_Version" and software_version_column
+                else column if column in available_columns else f"NULL AS {column}"
                 for column in EXTRACT_COLUMNS
             ]
             query = f"""
@@ -391,7 +395,7 @@ class ClickHouseETLJob:
                 fault_code_level_2=clean_text(row.get("Fault_Code_Level_2")),
                 resolution_code_level_1=clean_text(row.get("Resolution_Code_Level_1")),
                 bot_action=clean_text(row.get("Bot_Action")),
-                software_version=None,
+                software_version=clean_text(row.get("Software_Version")),
                 status=clean_text(row.get("Status")),
                 device_serial_number=clean_text(row.get("Device_Serial_Number")),
                 number_of_reopen=clean_text(row.get("Number_of_Reopen")),
@@ -412,7 +416,7 @@ class ClickHouseETLJob:
             "ticket_id", "source_updated_at", "ingest_version", "ingested_at", "created_at", "created_date",
             "closed_at", "department_name", "normalized_department", "channel", "normalized_channel",
             "customer_name", "email", "mobile", "phone", "product", "product_name", "device_model", "canonical_product",
-            "product_category",
+            "product_category", "software_version", "normalized_software_version",
             "fault_code", "normalized_fault_code", "fault_code_level_1", "normalized_fault_code_l1",
             "fault_code_level_2", "normalized_fault_code_l2", "executive_fault_code",
             "resolution_code_level_1", "normalized_resolution",
@@ -450,6 +454,8 @@ class ClickHouseETLJob:
                     ticket.device_model,
                     ticket.canonical_product,
                     ticket.product_category,
+                    ticket.software_version,
+                    ticket.normalized_version,
                     ticket.fault_code,
                     ticket.normalized_fault_code,
                     ticket.fault_code_level_1,
@@ -507,7 +513,9 @@ class ClickHouseETLJob:
                     created_date AS metric_date,
                     product_category,
                     product_name,
+                    ifNull(nullIf(trim(BOTH ' ' FROM device_model), ''), 'Unknown') AS device_model,
                     canonical_product AS product_family,
+                    ifNull(nullIf(trim(BOTH ' ' FROM normalized_software_version), ''), 'Not available in source') AS software_version,
                     executive_fault_code,
                     normalized_fault_code AS fault_code,
                     normalized_fault_code_l1 AS fault_code_level_1,
@@ -539,7 +547,7 @@ class ClickHouseETLJob:
                     countIf(handle_time_minutes IS NOT NULL) AS handle_time_ticket_count
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE created_date IN ({dates_sql})
-                GROUP BY metric_date, product_category, product_name, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status
+                GROUP BY metric_date, product_category, product_name, device_model, product_family, software_version, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status
                 """
             )
             client.command(
@@ -549,7 +557,9 @@ class ClickHouseETLJob:
                     created_date AS metric_date,
                     product_category,
                     product_name,
+                    ifNull(nullIf(trim(BOTH ' ' FROM device_model), ''), 'Unknown') AS device_model,
                     canonical_product AS product_family,
+                    ifNull(nullIf(trim(BOTH ' ' FROM normalized_software_version), ''), 'Not available in source') AS software_version,
                     executive_fault_code,
                     normalized_fault_code AS fault_code,
                     normalized_fault_code_l1 AS fault_code_level_1,
@@ -571,7 +581,7 @@ class ClickHouseETLJob:
                     topK(1)(ifNull(repair, 'Unknown'))[1] AS top_repair
                 FROM {settings.clickhouse_fact_table} FINAL
                 WHERE created_date IN ({dates_sql}) AND usable_issue = 1
-                GROUP BY metric_date, product_category, product_name, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action
+                GROUP BY metric_date, product_category, product_name, device_model, product_family, software_version, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action
                 """
             )
 

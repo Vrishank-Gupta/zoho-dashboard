@@ -28,6 +28,8 @@ def bootstrap_statements() -> list[str]:
             device_model Nullable(String),
             canonical_product LowCardinality(String),
             product_category LowCardinality(String),
+            software_version Nullable(String),
+            normalized_software_version LowCardinality(String),
             fault_code Nullable(String),
             normalized_fault_code LowCardinality(String),
             fault_code_level_1 Nullable(String),
@@ -80,7 +82,9 @@ def bootstrap_statements() -> list[str]:
             metric_date Date,
             product_category LowCardinality(String),
             product_name LowCardinality(String),
+            device_model LowCardinality(String),
             product_family LowCardinality(String),
+            software_version LowCardinality(String),
             executive_fault_code LowCardinality(String),
             fault_code LowCardinality(String),
             fault_code_level_1 LowCardinality(String),
@@ -113,14 +117,16 @@ def bootstrap_statements() -> list[str]:
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(metric_date)
-        ORDER BY (metric_date, product_category, product_name, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status)
+        ORDER BY (metric_date, product_category, product_name, device_model, product_family, software_version, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action, bot_outcome, status)
         """.strip(),
         f"""
         CREATE TABLE IF NOT EXISTS {settings.clickhouse.database}.{settings.clickhouse_issues_summary_table} (
             metric_date Date,
             product_category LowCardinality(String),
             product_name LowCardinality(String),
+            device_model LowCardinality(String),
             product_family LowCardinality(String),
+            software_version LowCardinality(String),
             executive_fault_code LowCardinality(String),
             fault_code LowCardinality(String),
             fault_code_level_1 LowCardinality(String),
@@ -143,7 +149,7 @@ def bootstrap_statements() -> list[str]:
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(metric_date)
-        ORDER BY (metric_date, product_category, product_name, product_family, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action)
+        ORDER BY (metric_date, product_category, product_name, device_model, product_family, software_version, executive_fault_code, fault_code, fault_code_level_1, fault_code_level_2, department_name, channel, normalized_bot_action)
         """.strip(),
         f"""
         CREATE TABLE IF NOT EXISTS {settings.clickhouse.database}.{settings.clickhouse_repeat_events_table} (
@@ -220,4 +226,10 @@ def bootstrap_statements() -> list[str]:
         ORDER BY (cache_group, cache_key)
         TTL toDateTime(expires_at)
         """.strip(),
+        f"ALTER TABLE {settings.clickhouse.database}.{settings.clickhouse_fact_table} ADD COLUMN IF NOT EXISTS software_version Nullable(String) AFTER product_category",
+        f"ALTER TABLE {settings.clickhouse.database}.{settings.clickhouse_fact_table} ADD COLUMN IF NOT EXISTS normalized_software_version LowCardinality(String) AFTER software_version",
+        f"ALTER TABLE {settings.clickhouse.database}.{settings.clickhouse_daily_summary_table} ADD COLUMN IF NOT EXISTS device_model LowCardinality(String) AFTER product_name",
+        f"ALTER TABLE {settings.clickhouse.database}.{settings.clickhouse_daily_summary_table} ADD COLUMN IF NOT EXISTS software_version LowCardinality(String) AFTER product_family",
+        f"ALTER TABLE {settings.clickhouse.database}.{settings.clickhouse_issues_summary_table} ADD COLUMN IF NOT EXISTS device_model LowCardinality(String) AFTER product_name",
+        f"ALTER TABLE {settings.clickhouse.database}.{settings.clickhouse_issues_summary_table} ADD COLUMN IF NOT EXISTS software_version LowCardinality(String) AFTER product_family",
     ]

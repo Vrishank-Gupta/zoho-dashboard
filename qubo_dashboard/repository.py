@@ -8,6 +8,18 @@ from .models import TicketRecord
 from .sample_data import generate_sample_tickets
 
 
+SOFTWARE_VERSION_FALLBACK_COLUMNS = (
+    "Software_Version",
+    "software_version",
+    "Software Version",
+    "Firmware_Version",
+    "firmware_version",
+    "Firmware Version",
+    "SW_Version",
+    "sw_version",
+)
+
+
 def connect_mysql(database: DatabaseConfig):
     import mysql.connector
 
@@ -196,6 +208,7 @@ class TicketRepository:
         return self._zoho_columns_cache
 
     def _build_zoho_select_query(self, available_columns: set[str], where_clause: str = "") -> str:
+        software_version_column = resolve_software_version_column(available_columns)
         desired_columns = [
             "Ticket_Id",
             "Created_Time",
@@ -220,10 +233,13 @@ class TicketRepository:
             "Defect",
             "Repair",
             "First_Commissioning_Date",
+            "Software_Version",
         ]
         select_parts = []
         for column in desired_columns:
-            if column in available_columns:
+            if column == "Software_Version" and software_version_column:
+                select_parts.append(f"`{software_version_column}` AS Software_Version")
+            elif column in available_columns:
                 select_parts.append(column)
             else:
                 select_parts.append(f"NULL AS {column}")
@@ -250,7 +266,7 @@ class TicketRepository:
             fault_code_level_2=clean_text(row.get("Fault_Code_Level_2")),
             resolution_code_level_1=clean_text(row.get("Resolution_Code_Level_1")),
             bot_action=clean_text(row.get("Bot_Action")),
-            software_version=None,
+            software_version=clean_text(row.get("Software_Version")),
             status=clean_text(row.get("Status")),
             device_serial_number=clean_text(row.get("Device_Serial_Number")),
             number_of_reopen=clean_text(row.get("Number_of_Reopen")),
@@ -280,4 +296,16 @@ def parse_datetime(value: object) -> datetime | None:
             return datetime.strptime(text, fmt)
         except ValueError:
             continue
+    return None
+
+
+def resolve_software_version_column(available_columns: set[str]) -> str | None:
+    candidates = [settings.zoho_software_version_column, *SOFTWARE_VERSION_FALLBACK_COLUMNS]
+    normalized = {column.lower(): column for column in available_columns}
+    for candidate in candidates:
+        if candidate in available_columns:
+            return candidate
+        matched = normalized.get(candidate.lower())
+        if matched:
+            return matched
     return None

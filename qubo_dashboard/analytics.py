@@ -292,11 +292,13 @@ class AnalyticsService:
         )
         category_health = self._agg_category_health(current_daily_rows, previous_daily_rows)
         product_health = self._agg_product_health(current_daily_rows, previous_daily_rows)
+        model_health = self._agg_model_health(current_daily_rows, previous_daily_rows)
         service_ops = self._agg_service_ops(current_daily_rows)
         kpis = self._agg_kpis(current_daily_rows, previous_daily_rows)
         filter_options = self._agg_filter_options(option_daily_rows, self._agg_issues(option_issue_rows, []), min_date, max_date)
         pipeline_health = self._agg_pipeline_health(pipeline_rows)
         freshness = self._build_freshness(max_date)
+        capabilities = self._capabilities(current_daily_rows)
 
         return {
             "meta": {
@@ -307,6 +309,7 @@ class AnalyticsService:
                 "window_start": start_date.isoformat(),
                 "window_end": end_date.isoformat(),
                 "freshness": freshness,
+                "capabilities": capabilities,
             },
             "filters": asdict(filters),
             "filter_options": filter_options,
@@ -315,8 +318,10 @@ class AnalyticsService:
             "repeat_analysis": repeat_analysis,
             "category_health": category_health,
             "product_health": product_health,
+            "model_health": model_health,
             "issue_views": self._agg_issue_views(issues),
             "rising_signals": self._agg_rising_signals(current_issue_rows),
+            "firmware_watchlist": self._agg_firmware_watchlist(current_daily_rows) if capabilities["software_version"] else [],
             "service_ops": service_ops,
             "bot_summary": self._agg_bot_summary(bot_rows, issues),
             "pipeline_health": pipeline_health,
@@ -780,6 +785,91 @@ class AnalyticsService:
             )
         return sorted(items, key=lambda item: item["tickets"], reverse=True)
 
+    def _agg_model_health(self, rows: list[dict[str, Any]], previous_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        previous_grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            grouped[
+                (
+                    str(row.get("product_category") or "Other"),
+                    str(row.get("product_name") or "Other"),
+                    str(row.get("device_model") or "Unknown"),
+                )
+            ].append(row)
+        for row in previous_rows:
+            previous_grouped[
+                (
+                    str(row.get("product_category") or "Other"),
+                    str(row.get("product_name") or "Other"),
+                    str(row.get("device_model") or "Unknown"),
+                )
+            ].append(row)
+        items = []
+        for (category, product_name, device_model), model_rows in grouped.items():
+            counts = self._sum_counts(model_rows)
+            previous_counts = self._sum_counts(previous_grouped.get((category, product_name, device_model), []))
+            efc_totals: dict[str, int] = defaultdict(int)
+            for row in model_rows:
+                efc_totals[str(row.get("executive_fault_code") or "Others")] += int(row.get("tickets", 0) or 0)
+            top_issue = max(
+                [row for row in model_rows if row.get("fault_code_level_2") not in {None, "", "Unclassified"}],
+                key=lambda row: int(row.get("tickets", 0) or 0),
+                default=None,
+            )
+            items.append(
+                {
+                    "product_category": category,
+                    "product_name": product_name,
+                    "device_model": device_model,
+                    "tickets": counts["tickets"],
+                    "repeat_rate": self._ratio(counts["repeat_tickets"], counts["tickets"]),
+                    "bot_resolved_rate": self._ratio(counts["bot_resolved_tickets"], counts["tickets"]),
+                    "change_rate": self._metric(counts["tickets"], previous_counts["tickets"])["change"],
+                    "top_efc": max(efc_totals.items(), key=lambda item: item[1])[0] if efc_totals else "Others",
+                    "top_issue_detail": top_issue.get("fault_code_level_2") if top_issue else "Unclassified",
+                }
+            )
+        return sorted(items, key=lambda item: item["tickets"], reverse=True)
+
+    def _agg_firmware_watchlist(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            version = str(row.get("software_version") or "").strip()
+            if not version or version.lower() in {"unknown", "not available in source"}:
+                continue
+            grouped[version].append(row)
+        items = []
+        for version, version_rows in grouped.items():
+            counts = self._sum_counts(version_rows)
+            issue_totals: dict[str, int] = defaultdict(int)
+            product_totals: dict[str, int] = defaultdict(int)
+            for row in version_rows:
+                issue_totals[str(row.get("fault_code_level_2") or "Unclassified")] += int(row.get("tickets", 0) or 0)
+                product_totals[str(row.get("product_name") or "Other")] += int(row.get("tickets", 0) or 0)
+            items.append(
+                {
+                    "software_version": version,
+                    "tickets": counts["tickets"],
+                    "repeat_rate": self._ratio(counts["repeat_tickets"], counts["tickets"]),
+                    "bot_resolved_rate": self._ratio(counts["bot_resolved_tickets"], counts["tickets"]),
+                    "top_issue_detail": max(issue_totals.items(), key=lambda item: item[1])[0] if issue_totals else "Unclassified",
+                    "top_product": max(product_totals.items(), key=lambda item: item[1])[0] if product_totals else "Other",
+                }
+            )
+        return sorted(items, key=lambda item: item["tickets"], reverse=True)
+
+    def _capabilities(self, rows: list[dict[str, Any]]) -> dict[str, bool]:
+        has_device_model = any(str(row.get("device_model") or "").strip() for row in rows)
+        has_software_version = any(
+            str(row.get("software_version") or "").strip()
+            and str(row.get("software_version") or "").strip().lower() not in {"unknown", "not available in source"}
+            for row in rows
+        )
+        return {
+            "device_model": has_device_model,
+            "software_version": has_software_version,
+        }
+
     def _agg_issues(self, current_rows: list[dict[str, Any]], previous_rows: list[dict[str, Any]]) -> list[AggregateIssue]:
         grouped_current = self._group_issue_rows(current_rows)
         grouped_previous = self._group_issue_rows(previous_rows)
@@ -1056,6 +1146,8 @@ class AnalyticsService:
             },
             "categories": ordered_counts(daily_rows, "product_category"),
             "products": ordered_counts(daily_rows, "product_name"),
+            "device_models": ordered_counts(daily_rows, "device_model"),
+            "software_versions": ordered_counts(daily_rows, "software_version"),
             "products_by_category": {
                 category: [label for label, _ in sorted(items.items(), key=lambda item: item[1], reverse=True)]
                 for category, items in sorted(products_by_category.items())
@@ -1077,6 +1169,10 @@ class AnalyticsService:
             exclude_installation=filters.exclude_installation,
             exclude_blank_chat=filters.exclude_blank_chat,
             exclude_unclassified_blank=filters.exclude_unclassified_blank,
+            categories=list(filters.categories),
+            products=list(filters.products),
+            device_models=list(filters.device_models),
+            software_versions=list(filters.software_versions),
             departments=list(filters.departments),
             channels=list(filters.channels),
             statuses=list(filters.statuses),
@@ -1096,6 +1192,7 @@ class AnalyticsService:
             (
                 filters.categories,
                 filters.products,
+                filters.device_models,
                 filters.efcs,
             )
         )
@@ -1106,7 +1203,7 @@ class AnalyticsService:
             remapped = [row for row in remapped if self._matches_mapping_filters(row, filters)]
         key_fields = (
             "metric_date", "product_category", "product_name", "product_family", "executive_fault_code",
-            "fault_code", "fault_code_level_1", "fault_code_level_2", "department_name", "channel",
+            "fault_code", "fault_code_level_1", "fault_code_level_2", "device_model", "software_version", "department_name", "channel",
             "normalized_bot_action", "bot_outcome", "status",
         )
         sum_fields = (
@@ -1124,7 +1221,7 @@ class AnalyticsService:
             remapped = [row for row in remapped if self._matches_mapping_filters(row, filters)]
         key_fields = (
             "metric_date", "product_category", "product_name", "product_family", "executive_fault_code",
-            "fault_code", "fault_code_level_1", "fault_code_level_2", "department_name", "channel", "normalized_bot_action",
+            "fault_code", "fault_code_level_1", "fault_code_level_2", "device_model", "software_version", "department_name", "channel", "normalized_bot_action",
         )
         sum_fields = (
             "tickets", "repair_field_tickets", "installation_field_tickets", "repeat_tickets", "bot_resolved_tickets",
@@ -1156,6 +1253,8 @@ class AnalyticsService:
             product_category = map_product_category(product_name, product_family, filters.product_category_overrides)
             self._product_category_cache[product_key] = product_category
         mapped["product_category"] = product_category
+        mapped["device_model"] = str(mapped.get("device_model") or "Unknown")
+        mapped["software_version"] = str(mapped.get("software_version") or "Not available in source")
         fc1 = str(mapped.get("fault_code_level_1") or mapped.get("normalized_fault_code_l1") or "")
         fc2 = str(mapped.get("fault_code_level_2") or mapped.get("normalized_fault_code_l2") or "")
         efc_overrides = tuple(sorted((filters.efc_overrides or {}).items()))
@@ -1169,6 +1268,12 @@ class AnalyticsService:
 
     def _matches_mapping_filters(self, row: dict[str, Any], filters: DashboardFilters) -> bool:
         if filters.categories and str(row.get("product_category") or "Other") not in filters.categories:
+            return False
+        if filters.products and str(row.get("product_name") or "Other") not in filters.products:
+            return False
+        if filters.device_models and str(row.get("device_model") or "Unknown") not in filters.device_models:
+            return False
+        if filters.software_versions and str(row.get("software_version") or "Not available in source") not in filters.software_versions:
             return False
         if filters.efcs and str(row.get("executive_fault_code") or "Others") not in filters.efcs:
             return False
@@ -1290,6 +1395,7 @@ class AnalyticsService:
         issue_totals: dict[tuple[str, str], dict[str, Any]] = {}
         efc_totals: dict[str, int] = defaultdict(int)
         product_fault_totals: dict[tuple[str, str, str, str], int] = defaultdict(int)
+        device_model_fault_totals: dict[tuple[str, str, str, str, str, str], int] = defaultdict(int)
         for row in mapped.get("issues", []):
             issue_detail = str(row.get("label") or row.get("fault_code_level_2") or "")
             original_efc = str(row.get("executive_fault_code") or "Others")
@@ -1320,6 +1426,18 @@ class AnalyticsService:
             )
             product_fault_totals[key] += int(row.get("tickets", 0) or 0)
             efc_totals[effective_efc] += 0
+        for row in mapped.get("device_model_fault_daily", []):
+            issue_detail = str(row.get("fault_code_level_2") or "")
+            effective_efc = map_executive_fault_code(None, issue_detail, filters.efc_overrides)
+            key = (
+                str(row.get("metric_date") or ""),
+                str(row.get("device_model") or "Unknown"),
+                effective_efc,
+                str(row.get("fault_code_level_1") or "Unclassified"),
+                issue_detail,
+                str(row.get("resolution") or "Unknown"),
+            )
+            device_model_fault_totals[key] += int(row.get("tickets", 0) or 0)
         mapped["issues"] = sorted(issue_totals.values(), key=lambda item: item["tickets"], reverse=True)
         mapped["efcs"] = [
             {"label": label, "tickets": tickets}
@@ -1336,6 +1454,18 @@ class AnalyticsService:
                 "tickets": tickets,
             }
             for (metric_date, product_name, executive_fault_code, fault_code_level_1, fault_code_level_2, resolution), tickets in sorted(product_fault_totals.items())
+        ]
+        mapped["device_model_fault_daily"] = [
+            {
+                "metric_date": metric_date,
+                "device_model": device_model,
+                "executive_fault_code": executive_fault_code,
+                "fault_code_level_1": fault_code_level_1,
+                "fault_code_level_2": fault_code_level_2,
+                "resolution": resolution,
+                "tickets": tickets,
+            }
+            for (metric_date, device_model, executive_fault_code, fault_code_level_1, fault_code_level_2, resolution), tickets in sorted(device_model_fault_totals.items())
         ]
         return mapped
 
@@ -1488,10 +1618,11 @@ class AnalyticsService:
                 "window_start": "",
                 "window_end": "",
                 "data_confidence_note": error,
+                "capabilities": {"device_model": False, "software_version": False},
                 "freshness": {"source_max_date": "", "clickhouse_max_date": "", "status": "Unavailable"},
             },
             "filters": asdict(filters),
-            "filter_options": {"date_bounds": {"min": "", "max": ""}, "categories": [], "products": [], "products_by_category": {}, "departments": [], "channels": [], "efcs": [], "issue_details": [], "statuses": [], "fc1": [], "fc2": [], "bot_actions": []},
+            "filter_options": {"date_bounds": {"min": "", "max": ""}, "categories": [], "products": [], "device_models": [], "software_versions": [], "products_by_category": {}, "departments": [], "channels": [], "efcs": [], "issue_details": [], "statuses": [], "fc1": [], "fc2": [], "bot_actions": []},
             "kpis": {
                 "tickets": {"value": 0, "change": 0.0},
                 "installation_tickets": {"value": 0.0, "change": 0.0},
@@ -1503,8 +1634,10 @@ class AnalyticsService:
               "repeat_analysis": {"overview": {}, "aging": [], "same_issue_mix": [], "trend": [], "products": [], "categories": [], "efcs": [], "fc2": [], "resolution_fallout": [], "transitions": []},
               "category_health": [],
               "product_health": [],
+              "model_health": [],
               "issue_views": {"highest_volume": [], "installation_tickets": [], "repeat_heavy": [], "bot_leakage": []},
               "rising_signals": [],
+              "firmware_watchlist": [],
               "service_ops": {"category_mix": [], "department_mix": [], "channel_mix": [], "bot_action_mix": [], "installation_mix": []},
             "bot_summary": {"overview": {}, "by_product": [], "best_issues": [], "leaky_issues": []},
             "pipeline_health": {"status": "Unavailable", "last_run_at": "Unknown", "duration_minutes": 0, "rows_fetched": 0, "rows_inserted": 0, "recent_runs": []},
