@@ -95,6 +95,16 @@ class Settings:
     agg_health_score_table: str = os.getenv("QUBO_AGG_HEALTH_SCORE_TABLE", "agg_health_score")
     agg_data_quality_table: str = os.getenv("QUBO_AGG_DATA_QUALITY_TABLE", "agg_data_quality")
     pipeline_log_table: str = os.getenv("QUBO_PIPELINE_LOG_TABLE", "pipeline_log")
+    auth_enabled: bool = os.getenv("QUBO_AUTH_ENABLED", "true").lower() == "true"
+    auth_allowed_domain: str = os.getenv("QUBO_AUTH_ALLOWED_DOMAIN", "@heroelectronix.com").lower()
+    auth_session_secret: str = os.getenv("QUBO_AUTH_SESSION_SECRET", "")
+    auth_session_days: int = int(os.getenv("QUBO_AUTH_SESSION_DAYS", "7"))
+    auth_otp_minutes: int = int(os.getenv("QUBO_AUTH_OTP_MINUTES", "10"))
+    smtp_host: str | None = os.getenv("QUBO_SMTP_HOST")
+    smtp_port: int = int(os.getenv("QUBO_SMTP_PORT", "587"))
+    smtp_user: str | None = os.getenv("QUBO_SMTP_USER")
+    smtp_password: str | None = os.getenv("QUBO_SMTP_PASSWORD")
+    smtp_sender: str | None = os.getenv("QUBO_SMTP_SENDER")
 
     @property
     def zoho_db(self) -> DatabaseConfig:

@@ -1,0 +1,7 @@
+FROM zoho-dashboard-qubo-dashboard-api:latest
+
+WORKDIR /app
+
+COPY . .
+
+CMD ["python", "-m", "qubo_dashboard.run"]

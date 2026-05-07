@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 from time import perf_counter
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
 from .analytics import AnalyticsService
+from .auth import current_user, logout, request_otp, verify_otp
 from .models import DashboardFilters
 from .pipeline.service import PipelineManager
 from .repository import TicketRepository
@@ -110,10 +112,36 @@ app = FastAPI(title="Qubo Support Executive Board")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allowed_origins,
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class OtpRequest(BaseModel):
+    email: str
+
+
+class OtpVerifyRequest(BaseModel):
+    email: str
+    otp: str
+
+
+AUTH_EXEMPT_API_PATHS = {
+    "/api/auth/request-otp",
+    "/api/auth/verify",
+    "/api/auth/session",
+    "/api/auth/logout",
+    "/api/health",
+}
+
+
+@app.middleware("http")
+async def enforce_dashboard_auth(request: Request, call_next):
+    if settings.auth_enabled and request.url.path.startswith("/api/") and request.url.path not in AUTH_EXEMPT_API_PATHS:
+        if not current_user(request):
+            return JSONResponse({"detail": "Login required."}, status_code=401)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -147,6 +175,28 @@ async def add_no_store_for_api(request: Request, call_next):
         request_id=request_id,
     )
     return response
+
+
+@app.post("/api/auth/request-otp")
+def auth_request_otp(payload: OtpRequest) -> dict:
+    return request_otp(payload.email)
+
+
+@app.post("/api/auth/verify")
+def auth_verify_otp(payload: OtpVerifyRequest, request: Request, response: Response) -> dict:
+    return verify_otp(payload.email, payload.otp, request, response)
+
+
+@app.get("/api/auth/session")
+def auth_session(request: Request) -> dict:
+    user = current_user(request)
+    return {"authenticated": bool(user), "user": user}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(response: Response) -> dict:
+    return logout(response)
+
 
 @app.get("/api/dashboard")
 def dashboard(

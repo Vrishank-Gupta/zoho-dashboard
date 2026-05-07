@@ -10,6 +10,23 @@
   <link rel="stylesheet" href="./styles.css?v=restyle30">
 </head>
 <body>
+  <section class="auth-gate" id="authGate">
+    <form class="auth-panel" id="authForm">
+      <div class="section-label">Secure access</div>
+      <h1 class="auth-title">Qubo Support Board</h1>
+      <p class="auth-copy" id="authCopy">Use your Hero Electronix email to receive a one-time password.</p>
+      <label class="field-label auth-field">
+        <span>Email</span>
+        <input id="authEmail" type="email" autocomplete="email" placeholder="name@heroelectronix.com" required>
+      </label>
+      <label class="field-label auth-field hidden" id="authOtpField">
+        <span>OTP</span>
+        <input id="authOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code">
+      </label>
+      <div class="auth-error hidden" id="authError"></div>
+      <button class="primary-btn auth-submit" id="authSubmit" type="submit">Send OTP</button>
+    </form>
+  </section>
   <main class="board-shell">
     <header class="hero">
       <div>

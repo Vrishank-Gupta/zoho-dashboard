@@ -210,10 +210,21 @@ const state = {
   currentDrilldownMeta: null,
   dashboardRequestId: 0,
   warmCacheSignature: "",
+  authEmail: "",
+  authStep: "email",
+  dashboardInitialized: false,
 };
 state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
 
 const els = {
+  authGate: document.getElementById("authGate"),
+  authForm: document.getElementById("authForm"),
+  authEmail: document.getElementById("authEmail"),
+  authOtp: document.getElementById("authOtp"),
+  authOtpField: document.getElementById("authOtpField"),
+  authCopy: document.getElementById("authCopy"),
+  authError: document.getElementById("authError"),
+  authSubmit: document.getElementById("authSubmit"),
   headline: document.getElementById("headline"),
   summary: document.getElementById("summary"),
   sourceBadge: document.getElementById("sourceBadge"),
@@ -289,7 +300,24 @@ const els = {
 
 boot();
 
-function boot() {
+async function boot() {
+  bindAuthEvents();
+  const session = await checkAuthSession();
+  if (!session.authenticated) {
+    showAuthGate();
+    return;
+  }
+  hideAuthGate();
+  initializeDashboard();
+}
+
+function initializeDashboard() {
+  if (state.dashboardInitialized) {
+    if (IS_ADMIN_MODE) renderActiveView();
+    else loadDashboard();
+    return;
+  }
+  state.dashboardInitialized = true;
   bindEvents();
   els.viewTabs?.classList.add("hidden");
   renderSegmented(els.mappingStudioTabs, MAPPING_STUDIO_TABS, state.mappingStudioTab, (value) => {
@@ -315,6 +343,122 @@ function boot() {
     return;
   }
   loadDashboard();
+}
+
+function bindAuthEvents() {
+  els.authForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    clearAuthError();
+    const email = String(els.authEmail?.value || "").trim().toLowerCase();
+    if (!email.endsWith("@heroelectronix.com")) {
+      showAuthError("Use an email address ending with @heroelectronix.com.");
+      return;
+    }
+    if (state.authStep === "email") {
+      await sendOtp(email);
+      return;
+    }
+    await verifyOtp(email, String(els.authOtp?.value || "").trim());
+  });
+}
+
+async function checkAuthSession() {
+  try {
+    const response = await fetch(apiUrl("/api/auth/session"), { cache: "no-store", credentials: "include" });
+    if (!response.ok) return { authenticated: false };
+    return await response.json();
+  } catch (error) {
+    return { authenticated: false };
+  }
+}
+
+async function sendOtp(email) {
+  setAuthBusy(true, "Sending...");
+  try {
+    const response = await fetch(apiUrl("/api/auth/request-otp"), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const payload = await readJson(response);
+    if (!response.ok) throw new Error(payload?.detail || `API ${response.status}`);
+    state.authEmail = email;
+    state.authStep = "otp";
+    els.authOtpField?.classList.remove("hidden");
+    if (els.authOtp) {
+      els.authOtp.required = true;
+      els.authOtp.value = "";
+      els.authOtp.focus();
+    }
+    if (els.authCopy) els.authCopy.textContent = `Enter the OTP sent to ${email}. It is valid for ${payload.expires_in_minutes || 10} minutes.`;
+    if (els.authSubmit) els.authSubmit.textContent = "Verify OTP";
+  } catch (error) {
+    showAuthError(error.message || "Could not send OTP.");
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+async function verifyOtp(email, otp) {
+  if (!/^\d{6}$/.test(otp)) {
+    showAuthError("Enter the 6-digit OTP.");
+    return;
+  }
+  setAuthBusy(true, "Verifying...");
+  try {
+    const response = await fetch(apiUrl("/api/auth/verify"), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, otp }),
+    });
+    const payload = await readJson(response);
+    if (!response.ok) throw new Error(payload?.detail || `API ${response.status}`);
+    hideAuthGate();
+    initializeDashboard();
+  } catch (error) {
+    showAuthError(error.message || "OTP verification failed.");
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+function showAuthGate() {
+  els.authGate?.classList.remove("hidden");
+  els.authEmail?.focus();
+}
+
+function hideAuthGate() {
+  els.authGate?.classList.add("hidden");
+}
+
+function setAuthBusy(isBusy, label = "") {
+  if (els.authSubmit) {
+    els.authSubmit.disabled = Boolean(isBusy);
+    if (label) els.authSubmit.textContent = label;
+    else els.authSubmit.textContent = state.authStep === "otp" ? "Verify OTP" : "Send OTP";
+  }
+}
+
+function showAuthError(message) {
+  if (!els.authError) return;
+  els.authError.textContent = message;
+  els.authError.classList.remove("hidden");
+}
+
+function clearAuthError() {
+  if (!els.authError) return;
+  els.authError.textContent = "";
+  els.authError.classList.add("hidden");
+}
+
+async function readJson(response) {
+  try {
+    return await response.json();
+  } catch (error) {
+    return {};
+  }
 }
 
 function bindEvents() {
@@ -432,7 +576,7 @@ async function loadDashboard() {
   const params = buildQueryParams(state.filters, { includeOverrides: false });
   params.set("_request_id", String(requestId));
   try {
-    const response = await fetch(apiUrlWithParams("/api/dashboard", params), { cache: "no-store" });
+    const response = await apiFetch(apiUrlWithParams("/api/dashboard", params), { cache: "no-store" });
     if (!response.ok) throw new Error(`API ${response.status}`);
     const payload = await response.json();
     if (requestId !== state.dashboardRequestId) return;
@@ -530,7 +674,7 @@ function warmCommonDashboardWindows() {
     }
     const params = buildQueryParams(warmedFilters, { includeOverrides: false });
     window.setTimeout(() => {
-      fetch(apiUrlWithParams("/api/dashboard", params), { cache: "no-store" })
+      apiFetch(apiUrlWithParams("/api/dashboard", params), { cache: "no-store" })
         .catch(() => {})
         .finally(() => warmNext(index + 1));
     }, index === 0 ? 1000 : 200);
@@ -1612,7 +1756,7 @@ async function loadMappingStudio() {
   renderMappingStudio(state.mappingStudioData || {});
   try {
     const params = buildQueryParams(state.filters, { includeOverrides: false });
-    const response = await fetch(apiUrlWithParams("/api/mapping-studio", params));
+    const response = await apiFetch(apiUrlWithParams("/api/mapping-studio", params));
     if (!response.ok) throw new Error(`API ${response.status}`);
     const payload = await response.json();
     state.mappingStudioData = payload.mapping_studio || {};
@@ -1630,7 +1774,7 @@ async function runPipeline() {
   els.runPipelineBtn.disabled = true;
   els.runPipelineBtn.textContent = "Starting...";
   try {
-    const response = await fetch(apiUrl("/api/pipeline/run"), { method: "POST" });
+    const response = await apiFetch(apiUrl("/api/pipeline/run"), { method: "POST" });
     if (!response.ok) throw new Error(`API ${response.status}`);
     els.runPipelineBtn.textContent = "Running...";
     prependPipelineMessage("warn", "Pipeline running", "Waiting for ETL to complete before refreshing the board.");
@@ -1653,7 +1797,7 @@ async function runPipeline() {
 async function waitForPipelineCompletion(timeoutMs = 240000, intervalMs = 2500) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const response = await fetch(apiUrl("/api/pipeline/status"), { cache: "no-store" });
+    const response = await apiFetch(apiUrl("/api/pipeline/status"), { cache: "no-store" });
     if (!response.ok) throw new Error(`API ${response.status}`);
     const payload = await response.json();
     renderPipeline({
@@ -1766,7 +1910,7 @@ async function openIssueDrilldown(issueId, options = {}) {
   return;
   try {
     const params = buildQueryParams(state.filters);
-    const response = await fetch(apiUrlWithParams(`/api/drilldown/issue/${encodeURIComponent(issueId)}`, params));
+    const response = await apiFetch(apiUrlWithParams(`/api/drilldown/issue/${encodeURIComponent(issueId)}`, params));
     const payload = await response.json();
     const issue = payload.issue || {};
     els.drilldownTitle.textContent = issue.fault_code_level_2 || "Issue detail";
@@ -1986,7 +2130,7 @@ async function refreshCurrentDrilldown() {
     const params = buildQueryParams(state.drilldownFilters || state.filters);
     params.set("category", state.currentDrilldownMeta?.category || "");
     params.set("product_name", state.currentDrilldownMeta?.product_name || "");
-    const response = await fetch(apiUrlWithParams("/api/drilldown/product", params));
+    const response = await apiFetch(apiUrlWithParams("/api/drilldown/product", params));
     const payload = await response.json();
     state.currentDrilldown = payload.drilldown || {};
     renderDrilldownFilters();
@@ -1996,7 +2140,7 @@ async function refreshCurrentDrilldown() {
   if (state.currentDrilldownKind === "category") {
     const params = buildQueryParams(state.drilldownFilters || state.filters);
     params.set("category", state.currentDrilldownMeta?.category || "");
-    const response = await fetch(apiUrlWithParams("/api/drilldown/category", params));
+    const response = await apiFetch(apiUrlWithParams("/api/drilldown/category", params));
     const payload = await response.json();
     state.currentCategoryDrilldown = payload.drilldown || {};
     state.currentDrilldown = state.currentCategoryDrilldown;
@@ -2006,7 +2150,7 @@ async function refreshCurrentDrilldown() {
   }
   if (state.currentDrilldownKind === "issue") {
     const params = buildQueryParams(state.drilldownFilters || state.filters);
-    const response = await fetch(apiUrlWithParams(`/api/drilldown/issue/${encodeURIComponent(state.currentDrilldownMeta?.issue_id || "")}`, params));
+    const response = await apiFetch(apiUrlWithParams(`/api/drilldown/issue/${encodeURIComponent(state.currentDrilldownMeta?.issue_id || "")}`, params));
     const payload = await response.json();
     const issue = payload.issue || {};
     els.drilldownTitle.textContent = issue.fault_code_level_2 || "Issue detail";
@@ -2020,7 +2164,7 @@ async function refreshCurrentDrilldown() {
     params.set("kind", state.currentDrilldownMeta?.kind || "");
     params.set("label", state.currentDrilldownMeta?.label || "");
     if (state.currentDrilldownMeta?.secondary) params.set("secondary", state.currentDrilldownMeta.secondary);
-    const response = await fetch(apiUrlWithParams("/api/drilldown/repeat", params));
+    const response = await apiFetch(apiUrlWithParams("/api/drilldown/repeat", params));
     const payload = await response.json();
     state.currentDrilldown = payload.drilldown || {};
     renderRepeatDrilldownPanels(state.currentDrilldown);
@@ -3734,7 +3878,7 @@ async function saveMappingWorkbook() {
     fault_code_level_2: row.fault_code_level_2,
     effective_efc: state.mappingDraft.efc_overrides[String(row.fault_code_level_2).toLowerCase()] || row.base_efc,
   }));
-  const response = await fetch(apiUrl("/api/admin/mapping/save"), {
+  const response = await apiFetch(apiUrl("/api/admin/mapping/save"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ product_rows: productRows, fc2_rows: fc2Rows }),
@@ -3755,7 +3899,7 @@ async function uploadActiveMappingCsv(event) {
   if (!file) return;
   const content = await file.text();
   const path = state.mappingStudioTab === "fc2" ? "/api/admin/mapping/efc.csv" : "/api/admin/mapping/product.csv";
-  const response = await fetch(apiUrl(path), {
+  const response = await apiFetch(apiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "text/csv; charset=utf-8" },
     body: content,
@@ -3770,6 +3914,23 @@ async function uploadActiveMappingCsv(event) {
 function apiUrl(path) {
   const separator = path.includes("?") ? "&" : "?";
   return `${state.apiBaseUrl}${path}${separator}_ts=${Date.now()}`;
+}
+
+async function apiFetch(url, options = {}) {
+  const response = await fetch(url, { ...options, credentials: "include" });
+  if (response.status === 401) {
+    state.authStep = "email";
+    state.authEmail = "";
+    els.authOtpField?.classList.add("hidden");
+    if (els.authOtp) {
+      els.authOtp.required = false;
+      els.authOtp.value = "";
+    }
+    if (els.authSubmit) els.authSubmit.textContent = "Send OTP";
+    if (els.authCopy) els.authCopy.textContent = "Use your Hero Electronix email to receive a one-time password.";
+    showAuthGate();
+  }
+  return response;
 }
 
 function apiUrlWithParams(path, params) {

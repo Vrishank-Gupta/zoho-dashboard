@@ -1,0 +1,7 @@
+FROM zoho-dashboard-qubo-clickhouse-etl:latest
+
+WORKDIR /app
+
+COPY . .
+
+CMD ["python", "-m", "qubo_dashboard.clickhouse_analytics.scheduler"]
