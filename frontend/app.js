@@ -2281,11 +2281,11 @@ function renderDrilldownPanels(drilldown) {
       <div class="drilldown-two-col">
         <div class="mini-panel">
           <h3>Device models in scope</h3>
-          ${renderModelLeaderboard(productModelLeaderboard, { clickable: true })}
+          ${renderModelLeaderboard(productModelLeaderboard, { clickable: true, searchable: true })}
         </div>
         <div class="mini-panel">
           <h3>Model x issue heatmap</h3>
-          ${renderCategoryFaultMatrices(productModelFaultMatrices)}
+          ${renderCategoryFaultMatricesWithSearch(productModelFaultMatrices)}
         </div>
       </div>
     </section>` : ""}
@@ -2336,13 +2336,12 @@ function renderDrilldownPanels(drilldown) {
   els.drilldownBody.querySelectorAll("[data-model-scope]").forEach((row) => {
     row.addEventListener("click", () => {
       const deviceModel = row.dataset.modelScope || "Unknown";
-      if (state.currentDrilldownKind === "product") {
-        openProductDrilldown(state.currentDrilldownMeta?.category || "", state.currentDrilldownMeta?.product_name || "", {
-          device_models: [deviceModel],
-        });
-      }
+      state.drilldownFilters.device_models = [deviceModel];
+      renderDrilldownFilters();
+      scheduleDrilldownRefresh();
     });
   });
+  bindModelSearch(els.drilldownBody);
   bindIssueTrendFilters(els.drilldownBody);
   els.drilldownBody.querySelectorAll("[data-category-bucket]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2499,8 +2498,8 @@ function renderCategoryDrilldownPanels(drilldown) {
     <section class="drilldown-section">
       <div class="section-label">Model diagnosis</div>
       <div class="drilldown-two-col">
-        <div class="mini-panel"><h3>Device models in category</h3>${renderModelLeaderboard(categoryModelRows, { showBotResolved: true, clickable: true })}</div>
-        <div class="mini-panel"><h3>Model x issue heatmap</h3>${renderCategoryFaultMatrices(deviceModelFaultMatrices)}</div>
+        <div class="mini-panel"><h3>Device models in category</h3>${renderModelLeaderboard(categoryModelRows, { showBotResolved: true, clickable: true, searchable: true })}</div>
+        <div class="mini-panel"><h3>Model x issue heatmap</h3>${renderCategoryFaultMatricesWithSearch(deviceModelFaultMatrices)}</div>
       </div>
     </section>` : ""}
     ${firmwareSection}`;
@@ -2508,14 +2507,13 @@ function renderCategoryDrilldownPanels(drilldown) {
   els.drilldownBody.querySelectorAll("[data-model-scope]").forEach((row) => {
     row.addEventListener("click", () => {
       const deviceModel = row.dataset.modelScope || "Unknown";
-      if (state.currentDrilldownKind === "category") {
-        state.drilldownFilters = state.drilldownFilters || structuredClone(state.filters);
-        state.drilldownFilters.device_models = [deviceModel];
-        renderDrilldownFilters();
-        scheduleDrilldownRefresh();
-      }
+      state.drilldownFilters = state.drilldownFilters || structuredClone(state.filters);
+      state.drilldownFilters.device_models = [deviceModel];
+      renderDrilldownFilters();
+      scheduleDrilldownRefresh();
     });
   });
+  bindModelSearch(els.drilldownBody);
 }
 
 function renderIssueWorkspacePanels(drilldown) {
@@ -2599,7 +2597,7 @@ function renderIssueWorkspacePanels(drilldown) {
     <section class="drilldown-section">
       <div class="section-label">Concentration</div>
       <div class="drilldown-two-col">
-        ${state.capabilities?.device_model ? `<div class="mini-panel"><h3>Models carrying this issue</h3>${renderModelLeaderboard(modelRows)}</div>` : ""}
+        ${state.capabilities?.device_model ? `<div class="mini-panel"><h3>Models carrying this issue</h3>${renderModelLeaderboard(modelRows, { clickable: true, searchable: true })}</div>` : ""}
         <div class="mini-panel"><h3>Support team mix</h3>${renderMixListHtml(departments)}</div>
         <div class="mini-panel"><h3>Channel mix</h3>${renderMixListHtml(channels)}</div>
       </div>
@@ -2636,6 +2634,15 @@ function renderIssueWorkspacePanels(drilldown) {
       renderIssueWorkspacePanels(state.currentDrilldown || drilldown);
     });
   });
+  els.drilldownBody.querySelectorAll("[data-model-scope]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const deviceModel = row.dataset.modelScope || "Unknown";
+      state.drilldownFilters.device_models = [deviceModel];
+      renderDrilldownFilters();
+      scheduleDrilldownRefresh();
+    });
+  });
+  bindModelSearch(els.drilldownBody);
 }
 
 function closeDrilldown() {
@@ -4676,7 +4683,11 @@ function buildCategoryModelLeaderboard(drilldown) {
 function renderModelLeaderboard(rows, options = {}) {
   if (!rows.length) return '<div class="empty-state">No device model data in the selected range.</div>';
   const showBotResolved = Boolean(options.showBotResolved);
+  const maxRows = options.maxRows || 20;
+  const visibleRows = rows.slice(0, maxRows);
+  const overflow = rows.length - visibleRows.length;
   return `
+    ${options.searchable ? `<input type="search" class="model-local-search" placeholder="Filter by model number…">` : ""}
     <table class="data-table compact-table">
       <thead>
         <tr>
@@ -4689,8 +4700,8 @@ function renderModelLeaderboard(rows, options = {}) {
         </tr>
       </thead>
       <tbody>
-        ${rows.slice(0, 12).map((row, index) => `
-          <tr class="click-row" ${options.clickable ? `data-model-scope="${escHtml(row.device_model || "Unknown")}"` : ""}>
+        ${visibleRows.map((row, index) => `
+          <tr class="${options.clickable ? "click-row" : ""}" data-model-name="${escHtml((row.device_model || "Unknown").toLowerCase())}" ${options.clickable ? `data-model-scope="${escHtml(row.device_model || "Unknown")}"` : ""}>
             <td class="num">${index + 1}</td>
             <td>${escHtml(row.device_model || "Unknown")}</td>
             <td class="num">${fmtNum(row.tickets || 0)}</td>
@@ -4700,7 +4711,38 @@ function renderModelLeaderboard(rows, options = {}) {
           </tr>
         `).join("")}
       </tbody>
-    </table>`;
+    </table>
+    ${overflow > 0 ? `<div class="model-table-overflow">Showing top ${maxRows} of ${rows.length} models · use the search above to narrow down</div>` : ""}`;
+}
+
+function bindModelSearch(scope) {
+  scope.querySelectorAll(".model-local-search").forEach((input) => {
+    const table = input.nextElementSibling;
+    if (!table) return;
+    input.addEventListener("input", () => {
+      const q = input.value.trim().toLowerCase();
+      table.querySelectorAll("tr[data-model-name]").forEach((row) => {
+        row.style.display = q && !row.dataset.modelName.includes(q) ? "none" : "";
+      });
+    });
+  });
+  scope.querySelectorAll(".model-heatmap-search").forEach((input) => {
+    const grid = input.nextElementSibling;
+    if (!grid || !grid.classList.contains("fault-matrix-grid")) return;
+    input.addEventListener("input", () => {
+      const q = input.value.trim().toLowerCase();
+      grid.querySelectorAll(".fault-product-card").forEach((card) => {
+        const name = card.querySelector("h4")?.textContent?.toLowerCase() || "";
+        card.style.display = q && !name.includes(q) ? "none" : "";
+      });
+    });
+  });
+}
+
+function renderCategoryFaultMatricesWithSearch(model) {
+  const inner = renderCategoryFaultMatrices(model);
+  if (!model.products.length) return inner;
+  return `<input type="search" class="model-heatmap-search" placeholder="Filter by model number…">${inner}`;
 }
 
 function renderVariantLeaderboard(rows, { label = "Firmware version", valueKey = "software_version", emptyMessage = "No firmware data in the selected range." } = {}) {
