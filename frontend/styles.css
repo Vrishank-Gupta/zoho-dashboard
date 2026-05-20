@@ -1166,12 +1166,13 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .donut-host {
   min-height: 220px;
+  container-type: inline-size;
 }
 
 .donut-card {
   display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(150px, 180px) minmax(180px, 1fr);
+  gap: 16px;
   align-items: start;
   background: linear-gradient(180deg, rgba(25, 29, 37, 0.98) 0%, rgba(19, 22, 28, 0.98) 100%);
   border: 1px solid var(--line);
@@ -1179,23 +1180,32 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   padding: 14px;
 }
 
+.donut-card svg {
+  width: 100%;
+  max-width: 180px;
+  height: auto;
+}
+
 .donut-legend {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .donut-legend-item {
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: 12px minmax(110px, 1fr) auto;
   gap: 8px;
   align-items: start;
   font-size: 12px;
+  min-width: 0;
 }
 
 .donut-legend-item span:nth-child(2) {
   min-width: 0;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .donut-legend-item strong {
@@ -1207,6 +1217,20 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   width: 12px;
   height: 12px;
   border-radius: 50%;
+}
+
+@container (max-width: 380px) {
+  .donut-card {
+    grid-template-columns: 1fr;
+  }
+
+  .donut-card svg {
+    justify-self: center;
+  }
+
+  .donut-legend-item {
+    grid-template-columns: 12px minmax(0, 1fr) auto;
+  }
 }
 
 .mix-row {
