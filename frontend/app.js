@@ -213,6 +213,7 @@ const state = {
   authEmail: "",
   authStep: "email",
   dashboardInitialized: false,
+  pendingFilterChanges: false,
 };
 state.mappingDraft = cloneMappingOverrides(state.mappingOverrides);
 
@@ -253,6 +254,7 @@ const els = {
   reportingShortcuts: document.getElementById("reportingShortcuts"),
   primaryFilterGrid: document.getElementById("primaryFilterGrid"),
   secondaryFilterGrid: document.getElementById("secondaryFilterGrid"),
+  applyFilters: document.getElementById("applyFilters"),
   toggleAdvancedFilters: document.getElementById("toggleAdvancedFilters"),
   resetFilters: document.getElementById("resetFilters"),
   kpiStrip: document.getElementById("kpiStrip"),
@@ -462,6 +464,13 @@ async function readJson(response) {
 }
 
 function bindEvents() {
+  els.applyFilters?.addEventListener("click", () => {
+    if (!state.pendingFilterChanges) return;
+    normalizeAllSelectedFiltersInPlace();
+    syncDashboardBucketModes();
+    loadDashboard();
+  });
+
   els.toggleAdvancedFilters.addEventListener("click", () => {
     state.advancedFiltersOpen = !state.advancedFiltersOpen;
     renderFilterControls();
@@ -485,14 +494,14 @@ function bindEvents() {
     state.filters.date_start = els.dateStart.value;
     state.activePreset = "";
     syncDashboardBucketModes();
-    loadDashboard();
+    markFiltersPending();
   });
 
   els.dateEnd.addEventListener("change", () => {
     state.filters.date_end = els.dateEnd.value;
     state.activePreset = "";
     syncDashboardBucketModes();
-    loadDashboard();
+    markFiltersPending();
   });
 
   document.addEventListener("click", (event) => {
@@ -514,8 +523,7 @@ function bindEvents() {
       if (key && value) {
         state.filters[key] = (state.filters[key] || []).filter((item) => item !== value);
         renderFilterControls();
-        renderActiveChips();
-        loadDashboard();
+        markFiltersPending();
       }
       return;
     }
@@ -598,6 +606,7 @@ async function loadDashboard() {
     reconcileFilterState();
     syncDashboardBucketModes();
     reconcileIssueWidgetFilters();
+    clearFiltersPending();
     renderDateToolbar();
     renderTimeBucketControls();
       renderFilterControls();
@@ -633,6 +642,28 @@ function setDashboardBusy(isBusy) {
       button.disabled = Boolean(isBusy);
     });
   }
+  renderFilterApplyState();
+}
+
+function markFiltersPending() {
+  state.pendingFilterChanges = true;
+  renderFilterApplyState();
+}
+
+function clearFiltersPending() {
+  state.pendingFilterChanges = false;
+  renderFilterApplyState();
+}
+
+function renderFilterApplyState() {
+  if (!els.applyFilters) return;
+  const isBusy = document.body.classList.contains("dashboard-busy");
+  els.applyFilters.disabled = isBusy || !state.pendingFilterChanges;
+  els.applyFilters.textContent = isBusy
+    ? state.pendingFilterChanges ? "Applying..." : "Loading..."
+    : state.pendingFilterChanges
+      ? "Apply filters"
+      : "Applied";
 }
 
 function warmCommonDashboardWindows() {
@@ -864,7 +895,7 @@ function renderDateToolbar() {
       syncDashboardBucketModes();
       els.dateStart.value = state.filters.date_start;
       els.dateEnd.value = state.filters.date_end;
-      loadDashboard();
+      markFiltersPending();
     });
   });
   renderReportingShortcuts();
@@ -885,7 +916,8 @@ function renderReportingShortcuts() {
       state.filters[key] = !state.filters[key];
       if (key === "exclude_unclassified_blank") applyBlankUnclassifiedShortcut(state.filters[key]);
       normalizeAllSelectedFiltersInPlace();
-      loadDashboard();
+      renderFilterControls();
+      markFiltersPending();
     });
   });
 }
@@ -952,7 +984,7 @@ function renderFilterControls() {
             .map((item) => item.label)
             .filter((label) => !blocked.has(label));
           renderFilterControls();
-          loadDashboard();
+          markFiltersPending();
         });
       });
       grid.querySelectorAll("[data-filter-remove-all]").forEach((button) => {
@@ -960,14 +992,14 @@ function renderFilterControls() {
           const key = button.dataset.filterRemoveAll;
           state.filters[key] = [NONE_SENTINEL];
           renderFilterControls();
-          loadDashboard();
+          markFiltersPending();
         });
       });
       grid.querySelectorAll("[data-filter-option]").forEach((input) => {
         input.addEventListener("change", () => {
           toggleFilterValue(input.dataset.filterOption, input.value, input.checked);
           renderFilterControls();
-          loadDashboard();
+          markFiltersPending();
       });
     });
   });
@@ -1030,8 +1062,12 @@ function renderProductHealth() {
     return;
   }
   rows.sort((a, b) => {
-    const delta = Number(b[state.productSort] || 0) - Number(a[state.productSort] || 0);
-    return state.productSortDirection === "desc" ? delta : -delta;
+    const left = a[state.productSort];
+    const right = b[state.productSort];
+    const delta = state.productSort === "product_name" || state.productSort === "product_category"
+      ? String(left || "").localeCompare(String(right || ""))
+      : Number(left || 0) - Number(right || 0);
+    return state.productSortDirection === "desc" ? -delta : delta;
   });
   const sortHeader = (key, label, numeric = false) => {
     const active = state.productSort === key;
@@ -1256,7 +1292,6 @@ function renderRepeatOverview(overview) {
   const cards = [
     ["Repeat returns", overview.repeat_returns],
     ["Repeat rate", overview.repeat_rate],
-    ["Repeat customer events", overview.repeat_customer_events],
     ["Median return days", overview.median_return_days],
     ["Within 7 days", overview.within_7d_share],
     ["Within 30 days", overview.within_30d_share],
@@ -1418,7 +1453,7 @@ function renderIssueWidgetFilters() {
 
 function getIssueWidgetOptions() {
   const issueViews = state.payload?.issue_views || {};
-  const allItems = Object.values(issueViews).flat();
+  const allItems = issueViews[state.issueView] || [];
   const categoryCounts = new Map();
   const productCounts = new Map();
   allItems.forEach((item) => {
@@ -1495,12 +1530,12 @@ function renderBotTrend(points) {
   const pad = { top: 26, right: 58, bottom: 40, left: 56 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
-  const maxTickets = Math.max(...bucketed.map((item) => item.tickets || 0), 1);
+  const maxTickets = Math.max(...bucketed.map((item) => item.chat_tickets || 0), 1);
   const step = innerW / Math.max(bucketed.length, 1);
   const barW = Math.max(12, Math.min(30, step * 0.48));
   const showValueLabels = shouldShowChartValueLabels(bucketed.length, mode);
   const linePoints = bucketed.map((item, index) => {
-    const pct = item.tickets ? (item.bot_resolved_tickets || 0) / item.tickets : 0;
+    const pct = item.chat_tickets ? (item.chat_bot_resolved_tickets || 0) / item.chat_tickets : 0;
     return {
       x: pad.left + step * index + step / 2,
       y: pad.top + innerH - pct * innerH,
@@ -1510,8 +1545,8 @@ function renderBotTrend(points) {
     };
   });
   for (let index = 1; index < linePoints.length; index += 1) {
-    const previousTickets = Number(bucketed[index - 1]?.tickets || 0);
-    const currentTickets = Number(bucketed[index]?.tickets || 0);
+    const previousTickets = Number(bucketed[index - 1]?.chat_tickets || 0);
+    const currentTickets = Number(bucketed[index]?.chat_tickets || 0);
     linePoints[index].delta = previousTickets > 0 ? (currentTickets - previousTickets) / previousTickets : 0;
   }
   const linePath = linePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
@@ -1526,10 +1561,10 @@ function renderBotTrend(points) {
         return ratio === 0 || ratio === 1 ? `<text x="${pad.left - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="${VISUAL_THEME.muted}">${fmtNum(Math.round(maxTickets * ratio))}</text>` : "";
       }).join("")}
       ${bucketed.map((item, index) => {
-        const barH = ((item.tickets || 0) / maxTickets) * innerH;
+        const barH = ((item.chat_tickets || 0) / maxTickets) * innerH;
         const x = pad.left + step * index + (step - barW) / 2;
         const y = pad.top + innerH - barH;
-        return `${renderChartBar({ x, y, barW, barH, color: METRIC_VISUALS.tickets.fill, stroke: METRIC_VISUALS.tickets.stroke, radius: 4, title: `${item.label}: ${fmtNum(item.tickets || 0)} tickets, ${fmtPct(linePoints[index].pct)} bot resolved` })}${showValueLabels ? renderChartValueLabel(x + barW / 2, y - 10, fmtNum(item.tickets || 0)) : ""}${shouldShowAxisLabel(index, bucketed.length, mode) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>` : ""}`;
+        return `${renderChartBar({ x, y, barW, barH, color: METRIC_VISUALS.tickets.fill, stroke: METRIC_VISUALS.tickets.stroke, radius: 4, title: `${item.label}: ${fmtNum(item.chat_tickets || 0)} chat tickets, ${fmtPct(linePoints[index].pct)} bot resolved` })}${showValueLabels ? renderChartValueLabel(x + barW / 2, y - 10, fmtNum(item.chat_tickets || 0)) : ""}${shouldShowAxisLabel(index, bucketed.length, mode) ? `<text x="${x + barW / 2}" y="${height - 10}" text-anchor="middle" font-size="10" fill="${VISUAL_THEME.muted}">${escHtml(item.label)}</text>` : ""}`;
       }).join("")}
       <path d="${linePath}" fill="none" stroke="${VISUAL_THEME.teal}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path>
       ${linePoints.map((point, index) => `${renderChartPoint(point.x, point.y, VISUAL_THEME.teal, `${point.label}: ${fmtPct(point.pct)} bot resolved`) }${shouldShowDeltaLabel(index, bucketed.length, mode) ? renderChartPercentLabel(point.x, point.y - 16, point.pct) : ""}`).join("")}
@@ -1560,7 +1595,12 @@ function renderDonut(container, rows, label) {
 }
 
 function renderPipeline(pipeline) {
-  const statusClass = pipeline.status === "ok" ? "" : pipeline.status === "running" ? "warn" : "error";
+  const normalizedStatus = String(pipeline.status || "").toLowerCase();
+  const statusClass = ["ok", "success", "succeeded", "completed", "complete"].includes(normalizedStatus)
+    ? ""
+    : normalizedStatus === "running"
+      ? "warn"
+      : "error";
   const recent = pipeline.recent_runs || [];
   els.pipelineHealth.innerHTML = `
     <div class="pipeline-summary">
@@ -2389,16 +2429,12 @@ function renderCategoryDrilldownPanels(drilldown) {
   (drilldown.resolution_by_product || []).forEach((row) => {
     if (!topResolutionByProduct.has(row.product_name)) topResolutionByProduct.set(row.product_name, row.resolution || "Unknown");
   });
-  const categoryFirmwareRows = (drilldown.software_versions || []).map((row, index, arr) => {
-    const current = Number(row.tickets || 0);
-    const next = Number(arr[index + 1]?.tickets || 0);
-    return {
-      software_version: row.label || "Not available in source",
-      tickets: current,
-      change_rate: next > 0 ? (current - next) / next : current > 0 ? 1 : 0,
-      top_issue: ((drilldown.software_version_fault_daily || []).find((item) => (item.software_version || "Not available in source") === (row.label || "Not available in source"))?.fault_code_level_2) || "Unclassified",
-    };
-  });
+  const categoryFirmwareRows = buildVariantLeaderboard(
+    (drilldown.software_version_fault_daily || []).map((row) => ({ ...row, software_version: row.software_version || "Not available in source" })),
+    state.categoryDrilldownBucket,
+    "software_version",
+    "software_version",
+  );
   renderDrilldownTabs();
   const firmwareSection = state.capabilities?.software_version
     ? `
@@ -2703,7 +2739,6 @@ function renderRepeatDrilldownPanels(drilldown) {
       <div class="section-label">Snapshot</div>
       <div class="mini-summary-grid">
         ${renderSnapshotStat("Repeat returns", overview.repeat_returns?.value || 0, null, metricPreviousValue(overview.repeat_returns))}
-        ${renderSnapshotStat("Repeat customer events", overview.repeat_customer_events?.value || 0, null, metricPreviousValue(overview.repeat_customer_events))}
         ${renderSnapshotStat("Median return days", overview.median_return_days?.value || 0, null, metricPreviousValue(overview.median_return_days))}
         ${renderSnapshotStat("Within 7 days", overview.within_7d_share?.value || 0, overview.within_7d_share?.value || 0, metricPreviousValue(overview.within_7d_share))}
       </div>
@@ -3670,8 +3705,9 @@ function reconcileIssueWidgetFilters() {
 }
 
 function getControlOptions(control) {
+  const optionScope = state.options.scoped?.[control.key] || state.options;
   if (control.key === "products") {
-    const mapping = state.options.products_by_category || {};
+    const mapping = optionScope.products_by_category || {};
     const selectedCategories = state.filters.categories || [];
     const categories = selectedCategories.length ? selectedCategories : Object.keys(mapping);
     const counts = new Map();
@@ -3680,7 +3716,7 @@ function getControlOptions(control) {
     });
     return [...counts.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
   }
-  const raw = state.options[control.optionsKey] || [];
+  const raw = optionScope[control.optionsKey] || [];
   return raw.map((label, index) => ({ label, count: raw.length - index }));
 }
 
@@ -3748,6 +3784,10 @@ function bucketTimeline(points, mode) {
       installation_tickets: 0,
       bot_resolved_tickets: 0,
       repeat_tickets: 0,
+      chat_tickets: 0,
+      chat_bot_resolved_tickets: 0,
+      chat_bot_transferred_tickets: 0,
+      blank_chat_tickets: 0,
       _dates: new Set(),
     });
     const current = grouped.get(key);
@@ -3755,6 +3795,10 @@ function bucketTimeline(points, mode) {
     current.installation_tickets += Number(point.installation_tickets || 0);
     current.bot_resolved_tickets += Number(point.bot_resolved_tickets || 0);
     current.repeat_tickets += Number(point.repeat_tickets || 0);
+    current.chat_tickets += Number(point.chat_tickets || 0);
+    current.chat_bot_resolved_tickets += Number(point.chat_bot_resolved_tickets || 0);
+    current.chat_bot_transferred_tickets += Number(point.chat_bot_transferred_tickets || 0);
+    current.blank_chat_tickets += Number(point.blank_chat_tickets || 0);
     current._dates.add(isoDate(rawDate));
   });
   let entries = [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]));

@@ -247,6 +247,12 @@ class AnalyticsService:
         previous_start = previous_end - timedelta(days=(end_date - start_date).days)
         option_filters = self._mapping_option_filters(filters, start_date, end_date)
         needs_expanded_option_queries = self._needs_expanded_option_queries(filters)
+        option_control_keys = (
+            "categories", "products", "device_models", "software_versions", "efcs",
+            "departments", "channels", "statuses", "bot_actions",
+            "include_fc1", "exclude_fc1", "include_fc2", "exclude_fc2",
+            "include_bot_action", "exclude_bot_action",
+        )
 
         with ThreadPoolExecutor(max_workers=8) as pool:
             futures = {
@@ -259,6 +265,10 @@ class AnalyticsService:
             if needs_expanded_option_queries:
                 futures["option_daily"] = pool.submit(self._clickhouse.fetch_daily_rows, start_date, end_date, option_filters)
                 futures["option_issue"] = pool.submit(self._clickhouse.fetch_issue_rows, start_date, end_date, option_filters)
+                for control_key in option_control_keys:
+                    scoped_filters = self._scoped_option_filters(filters, start_date, end_date, control_key)
+                    futures[f"option_daily:{control_key}"] = pool.submit(self._clickhouse.fetch_daily_rows, start_date, end_date, scoped_filters)
+                    futures[f"option_issue:{control_key}"] = pool.submit(self._clickhouse.fetch_issue_rows, start_date, end_date, scoped_filters)
             if previous_end >= previous_start:
                 futures["previous_daily"] = pool.submit(self._clickhouse.fetch_daily_rows, previous_start, previous_end, filters)
                 futures["previous_issue"] = pool.submit(self._clickhouse.fetch_issue_rows, previous_start, previous_end, filters)
@@ -273,6 +283,15 @@ class AnalyticsService:
             previous_daily_rows = futures["previous_daily"].result() if "previous_daily" in futures else []
             previous_issue_rows = futures["previous_issue"].result() if "previous_issue" in futures else []
             previous_repeat_rows = futures["previous_repeat"].result() if "previous_repeat" in futures else []
+            scoped_option_rows = {
+                control_key: (
+                    futures[f"option_daily:{control_key}"].result(),
+                    futures[f"option_issue:{control_key}"].result(),
+                    self._scoped_option_filters(filters, start_date, end_date, control_key),
+                )
+                for control_key in option_control_keys
+                if f"option_daily:{control_key}" in futures
+            }
         current_daily_rows = self._mapped_daily_rows(current_daily_rows, filters)
         previous_daily_rows = self._mapped_daily_rows(previous_daily_rows, filters)
         current_issue_rows = self._mapped_issue_rows(current_issue_rows, filters)
@@ -280,6 +299,16 @@ class AnalyticsService:
         bot_rows = self._mapped_bot_rows(bot_rows, filters)
         option_daily_rows = self._mapped_daily_rows(option_daily_rows, option_filters, apply_mapping_filters=False)
         option_issue_rows = self._mapped_issue_rows(option_issue_rows, option_filters, apply_mapping_filters=False)
+        scoped_filter_options = {}
+        for control_key, (daily_rows, issue_rows, scoped_filters) in scoped_option_rows.items():
+            scoped_daily_rows = self._mapped_daily_rows(daily_rows, scoped_filters, apply_mapping_filters=True)
+            scoped_issue_rows = self._mapped_issue_rows(issue_rows, scoped_filters, apply_mapping_filters=True)
+            scoped_filter_options[control_key] = self._agg_filter_options(
+                scoped_daily_rows,
+                self._agg_issues(scoped_issue_rows, []),
+                min_date,
+                max_date,
+            )
 
         issues = self._agg_issues(current_issue_rows, previous_issue_rows)
         repeat_analysis = self._agg_repeat_analysis(
@@ -296,6 +325,8 @@ class AnalyticsService:
         service_ops = self._agg_service_ops(current_daily_rows)
         kpis = self._agg_kpis(current_daily_rows, previous_daily_rows)
         filter_options = self._agg_filter_options(option_daily_rows, self._agg_issues(option_issue_rows, []), min_date, max_date)
+        if scoped_filter_options:
+            filter_options["scoped"] = scoped_filter_options
         pipeline_health = self._agg_pipeline_health(pipeline_rows)
         freshness = self._build_freshness(max_date)
         capabilities = self._capabilities(current_daily_rows)
@@ -434,13 +465,29 @@ class AnalyticsService:
         }
 
     def _agg_timeline(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        grouped: dict[str, dict[str, int]] = defaultdict(lambda: {"tickets": 0, "installation_tickets": 0, "bot_resolved_tickets": 0, "repeat_tickets": 0})
+        grouped: dict[str, dict[str, int]] = defaultdict(
+            lambda: {
+                "tickets": 0,
+                "installation_tickets": 0,
+                "bot_resolved_tickets": 0,
+                "repeat_tickets": 0,
+                "chat_tickets": 0,
+                "chat_bot_resolved_tickets": 0,
+                "chat_bot_transferred_tickets": 0,
+                "blank_chat_tickets": 0,
+            }
+        )
         for row in rows:
             key = row["metric_date"].isoformat() if hasattr(row["metric_date"], "isoformat") else str(row["metric_date"])
             grouped[key]["tickets"] += int(row.get("tickets", 0) or 0)
             grouped[key]["installation_tickets"] += int(row.get("installation_field_tickets", 0) or 0)
             grouped[key]["bot_resolved_tickets"] += int(row.get("bot_resolved_tickets", 0) or 0)
             grouped[key]["repeat_tickets"] += int(row.get("repeat_tickets", 0) or 0)
+            if str(row.get("channel") or "") == "Chat":
+                grouped[key]["chat_tickets"] += int(row.get("tickets", 0) or 0)
+                grouped[key]["chat_bot_resolved_tickets"] += int(row.get("bot_resolved_tickets", 0) or 0)
+                grouped[key]["chat_bot_transferred_tickets"] += int(row.get("bot_transferred_tickets", 0) or 0)
+                grouped[key]["blank_chat_tickets"] += int(row.get("blank_chat_tickets", 0) or 0)
         return [{"date": day, **metrics} for day, metrics in sorted(grouped.items())]
 
     def _agg_repeat_analysis(
@@ -472,15 +519,15 @@ class AnalyticsService:
             "repeat_customer_events": self._metric(len(current_customers), len(previous_customers)),
             "median_return_days": self._metric(self._median_days(current_rows), self._median_days(previous_rows)),
             "within_7d_share": self._metric_ratio(
-                self._bucket_total(current_rows, {"0-7 days"}),
+                self._bucket_total(current_rows, {"0-2 days", "3-7 days"}),
                 current_returns,
-                self._bucket_total(previous_rows, {"0-7 days"}),
+                self._bucket_total(previous_rows, {"0-2 days", "3-7 days"}),
                 previous_returns,
             ),
             "within_30d_share": self._metric_ratio(
-                self._bucket_total(current_rows, {"0-7 days", "8-15 days", "16-30 days"}),
+                self._bucket_total(current_rows, {"0-2 days", "3-7 days", "8-15 days", "16-30 days"}),
                 current_returns,
-                self._bucket_total(previous_rows, {"0-7 days", "8-15 days", "16-30 days"}),
+                self._bucket_total(previous_rows, {"0-2 days", "3-7 days", "8-15 days", "16-30 days"}),
                 previous_returns,
             ),
         }
@@ -1169,12 +1216,41 @@ class AnalyticsService:
             exclude_installation=filters.exclude_installation,
             exclude_blank_chat=filters.exclude_blank_chat,
             exclude_unclassified_blank=filters.exclude_unclassified_blank,
+            categories=[],
+            products=[],
+            device_models=[],
+            software_versions=[],
+            departments=[],
+            channels=[],
+            efcs=[],
+            issue_details=[],
+            statuses=[],
+            bot_actions=[],
+            include_fc1=[],
+            exclude_fc1=[],
+            include_fc2=[],
+            exclude_fc2=[],
+            include_bot_action=[],
+            exclude_bot_action=[],
+            product_category_overrides=dict(filters.product_category_overrides),
+            efc_overrides=dict(filters.efc_overrides),
+        )
+
+    def _scoped_option_filters(self, filters: DashboardFilters, start_date: date, end_date: date, control_key: str) -> DashboardFilters:
+        scoped = DashboardFilters(
+            date_start=start_date.isoformat(),
+            date_end=end_date.isoformat(),
+            exclude_installation=filters.exclude_installation,
+            exclude_blank_chat=filters.exclude_blank_chat,
+            exclude_unclassified_blank=filters.exclude_unclassified_blank,
             categories=list(filters.categories),
             products=list(filters.products),
             device_models=list(filters.device_models),
             software_versions=list(filters.software_versions),
             departments=list(filters.departments),
             channels=list(filters.channels),
+            efcs=list(filters.efcs),
+            issue_details=list(filters.issue_details),
             statuses=list(filters.statuses),
             bot_actions=list(filters.bot_actions),
             include_fc1=list(filters.include_fc1),
@@ -1186,6 +1262,27 @@ class AnalyticsService:
             product_category_overrides=dict(filters.product_category_overrides),
             efc_overrides=dict(filters.efc_overrides),
         )
+        clear_fields = {
+            "categories": ("categories",),
+            "products": ("products",),
+            "device_models": ("device_models",),
+            "software_versions": ("software_versions",),
+            "efcs": ("efcs",),
+            "issue_details": ("issue_details",),
+            "departments": ("departments",),
+            "channels": ("channels",),
+            "statuses": ("statuses",),
+            "bot_actions": ("bot_actions",),
+            "include_fc1": ("include_fc1",),
+            "exclude_fc1": ("exclude_fc1",),
+            "include_fc2": ("include_fc2",),
+            "exclude_fc2": ("exclude_fc2",),
+            "include_bot_action": ("include_bot_action",),
+            "exclude_bot_action": ("exclude_bot_action",),
+        }.get(control_key, ())
+        for field_name in clear_fields:
+            setattr(scoped, field_name, [])
+        return scoped
 
     def _needs_expanded_option_queries(self, filters: DashboardFilters) -> bool:
         return any(
@@ -1193,7 +1290,19 @@ class AnalyticsService:
                 filters.categories,
                 filters.products,
                 filters.device_models,
+                filters.software_versions,
                 filters.efcs,
+                filters.issue_details,
+                filters.departments,
+                filters.channels,
+                filters.statuses,
+                filters.bot_actions,
+                filters.include_fc1,
+                filters.exclude_fc1,
+                filters.include_fc2,
+                filters.exclude_fc2,
+                filters.include_bot_action,
+                filters.exclude_bot_action,
             )
         )
 
@@ -1356,8 +1465,8 @@ class AnalyticsService:
             "category_options": [item for item in category_options if item],
             "efc_options": [item for item in efc_options if item],
             "active_overrides": {
-                "products": len(product_rows),
-                "efcs": len(fc2_rows),
+                "products": sum(1 for row in product_rows if row["overridden"]),
+                "efcs": sum(1 for row in fc2_rows if row["overridden"]),
             },
         }
 
