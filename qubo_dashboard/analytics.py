@@ -1389,12 +1389,9 @@ class AnalyticsService:
         if filters.exclude_unclassified_blank:
             product_name = str(row.get("product_name") or "").strip().lower()
             product_category = str(row.get("product_category") or "").strip().lower()
-            efc = str(row.get("executive_fault_code") or "").strip().lower()
             if product_name in {"blank product", "blankproduct", "-"}:
                 return False
             if product_category in {"blank product", "blankproduct", "-"}:
-                return False
-            if efc in {"blank", "unclassified"}:
                 return False
         return True
 

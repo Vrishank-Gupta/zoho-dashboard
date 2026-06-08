@@ -648,7 +648,7 @@ async function loadDashboard() {
     state.capabilities = payload?.meta?.capabilities || { device_model: false, software_version: false };
     const appliedDefaults = applyDefaultSelections();
     if (appliedDefaults) {
-      if (state.filters.exclude_unclassified_blank) applyBlankUnclassifiedShortcut(true);
+      if (state.filters.exclude_unclassified_blank) applyBlankProductShortcut(true);
       renderDateToolbar();
       renderFilterControls();
       loadDashboard();
@@ -813,9 +813,8 @@ function recommendedBucketMode(dateStart, dateEnd, bounds = {}) {
   return "monthly";
 }
 
-function applyBlankUnclassifiedShortcut(active) {
+function applyBlankProductShortcut(active) {
   const productExclusions = new Set(["blank product", "blankproduct"]);
-  const efcExclusions = new Set(["blank", "unclassified"]);
   const ensureExplicitSelection = (key) => {
     if ((state.filters[key] || []).length) return;
     const control = CONTROLS.find((item) => item.key === key);
@@ -823,24 +822,16 @@ function applyBlankUnclassifiedShortcut(active) {
     state.filters[key] = getControlOptions(control).map((item) => item.label);
   };
   ensureExplicitSelection("products");
-  ensureExplicitSelection("efcs");
   if (active) {
     state.filters.products = (state.filters.products || []).filter((label) => !productExclusions.has(String(label || "").trim().toLowerCase()));
-    state.filters.efcs = (state.filters.efcs || []).filter((label) => !efcExclusions.has(String(label || "").trim().toLowerCase()));
     return;
   }
   const allProducts = getControlOptions({ key: "products", optionsKey: "products" }).map((item) => item.label);
-  const allEfcs = getControlOptions({ key: "efcs", optionsKey: "efcs" }).map((item) => item.label);
   const productSet = new Set(state.filters.products || []);
-  const efcSet = new Set(state.filters.efcs || []);
   allProducts.forEach((label) => {
     if (productExclusions.has(String(label || "").trim().toLowerCase())) productSet.add(label);
   });
-  allEfcs.forEach((label) => {
-    if (efcExclusions.has(String(label || "").trim().toLowerCase())) efcSet.add(label);
-  });
   state.filters.products = [...productSet];
-  state.filters.efcs = [...efcSet];
 }
 
 function renderDashboard(payload) {
@@ -972,7 +963,7 @@ function renderReportingShortcuts() {
   const shortcuts = [
     { key: "exclude_installation", label: "Exclude installation, marketing & non-product issues", help: "Removes non-product-support issues from the analytical view." },
     { key: "exclude_blank_chat", label: "Exclude blank chats", help: "Removes tickets whose normalized bot action is Blank chat. This is enabled by default." },
-    { key: "exclude_unclassified_blank", label: "Exclude blank products & unclassified EFC", help: "Removes records with blank product names and blank or unclassified EFCs." },
+    { key: "exclude_unclassified_blank", label: "Exclude blank products", help: "Removes records whose product name or product category is Blank Product." },
   ];
   els.reportingShortcuts.innerHTML = shortcuts.map((item) => `
     <button class="shortcut-pill ${state.filters[item.key] ? "active" : ""}" type="button" data-shortcut="${escHtml(item.key)}">${escHtml(item.label)}${infoTip(item.help)}</button>
@@ -981,7 +972,7 @@ function renderReportingShortcuts() {
     button.addEventListener("click", () => {
       const key = button.dataset.shortcut;
       state.filters[key] = !state.filters[key];
-      if (key === "exclude_unclassified_blank") applyBlankUnclassifiedShortcut(state.filters[key]);
+      if (key === "exclude_unclassified_blank") applyBlankProductShortcut(state.filters[key]);
       normalizeAllSelectedFiltersInPlace();
       renderFilterControls();
       markFiltersPending();
@@ -3837,7 +3828,7 @@ function reconcileFilterState() {
     const valid = new Set(getControlOptions(control).map((item) => item.label));
     state.filters[control.key] = (state.filters[control.key] || []).filter((value) => value === NONE_SENTINEL || valid.has(value));
   });
-  if (state.filters.exclude_unclassified_blank) applyBlankUnclassifiedShortcut(true);
+  if (state.filters.exclude_unclassified_blank) applyBlankProductShortcut(true);
 }
 
 function reconcileIssueWidgetFilters() {

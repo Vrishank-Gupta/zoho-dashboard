@@ -968,7 +968,6 @@ class ClickHouseAnalyticsRepository:
             clauses.append("normalized_bot_action != 'Blank chat'")
         if filters.exclude_unclassified_blank:
             clauses.append("lowerUTF8(trim(BOTH ' ' FROM product_name)) NOT IN ('blank product', 'blankproduct', '-')")
-            clauses.append("lowerUTF8(trim(BOTH ' ' FROM executive_fault_code)) NOT IN ('blank', 'unclassified')")
         return " AND ".join(clauses) if clauses else "1 = 1"
 
     def _issue_filters(self, filters: DashboardFilters, start_date: date | None, end_date: date | None) -> str:
@@ -1015,7 +1014,6 @@ class ClickHouseAnalyticsRepository:
             clauses.append("normalized_bot_action != 'Blank chat'")
         if filters.exclude_unclassified_blank:
             clauses.append("lowerUTF8(trim(BOTH ' ' FROM product_name)) NOT IN ('blank product', 'blankproduct', '-')")
-            clauses.append("lowerUTF8(trim(BOTH ' ' FROM executive_fault_code)) NOT IN ('blank', 'unclassified')")
         return " AND ".join(clauses) if clauses else "1 = 1"
 
     def _repeat_filters(self, filters: DashboardFilters, start_date: date | None, end_date: date | None) -> str:
@@ -1056,7 +1054,6 @@ class ClickHouseAnalyticsRepository:
             clauses.append("return_bot_action != 'Blank chat'")
         if filters.exclude_unclassified_blank:
             clauses.append("lowerUTF8(trim(BOTH ' ' FROM product_name)) NOT IN ('blank product', 'blankproduct', '-')")
-            clauses.append("lowerUTF8(trim(BOTH ' ' FROM return_executive_fault_code)) NOT IN ('blank', 'unclassified')")
         return " AND ".join(clauses) if clauses else "1 = 1"
 
     def _multi_filters(self, column: str, include_values: list[str], exclude_values: list[str]) -> list[str]:
