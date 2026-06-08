@@ -67,7 +67,10 @@
           <span class="mapping-step">2. Search and adjust</span>
           <span class="mapping-step">3. Save to workbook</span>
         </div>
-        <label class="mapping-toggle"><input type="checkbox" id="mappingShowOverriddenOnly"> <span>Show only overridden rows</span></label>
+        <div class="mapping-toolbar-actions">
+          <label class="mapping-toggle"><input type="checkbox" id="mappingShowNeedsMappingOnly"> <span>Needs mapping</span></label>
+          <label class="mapping-toggle"><input type="checkbox" id="mappingShowOverriddenOnly"> <span>Edited rows</span></label>
+        </div>
       </div>
       <div class="segmented mapping-tabs" id="mappingStudioTabs"></div>
       <div class="mapping-grid">
@@ -77,7 +80,13 @@
               <div class="mini-title">Product -> Category</div>
               <div class="mapping-caption">Base category comes from `mapping.xlsx`. Edit it here when you want to update the live analytical grouping.</div>
             </div>
-            <input class="mapping-search" id="mappingProductSearch" type="search" placeholder="Search product">
+            <div class="mapping-panel-controls">
+              <div class="mapping-add-category">
+                <input class="mapping-search" id="mappingNewCategory" type="text" placeholder="New category">
+                <button class="ghost-btn compact-btn" id="addMappingCategory" type="button">Add</button>
+              </div>
+              <input class="mapping-search" id="mappingProductSearch" type="search" placeholder="Search product">
+            </div>
           </div>
           <div class="mapping-table-host" id="mappingProductTable"></div>
         </div>

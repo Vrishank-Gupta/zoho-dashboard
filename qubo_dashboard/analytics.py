@@ -1436,12 +1436,14 @@ class AnalyticsService:
         for product_name, tickets in sorted(product_counts.items(), key=lambda item: (-item[1], item[0])):
             base_category = map_product_category(product_name)
             effective_category = map_product_category(product_name, overrides=filters.product_category_overrides)
+            needs_mapping = effective_category.strip().lower() in {"", "-", "other", "others", "blank product", "blankproduct"}
             product_rows.append({
                 "product_name": product_name,
                 "base_category": base_category,
                 "effective_category": effective_category,
                 "tickets": tickets,
                 "overridden": base_category != effective_category,
+                "needs_mapping": needs_mapping,
             })
 
         fc2_rows = []
@@ -1467,6 +1469,7 @@ class AnalyticsService:
             "active_overrides": {
                 "products": sum(1 for row in product_rows if row["overridden"]),
                 "efcs": sum(1 for row in fc2_rows if row["overridden"]),
+                "products_needing_mapping": sum(1 for row in product_rows if row["needs_mapping"]),
             },
         }
 

@@ -95,6 +95,10 @@ def export_product_mapping_csv() -> str:
     return buffer.getvalue()
 
 
+def product_mapping_rows() -> list[dict[str, str]]:
+    return parse_product_mapping_csv(export_product_mapping_csv())
+
+
 def export_efc_mapping_csv() -> str:
     workbook_path = _require_workbook_path()
     workbook = load_workbook(workbook_path, read_only=True, data_only=True)
@@ -112,6 +116,10 @@ def export_efc_mapping_csv() -> str:
         for fc2, efc in sorted(rows, key=lambda item: item[0].lower()):
             writer.writerow((fc2, efc))
     return buffer.getvalue()
+
+
+def efc_mapping_rows() -> list[dict[str, str]]:
+    return parse_efc_mapping_csv(export_efc_mapping_csv())
 
 
 def replace_product_mapping(rows: list[dict[str, str]]) -> None:

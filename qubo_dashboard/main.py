@@ -19,8 +19,10 @@ from .mapping import (
     clear_mapping_cache,
     export_efc_mapping_csv,
     export_product_mapping_csv,
+    efc_mapping_rows,
     parse_efc_mapping_csv,
     parse_product_mapping_csv,
+    product_mapping_rows,
     replace_efc_mapping,
     replace_product_mapping,
 )
@@ -307,25 +309,34 @@ async def save_mapping_overrides(request: Request) -> dict:
     payload = await request.json()
     product_rows = payload.get("product_rows") or []
     fc2_rows = payload.get("fc2_rows") or []
+    product_mapping = {
+        row["product_name"].strip().lower(): row
+        for row in product_mapping_rows()
+        if row.get("product_name")
+    }
+    for row in product_rows:
+        product_name = str(row.get("product_name") or "").strip()
+        category = str(row.get("effective_category") or row.get("category") or "").strip()
+        if product_name and category:
+            product_mapping[product_name.lower()] = {"product_name": product_name, "category": category}
     replace_product_mapping(
-        [
-            {
-                "product_name": str(row.get("product_name") or "").strip(),
-                "category": str(row.get("effective_category") or row.get("category") or "").strip(),
-            }
-            for row in product_rows
-            if str(row.get("product_name") or "").strip() and str(row.get("effective_category") or row.get("category") or "").strip()
-        ]
+        sorted(product_mapping.values(), key=lambda row: row["product_name"].lower())
     )
-    replace_efc_mapping(
-        [
-            {
-                "fault_code_level_2": str(row.get("fault_code_level_2") or "").strip(),
-                "executive_fault_code": str(row.get("effective_efc") or row.get("executive_fault_code") or "").strip(),
+    efc_mapping = {
+        row["fault_code_level_2"].strip().lower(): row
+        for row in efc_mapping_rows()
+        if row.get("fault_code_level_2")
+    }
+    for row in fc2_rows:
+        fault_code_level_2 = str(row.get("fault_code_level_2") or "").strip()
+        executive_fault_code = str(row.get("effective_efc") or row.get("executive_fault_code") or "").strip()
+        if fault_code_level_2 and executive_fault_code:
+            efc_mapping[fault_code_level_2.lower()] = {
+                "fault_code_level_2": fault_code_level_2,
+                "executive_fault_code": executive_fault_code,
             }
-            for row in fc2_rows
-            if str(row.get("fault_code_level_2") or "").strip() and str(row.get("effective_efc") or row.get("executive_fault_code") or "").strip()
-        ]
+    replace_efc_mapping(
+        sorted(efc_mapping.values(), key=lambda row: row["fault_code_level_2"].lower())
     )
     clear_mapping_cache()
     service.invalidate_cache()

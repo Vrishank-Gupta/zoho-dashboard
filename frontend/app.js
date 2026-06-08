@@ -201,7 +201,9 @@ const state = {
   mappingOverrides: { product_category_overrides: {}, efc_overrides: {} },
   mappingDraft: { product_category_overrides: {}, efc_overrides: {} },
   mappingSearches: { global: "", products: "", fc2: "" },
+  mappingCustomCategories: loadSessionJson("quboMappingCustomCategories", []),
   mappingShowOverriddenOnly: loadSessionJson("quboMappingShowOverriddenOnly", false),
+  mappingShowNeedsMappingOnly: loadSessionJson("quboMappingShowNeedsMappingOnly", false),
   mappingStudioData: null,
   mappingStudioLoading: false,
   mappingStudioTab: loadSessionJson("quboMappingStudioTab", "products"),
@@ -264,7 +266,10 @@ const els = {
   mappingGlobalSearch: document.getElementById("mappingGlobalSearch"),
   mappingProductSearch: document.getElementById("mappingProductSearch"),
   mappingFc2Search: document.getElementById("mappingFc2Search"),
+  mappingNewCategory: document.getElementById("mappingNewCategory"),
+  addMappingCategory: document.getElementById("addMappingCategory"),
   mappingShowOverriddenOnly: document.getElementById("mappingShowOverriddenOnly"),
+  mappingShowNeedsMappingOnly: document.getElementById("mappingShowNeedsMappingOnly"),
   mappingProductTable: document.getElementById("mappingProductTable"),
   mappingFc2Table: document.getElementById("mappingFc2Table"),
   applyMappingOverrides: document.getElementById("applyMappingOverrides"),
@@ -592,6 +597,18 @@ function bindEvents() {
     state.mappingShowOverriddenOnly = Boolean(els.mappingShowOverriddenOnly.checked);
     saveSessionJson("quboMappingShowOverriddenOnly", state.mappingShowOverriddenOnly);
     renderMappingStudio(state.mappingStudioData || {});
+  });
+  els.mappingShowNeedsMappingOnly?.addEventListener("change", () => {
+    state.mappingShowNeedsMappingOnly = Boolean(els.mappingShowNeedsMappingOnly.checked);
+    saveSessionJson("quboMappingShowNeedsMappingOnly", state.mappingShowNeedsMappingOnly);
+    renderMappingStudio(state.mappingStudioData || {});
+  });
+  els.addMappingCategory?.addEventListener("click", addMappingCategoryOption);
+  els.mappingNewCategory?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addMappingCategoryOption();
+    }
   });
   els.applyMappingOverrides?.addEventListener("click", saveMappingWorkbook);
   els.resetMappingOverrides?.addEventListener("click", () => {
@@ -1701,9 +1718,14 @@ function renderMappingStudio(mappingStudio) {
   const active = mappingStudio.active_overrides || {};
   if (els.mappingGlobalSearch) els.mappingGlobalSearch.value = state.mappingSearches.global || "";
   if (els.mappingShowOverriddenOnly) els.mappingShowOverriddenOnly.checked = !!state.mappingShowOverriddenOnly;
+  if (els.mappingShowNeedsMappingOnly) els.mappingShowNeedsMappingOnly.checked = !!state.mappingShowNeedsMappingOnly;
   renderMappingStudioLayout();
   els.mappingStudioSummary.innerHTML = `
     <div class="mapping-banner">Workbook mapping stays as the base. Changes saved here persist and affect the live dashboard.</div>
+    <div class="mapping-stat">
+      <span class="mapping-stat-value">${fmtNum(active.products_needing_mapping || 0)}</span>
+      <span class="mapping-stat-label">Need mapping</span>
+    </div>
     <div class="mapping-stat">
       <span class="mapping-stat-value">${fmtNum(active.products || 0)}</span>
       <span class="mapping-stat-label">Product overrides</span>
@@ -1721,9 +1743,11 @@ function renderMappingStudio(mappingStudio) {
     const matchesLocal = !productSearch || row.product_name.toLowerCase().includes(productSearch);
     const isOverridden = hasDraftOverride("product_category_overrides", row.product_name, row.base_category);
     const matchesOverrideOnly = !state.mappingShowOverriddenOnly || isOverridden;
-    return matchesGlobal && matchesLocal && matchesOverrideOnly;
+    const needsMapping = isMappingNeedsReview(state.mappingDraft.product_category_overrides[String(row.product_name).toLowerCase()] || row.effective_category || row.base_category);
+    const matchesNeedsMappingOnly = !state.mappingShowNeedsMappingOnly || needsMapping;
+    return matchesGlobal && matchesLocal && matchesOverrideOnly && matchesNeedsMappingOnly;
   });
-  const categoryOptions = mappingStudio.category_options || [];
+  const categoryOptions = uniqueSorted([...(mappingStudio.category_options || []), ...(state.mappingCustomCategories || [])]);
   els.mappingProductTable.innerHTML = renderMappingTable({
     rows: productRows,
     idKey: "product_name",
@@ -1804,7 +1828,8 @@ function renderMappingTable({ rows, idKey, valueKey, selectKey, labelColumns, va
             const effectiveValue = overrideValue || row[valueKey] || "";
             const baseValue = selectKey === "product_category_overrides" ? row.base_category : row.base_efc;
             const isOverridden = hasDraftOverride(selectKey, row[idKey], baseValue);
-            return `<tr class="${isOverridden ? "mapping-overridden" : ""}">
+            const needsMapping = selectKey === "product_category_overrides" && isMappingNeedsReview(effectiveValue);
+            return `<tr class="${isOverridden ? "mapping-overridden" : ""} ${needsMapping ? "mapping-needs-review" : ""}">
               ${labelColumns.map((column) => `<td>${escHtml(row[column.key] || "")}</td>`).join("")}
               <td>
                 <div class="mapping-select-row">
@@ -3961,6 +3986,24 @@ function mergeDraftWithPayload(draft, mappingStudio) {
 function hasDraftOverride(scope, key, baseValue) {
   const overrideValue = state.mappingDraft?.[scope]?.[String(key).toLowerCase()];
   return Boolean(overrideValue && overrideValue !== baseValue);
+}
+
+function isMappingNeedsReview(value) {
+  return ["", "-", "other", "others", "blank product", "blankproduct"].includes(String(value || "").trim().toLowerCase());
+}
+
+function uniqueSorted(values) {
+  return [...new Set((values || []).map((item) => String(item || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function addMappingCategoryOption() {
+  const value = String(els.mappingNewCategory?.value || "").trim();
+  if (!value) return;
+  state.mappingCustomCategories = uniqueSorted([...(state.mappingCustomCategories || []), value]);
+  saveSessionJson("quboMappingCustomCategories", state.mappingCustomCategories);
+  if (els.mappingNewCategory) els.mappingNewCategory.value = "";
+  renderMappingStudio(state.mappingStudioData || {});
 }
 
 async function saveMappingWorkbook() {

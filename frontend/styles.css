@@ -1451,7 +1451,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .mapping-summary {
   display: grid;
-  grid-template-columns: minmax(280px, 1.8fr) repeat(2, minmax(170px, 0.6fr));
+  grid-template-columns: minmax(280px, 1.8fr) repeat(3, minmax(150px, 0.6fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -1468,6 +1468,15 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .mapping-guide {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mapping-toolbar-actions,
+.mapping-panel-controls,
+.mapping-add-category {
+  display: flex;
+  gap: 10px;
+  align-items: center;
   flex-wrap: wrap;
 }
 
@@ -1566,6 +1575,15 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   min-width: 220px;
 }
 
+.mapping-add-category .mapping-search {
+  min-width: 180px;
+}
+
+.compact-btn {
+  height: 38px;
+  padding: 0 14px;
+}
+
 .mapping-search-wide {
   min-width: min(520px, 100%);
 }
@@ -1586,6 +1604,10 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .mapping-overridden td {
   background: rgba(77, 142, 244, 0.06);
+}
+
+.mapping-needs-review td {
+  box-shadow: inset 3px 0 0 rgba(240, 107, 107, 0.72);
 }
 
 .mapping-select-row {
