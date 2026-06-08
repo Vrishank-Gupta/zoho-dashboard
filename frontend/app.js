@@ -1721,7 +1721,7 @@ function renderMappingStudio(mappingStudio) {
   if (els.mappingShowNeedsMappingOnly) els.mappingShowNeedsMappingOnly.checked = !!state.mappingShowNeedsMappingOnly;
   renderMappingStudioLayout();
   els.mappingStudioSummary.innerHTML = `
-    <div class="mapping-banner">Workbook mapping stays as the base. Changes saved here persist and affect the live dashboard.</div>
+    <div class="mapping-banner">Dropdown edits are drafts until you click Save workbook. Saving writes mapping.xlsx, refreshes dashboard cache, and applies the category globally.</div>
     <div class="mapping-stat">
       <span class="mapping-stat-value">${fmtNum(active.products_needing_mapping || 0)}</span>
       <span class="mapping-stat-label">Need mapping</span>
@@ -1755,9 +1755,9 @@ function renderMappingStudio(mappingStudio) {
     selectKey: "product_category_overrides",
     labelColumns: [
       { key: "product_name", label: "Product" },
-      { key: "base_category", label: "Workbook category" },
+      { key: "base_category", label: "Current workbook category" },
     ],
-    valueLabel: "Session category",
+    valueLabel: "Category to save",
     options: categoryOptions,
     countKey: "tickets",
     countLabel: "Tickets",
@@ -1780,9 +1780,9 @@ function renderMappingStudio(mappingStudio) {
     labelColumns: [
       { key: "fault_code_level_2", label: "FC2" },
       { key: "fault_code_level_1", label: "Fallback FC1" },
-      { key: "base_efc", label: "Workbook/base EFC" },
+      { key: "base_efc", label: "Current workbook EFC" },
     ],
-    valueLabel: "Session EFC",
+    valueLabel: "EFC to save",
     options: efcOptions,
     countKey: "tickets",
     countLabel: "Tickets",
