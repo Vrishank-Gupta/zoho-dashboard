@@ -1566,12 +1566,12 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .access-log-table th:nth-child(2),
 .access-log-table td:nth-child(2) {
-  width: 250px;
+  width: 280px;
 }
 
 .access-log-table th:nth-child(3),
 .access-log-table td:nth-child(3) {
-  width: 170px;
+  width: 160px;
 }
 
 .access-log-table td {

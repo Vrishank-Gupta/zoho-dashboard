@@ -1916,16 +1916,16 @@ function renderAccessLog(accessLog) {
   els.accessLogSummary.innerHTML = `
     <div class="mapping-stat">
       <span class="mapping-stat-value">${fmtNum(summary.events || rows.length || 0)}</span>
-      <span class="mapping-stat-label">Recent events</span>
+      <span class="mapping-stat-label">Recent logins</span>
     </div>
     <div class="mapping-stat">
       <span class="mapping-stat-value">${fmtNum(summary.users || 0)}</span>
       <span class="mapping-stat-label">Users</span>
     </div>
-    <div class="mapping-banner">Shows authenticated dashboard/API access and OTP login events from server logs.</div>
+    <div class="mapping-banner">Shows successful OTP logins only. Dashboard API calls are intentionally excluded.</div>
   `;
   if (!rows.length) {
-    els.accessLogTable.innerHTML = '<div class="empty-state">No authenticated access events found yet.</div>';
+    els.accessLogTable.innerHTML = '<div class="empty-state">No successful login events found yet.</div>';
     return;
   }
   els.accessLogTable.innerHTML = `
@@ -1935,8 +1935,6 @@ function renderAccessLog(accessLog) {
           <tr>
             <th>Time</th>
             <th>Email</th>
-            <th>Event</th>
-            <th>Path</th>
             <th>IP</th>
             <th>User agent</th>
           </tr>
@@ -1946,8 +1944,6 @@ function renderAccessLog(accessLog) {
             <tr>
               <td>${escHtml(fmtDateTime(row.timestamp || ""))}</td>
               <td>${escHtml(row.email || "")}</td>
-              <td>${escHtml(row.event || "")}</td>
-              <td>${escHtml(row.path || "")}</td>
               <td>${escHtml(row.client_ip || "")}</td>
               <td>${escHtml(row.user_agent || "")}</td>
             </tr>

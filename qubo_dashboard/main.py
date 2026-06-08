@@ -160,7 +160,6 @@ async def add_no_store_for_api(request: Request, call_next):
             status_code=500,
             duration_ms=(perf_counter() - started) * 1000,
             request_id=request_id,
-            user_email=_request_user_email(request),
         )
         LOGGER.exception(
             "request_failed",
@@ -177,7 +176,6 @@ async def add_no_store_for_api(request: Request, call_next):
         status_code=response.status_code,
         duration_ms=(perf_counter() - started) * 1000,
         request_id=request_id,
-        user_email=_request_user_email(request),
     )
     return response
 
@@ -408,8 +406,8 @@ async def upload_efc_mapping_csv(request: Request) -> dict:
 
 @app.get("/api/admin/access-log")
 def admin_access_log(request: Request, limit: int = Query(default=250, ge=1, le=1000)) -> dict:
-    rows = _recent_access_rows(limit)
-    log_audit(request, action="access_log_view", details={"rows": len(rows)}, user_email=_request_user_email(request))
+    rows = _recent_login_rows(limit)
+    log_audit(request, action="login_log_view", details={"rows": len(rows)}, user_email=_request_user_email(request))
     unique_users = sorted({row["email"] for row in rows if row.get("email")})
     return {
         "access_log": {
@@ -799,27 +797,18 @@ def _request_user_email(request: Request) -> str:
     return str((user or {}).get("email") or "")
 
 
-def _recent_access_rows(limit: int) -> list[dict[str, Any]]:
+def _recent_login_rows(limit: int) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for record in _read_json_log_records(settings.app_access_log_name, limit * 8):
-        email = str(record.get("user_email") or "").strip().lower()
-        path = str(record.get("path") or "")
-        if not email:
-            continue
-        if not _is_dashboard_access_path(path):
-            continue
-        rows.append(_format_access_record(record))
-        if len(rows) >= limit:
-            break
-
     for record in _read_json_log_records(settings.app_audit_log_name, limit * 4):
         action = str(record.get("action") or "")
-        if action not in {"auth_login_success", "auth_logout", "auth_otp_requested"}:
+        if action != "auth_login_success":
             continue
         email = str(record.get("user_email") or record.get("details", {}).get("email") or "").strip().lower()
         if not email:
             continue
-        rows.append(_format_audit_record(record, email))
+        rows.append(_format_login_record(record, email))
+        if len(rows) >= limit:
+            break
 
     rows.sort(key=lambda row: row.get("timestamp") or "", reverse=True)
     return rows[:limit]
@@ -852,61 +841,13 @@ def _read_json_log_records(filename: str, max_records: int) -> list[dict[str, An
     return records
 
 
-def _is_dashboard_access_path(path: str) -> bool:
-    return (
-        path == "/api/auth/session"
-        or path == "/api/dashboard"
-        or path == "/api/mapping-studio"
-        or path.startswith("/api/drilldown/")
-        or path.startswith("/api/issues/")
-    )
-
-
-def _format_access_record(record: dict[str, Any]) -> dict[str, Any]:
-    path = str(record.get("path") or "")
-    return {
-        "timestamp": str(record.get("timestamp") or ""),
-        "email": str(record.get("user_email") or "").strip().lower(),
-        "event": _access_event_label(path),
-        "method": str(record.get("method") or ""),
-        "path": path,
-        "status_code": int(record.get("status_code") or 0),
-        "client_ip": str(record.get("client_ip") or ""),
-        "user_agent": str((record.get("headers") or {}).get("user-agent") or ""),
-    }
-
-
-def _format_audit_record(record: dict[str, Any], email: str) -> dict[str, Any]:
-    action = str(record.get("action") or "")
-    labels = {
-        "auth_login_success": "Login success",
-        "auth_logout": "Logout",
-        "auth_otp_requested": "OTP requested",
-    }
+def _format_login_record(record: dict[str, Any], email: str) -> dict[str, Any]:
     return {
         "timestamp": str(record.get("timestamp") or ""),
         "email": email,
-        "event": labels.get(action, action),
-        "method": str(record.get("method") or ""),
-        "path": str(record.get("path") or ""),
-        "status_code": "",
         "client_ip": str(record.get("client_ip") or ""),
         "user_agent": str((record.get("headers") or {}).get("user-agent") or ""),
     }
-
-
-def _access_event_label(path: str) -> str:
-    if path == "/api/auth/session":
-        return "Dashboard opened"
-    if path == "/api/dashboard":
-        return "Dashboard data loaded"
-    if path == "/api/mapping-studio":
-        return "Admin mapping opened"
-    if path.startswith("/api/drilldown/"):
-        return "Drilldown opened"
-    if path.startswith("/api/issues/"):
-        return "Issue details opened"
-    return "API access"
 
 
 @app.get("/api/pipeline/status")

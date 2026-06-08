@@ -127,7 +127,6 @@ def log_access(
     status_code: int,
     duration_ms: float,
     request_id: str,
-    user_email: str = "",
 ) -> None:
     access_logger().info(
         "request_complete",
@@ -141,7 +140,6 @@ def log_access(
                 "status_code": status_code,
                 "duration_ms": round(duration_ms, 2),
                 "client_ip": client_ip(request),
-                "user_email": user_email,
                 "headers": header_subset(request),
             }
         },
