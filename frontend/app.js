@@ -22,40 +22,40 @@ const DEFAULT_FILTERS = {
 };
 
 const KPI_CONFIG = [
-  { key: "tickets", label: "Tickets", format: "number", lowerIsBetter: false },
-  { key: "installation_tickets", label: "Installation tickets", format: "number", lowerIsBetter: false },
-  { key: "bot_resolved", label: "Bot resolved", format: "number", lowerIsBetter: false },
-  { key: "repeat_tickets", label: "Repeat tickets", format: "number", lowerIsBetter: true },
+  { key: "tickets", label: "Tickets", format: "number", lowerIsBetter: false, help: "Total tickets in the selected date range after dashboard filters are applied." },
+  { key: "installation_tickets", label: "Installation tickets", format: "number", lowerIsBetter: false, help: "Field-service tickets whose FC1 or FC2 indicates installation." },
+  { key: "bot_resolved", label: "Bot resolved", format: "number", lowerIsBetter: false, help: "Tickets where the normalized bot action is Bot resolved." },
+  { key: "repeat_tickets", label: "Repeat tickets", format: "number", lowerIsBetter: true, help: "Later tickets from the same device serial and same normalized fault code within 30 days." },
 ];
 
 const CONTROLS = [
-  { key: "categories", label: "Category", optionsKey: "categories" },
-  { key: "products", label: "Product", optionsKey: "products" },
-  { key: "device_models", label: "Device model", optionsKey: "device_models", capabilityKey: "device_model" },
-  { key: "software_versions", label: "Firmware version", optionsKey: "software_versions", capabilityKey: "software_version" },
-  { key: "efcs", label: "EFC", optionsKey: "efcs" },
-  { key: "departments", label: "Support team", optionsKey: "departments" },
-  { key: "channels", label: "Channel", optionsKey: "channels" },
-  { key: "bot_actions", label: "Bot action", optionsKey: "bot_actions" },
-  { key: "include_fc1", label: "FC1 include", optionsKey: "fc1", oppositeKey: "exclude_fc1" },
-  { key: "exclude_fc1", label: "FC1 exclude", optionsKey: "fc1", oppositeKey: "include_fc1" },
-  { key: "include_fc2", label: "FC2 include", optionsKey: "fc2", oppositeKey: "exclude_fc2" },
-  { key: "exclude_fc2", label: "FC2 exclude", optionsKey: "fc2", oppositeKey: "include_fc2" },
-  { key: "include_bot_action", label: "Bot action include", optionsKey: "bot_actions", oppositeKey: "exclude_bot_action" },
-  { key: "exclude_bot_action", label: "Bot action exclude", optionsKey: "bot_actions", oppositeKey: "include_bot_action" },
+  { key: "categories", label: "Category", optionsKey: "categories", help: "Limits all widgets to selected mapped product categories." },
+  { key: "products", label: "Product", optionsKey: "products", help: "Limits all widgets to selected normalized product names." },
+  { key: "device_models", label: "Device model", optionsKey: "device_models", capabilityKey: "device_model", help: "Filters by source device model when this field exists in the data." },
+  { key: "software_versions", label: "Firmware version", optionsKey: "software_versions", capabilityKey: "software_version", help: "Filters by normalized firmware/software version." },
+  { key: "efcs", label: "EFC", optionsKey: "efcs", help: "Filters by executive fault code, mapped from FC2 and falling back to FC1 where needed." },
+  { key: "departments", label: "Support team", optionsKey: "departments", help: "Filters by normalized department, such as Field Service, Call Center, or Logistics." },
+  { key: "channels", label: "Channel", optionsKey: "channels", help: "Filters by normalized ticket channel." },
+  { key: "bot_actions", label: "Bot action", optionsKey: "bot_actions", help: "Filters by normalized bot outcome/action recorded on the ticket." },
+  { key: "include_fc1", label: "FC1 include", optionsKey: "fc1", oppositeKey: "exclude_fc1", help: "Keeps only tickets whose normalized FC1 matches selected values." },
+  { key: "exclude_fc1", label: "FC1 exclude", optionsKey: "fc1", oppositeKey: "include_fc1", help: "Removes tickets whose normalized FC1 matches selected values." },
+  { key: "include_fc2", label: "FC2 include", optionsKey: "fc2", oppositeKey: "exclude_fc2", help: "Keeps only tickets whose normalized FC2 matches selected values." },
+  { key: "exclude_fc2", label: "FC2 exclude", optionsKey: "fc2", oppositeKey: "include_fc2", help: "Removes tickets whose normalized FC2 matches selected values." },
+  { key: "include_bot_action", label: "Bot action include", optionsKey: "bot_actions", oppositeKey: "exclude_bot_action", help: "Keeps only tickets with selected bot actions." },
+  { key: "exclude_bot_action", label: "Bot action exclude", optionsKey: "bot_actions", oppositeKey: "include_bot_action", help: "Removes tickets with selected bot actions." },
 ];
 
 const PRIMARY_CONTROL_KEYS = new Set(["categories", "products", "device_models", "efcs", "departments", "channels", "bot_actions"]);
 
 const ISSUE_VIEWS = [
-  { key: "highest_volume", label: "By volume" },
-  { key: "bot_leakage", label: "High transfer" },
-  { key: "repeat_heavy", label: "Repeat-heavy" },
+  { key: "highest_volume", label: "By volume", help: "Issues sorted by ticket count in the current filtered window." },
+  { key: "bot_leakage", label: "High transfer", help: "Issues with high bot-to-agent transfer volume and rate." },
+  { key: "repeat_heavy", label: "Repeat-heavy", help: "Issues ranked by volume weighted with repeat rate." },
 ];
 
 const PRODUCT_VIEWS = [
-  { key: "product", label: "By product" },
-  { key: "category", label: "By category" },
+  { key: "product", label: "By product", help: "Groups product health by normalized product name." },
+  { key: "category", label: "By category", help: "Groups product health by mapped product category." },
 ];
 
 const IS_ADMIN_MODE = window.location.pathname.replace(/\/+$/, "") === "/admin";
@@ -86,23 +86,47 @@ const DRILLDOWN_TABS = {
 };
 
 const TIMELINE_METRICS = [
-  { key: "tickets", label: "Tickets" },
-  { key: "installation_tickets", label: "Installation" },
-  { key: "bot_resolved_tickets", label: "Bot resolved" },
-  { key: "repeat_tickets", label: "Repeat" },
+  { key: "tickets", label: "Tickets", help: "Bars show total tickets per period. Badges show change versus the previous period." },
+  { key: "installation_tickets", label: "Installation", help: "Bars show installation field-service tickets per period. Badges show period-over-period change." },
+  { key: "bot_resolved_tickets", label: "Bot resolved", help: "Bars show tickets resolved by bot per period. Badges show period-over-period change." },
+  { key: "repeat_tickets", label: "Repeat", help: "Bars show repeat tickets per period. Repeat means same device serial and same fault code within 30 days." },
 ];
 
 const BUCKET_MODES = [
-  { key: "daily", label: "Daily" },
-  { key: "weekly", label: "Weekly" },
-  { key: "monthly", label: "Monthly" },
+  { key: "daily", label: "Daily", help: "Groups the trend by ticket created date." },
+  { key: "weekly", label: "Weekly", help: "Groups the trend by week start. Partial edge weeks may be hidden." },
+  { key: "monthly", label: "Monthly", help: "Groups the trend by month. Partial edge months may be hidden." },
 ];
 
 const REPEAT_MATRIX_SORTS = [
-  { key: "latest_delta", label: "Latest change" },
-  { key: "total", label: "Total returns" },
-  { key: "latest_value", label: "Latest period" },
+  { key: "latest_delta", label: "Latest change", help: "Sorts repeat issue rows by the newest period-over-period change." },
+  { key: "total", label: "Total returns", help: "Sorts repeat issue rows by total return count." },
+  { key: "latest_value", label: "Latest period", help: "Sorts repeat issue rows by the latest period count." },
 ];
+
+const PRODUCT_COLUMN_HELP = {
+  product_name: "Normalized product name after product mapping.",
+  product_category: "Mapped product category used for dashboard grouping.",
+  tickets: "Total tickets for this row in the current filtered window.",
+  change_rate: "Ticket-volume change versus the immediately previous window of equal length.",
+  repeat_rate: "Repeat tickets divided by total tickets for this row. Repeat means same device serial and same fault code within 30 days.",
+  bot_resolved_rate: "Bot resolved tickets divided by total tickets for this row.",
+  top_efc: "Executive fault code with the highest ticket count in this row.",
+};
+
+const REPEAT_COLUMN_HELP = {
+  label: "The grouped repeat-analysis dimension for this table.",
+  repeat_returns: "Return events counted in repeat analysis.",
+  repeat_rate: "Repeat returns divided by the base ticket volume for the same dimension.",
+  median_days: "Weighted median days between first ticket and return ticket.",
+  change_rate: "Return-count change versus the previous window.",
+  top_secondary: "Most common return EFC within this row.",
+  same_issue_share: "Share of repeat returns where FC2 stayed the same.",
+  first_efc: "EFC on the earlier ticket.",
+  return_efc: "EFC on the return ticket.",
+  top_return_efc: "Most common EFC on the return ticket.",
+  top_return_resolution: "Most common resolution on the return ticket.",
+};
 
 const NONE_SENTINEL = "__NONE__";
 
@@ -903,12 +927,12 @@ function renderDateToolbar() {
 
 function renderReportingShortcuts() {
   const shortcuts = [
-    { key: "exclude_installation", label: "Exclude installation, marketing & non-product issues" },
-    { key: "exclude_blank_chat", label: "Exclude blank chats" },
-    { key: "exclude_unclassified_blank", label: "Exclude blank products & unclassified EFC" },
+    { key: "exclude_installation", label: "Exclude installation, marketing & non-product issues", help: "Removes non-product-support issues from the analytical view." },
+    { key: "exclude_blank_chat", label: "Exclude blank chats", help: "Removes tickets whose normalized bot action is Blank chat. This is enabled by default." },
+    { key: "exclude_unclassified_blank", label: "Exclude blank products & unclassified EFC", help: "Removes records with blank product names and blank or unclassified EFCs." },
   ];
   els.reportingShortcuts.innerHTML = shortcuts.map((item) => `
-    <button class="shortcut-pill ${state.filters[item.key] ? "active" : ""}" type="button" data-shortcut="${escHtml(item.key)}">${escHtml(item.label)}</button>
+    <button class="shortcut-pill ${state.filters[item.key] ? "active" : ""}" type="button" data-shortcut="${escHtml(item.key)}">${escHtml(item.label)}${infoTip(item.help)}</button>
   `).join("");
   els.reportingShortcuts.querySelectorAll("[data-shortcut]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -937,7 +961,7 @@ function renderFilterControls() {
     const visible = options.filter((item) => !blocked.has(item.label) && formatOptionLabel(control, item.label).toLowerCase().includes(search.toLowerCase()));
     return `
       <div class="filter-control ${state.openFilter === control.key ? "open" : ""}">
-        <div class="control-label">${escHtml(control.label)}</div>
+        <div class="control-label">${escHtml(control.label)}${infoTip(control.help)}</div>
         <button class="control-trigger" type="button" data-filter-trigger="${escHtml(control.key)}">
           <span class="control-summary">
             <span class="control-main">${escHtml(summary.main)}</span>
@@ -1034,7 +1058,7 @@ function renderKpis(kpis) {
     return `
       <div class="kpi-card">
         <div class="kpi-value">${config.format === "percent" ? fmtPct(metricValue) : fmtNum(metricValue)}</div>
-        <div class="kpi-label">${escHtml(config.label)}</div>
+        <div class="kpi-label">${escHtml(config.label)}${infoTip(config.help)}</div>
         <div class="kpi-share">${escHtml(shareLabel)}</div>
         <div class="kpi-delta ${delta === 0 ? "" : positive ? "good" : "bad"}">${escHtml(deltaLabel)}</div>
       </div>`;
@@ -1073,7 +1097,7 @@ function renderProductHealth() {
     const active = state.productSort === key;
     const arrow = !active ? "↕" : state.productSortDirection === "desc" ? "↓" : "↑";
     const classes = numeric ? "num" : "";
-    return `<th class="${classes}"><button class="sort-header" type="button" data-product-sort="${escHtml(key)}">${escHtml(label)} <span class="sort-indicator">${arrow}</span></button></th>`;
+    return `<th class="${classes}"><button class="sort-header" type="button" data-product-sort="${escHtml(key)}">${escHtml(label)}${infoTip(PRODUCT_COLUMN_HELP[key] || "")} <span class="sort-indicator">${arrow}</span></button></th>`;
   };
     const body = rows.slice(0, 18).map((row, index) => `
       <tr class="click-row"
@@ -1103,7 +1127,7 @@ function renderProductHealth() {
             ${sortHeader("change_rate", "Change", true)}
             ${sortHeader("repeat_rate", "Repeat %", true)}
             ${sortHeader("bot_resolved_rate", "Bot resolved %", true)}
-            <th>Top EFC</th>
+            <th>Top EFC${infoTip(PRODUCT_COLUMN_HELP.top_efc)}</th>
         </tr>
       </thead>
       <tbody>${body}</tbody>
@@ -1169,11 +1193,11 @@ function renderModelHealth() {
       <thead>
         <tr>
           <th class="num">#</th>
-          <th>Device model</th>
-          <th class="num">Tickets</th>
-          <th class="num">Change</th>
-          <th class="num">Repeat %</th>
-          <th>Top issue</th>
+          <th>Device model${infoTip("Source device model grouped within product and category.")}</th>
+          <th class="num">Tickets${infoTip(PRODUCT_COLUMN_HELP.tickets)}</th>
+          <th class="num">Change${infoTip(PRODUCT_COLUMN_HELP.change_rate)}</th>
+          <th class="num">Repeat %${infoTip(PRODUCT_COLUMN_HELP.repeat_rate)}</th>
+          <th>Top issue${infoTip("Most common FC2 issue for this model.")}</th>
         </tr>
       </thead>
       <tbody>${body}</tbody>
@@ -1215,11 +1239,11 @@ function renderFirmwareWatchlist(rows) {
       <thead>
         <tr>
           <th class="num">#</th>
-          <th>Firmware</th>
-          <th class="num">Tickets</th>
-          <th class="num">Repeat %</th>
-          <th>Top issue</th>
-          <th>Top product</th>
+          <th>Firmware${infoTip("Normalized firmware/software version.")}</th>
+          <th class="num">Tickets${infoTip(PRODUCT_COLUMN_HELP.tickets)}</th>
+          <th class="num">Repeat %${infoTip(PRODUCT_COLUMN_HELP.repeat_rate)}</th>
+          <th>Top issue${infoTip("Most common FC2 issue for this firmware.")}</th>
+          <th>Top product${infoTip("Product with the highest ticket count for this firmware.")}</th>
         </tr>
       </thead>
       <tbody>${body}</tbody>
@@ -1290,19 +1314,19 @@ function renderRepeatAnalysis(repeatAnalysis) {
 function renderRepeatOverview(overview) {
   if (!els.repeatOverview) return;
   const cards = [
-    ["Repeat returns", overview.repeat_returns],
-    ["Repeat rate", overview.repeat_rate],
-    ["Median return days", overview.median_return_days],
-    ["Within 7 days", overview.within_7d_share],
-    ["Within 30 days", overview.within_30d_share],
+    ["Repeat returns", overview.repeat_returns, "Return events in repeat analysis. A return is a later ticket after a resolved-like earlier ticket for the same customer and product."],
+    ["Repeat rate", overview.repeat_rate, "Repeat returns divided by total tickets in the same filtered window."],
+    ["Median return days", overview.median_return_days, "Weighted median days between first ticket and return ticket."],
+    ["Within 7 days", overview.within_7d_share, "Share of repeat returns that came back within 7 days."],
+    ["Within 30 days", overview.within_30d_share, "Share of repeat returns that came back within 30 days."],
   ];
-  els.repeatOverview.innerHTML = cards.map(([label, metric]) => {
+  els.repeatOverview.innerHTML = cards.map(([label, metric, help]) => {
     const value = metric?.value ?? 0;
     const formatted = /rate|Within/.test(label) ? fmtPct(value) : /days/.test(label) ? `${fmtNum(value)}d` : fmtNum(value);
     const delta = metric?.change ?? 0;
     return `
       <div class="repeat-card">
-        <div class="repeat-card-label">${escHtml(label)}</div>
+        <div class="repeat-card-label">${escHtml(label)}${infoTip(help)}</div>
         <div class="repeat-card-value">${escHtml(formatted)}</div>
         <div class="repeat-card-change ${delta >= 0 ? "good" : "bad"}">${escHtml(formatSignedPct(delta))} vs prior window</div>
       </div>`;
@@ -1315,7 +1339,7 @@ function renderRepeatTable(container, rows, kind, columns) {
     container.innerHTML = '<div class="empty-state">No repeat data in the current view.</div>';
     return;
   }
-  const header = columns.map((column) => `<th class="${column.numeric ? "num" : ""}">${escHtml(column.label)}</th>`).join("");
+  const header = columns.map((column) => `<th class="${column.numeric ? "num" : ""}">${escHtml(column.label)}${infoTip(REPEAT_COLUMN_HELP[column.key] || "")}</th>`).join("");
   const body = rows.slice(0, 10).map((row) => `
     <tr class="click-row"
       data-repeat-kind="${escHtml(kind)}"
@@ -1351,10 +1375,10 @@ function renderIssueBoard(issueViews) {
         <div class="issue-subtitle">${escHtml(issue.product_category || "Other")} · ${escHtml(issue.product_name || "Other")} · ${escHtml(issue.executive_fault_code || "Blank")} · ${escHtml(issue.fault_code_level_1 || "Unclassified")}</div>
       </div>
       <div class="issue-metrics">
-        <div class="issue-metric"><div class="issue-metric-label">Tickets</div><div class="issue-metric-value">${fmtNum(issue.volume)}</div></div>
-        <div class="issue-metric"><div class="issue-metric-label">Bot resolved %</div><div class="issue-metric-value">${fmtPct(issue.bot_resolved_rate)}</div></div>
-        <div class="issue-metric"><div class="issue-metric-label">Transfer %</div><div class="issue-metric-value">${fmtPct(issue.bot_transfer_rate)}</div></div>
-        <div class="issue-metric"><div class="issue-metric-label">Change vs prior window</div><div class="issue-metric-value">${formatSignedPct(issue.delta_rate || 0)}</div></div>
+        <div class="issue-metric"><div class="issue-metric-label">Tickets${infoTip("Ticket count for this issue in the current filtered window.")}</div><div class="issue-metric-value">${fmtNum(issue.volume)}</div></div>
+        <div class="issue-metric"><div class="issue-metric-label">Bot resolved %${infoTip("Bot resolved tickets divided by total tickets for this issue.")}</div><div class="issue-metric-value">${fmtPct(issue.bot_resolved_rate)}</div></div>
+        <div class="issue-metric"><div class="issue-metric-label">Transfer %${infoTip("Bot transferred tickets divided by total tickets for this issue.")}</div><div class="issue-metric-value">${fmtPct(issue.bot_transfer_rate)}</div></div>
+        <div class="issue-metric"><div class="issue-metric-label">Change vs prior window${infoTip("Ticket-volume change versus the immediately previous window of equal length.")}</div><div class="issue-metric-value">${formatSignedPct(issue.delta_rate || 0)}</div></div>
       </div>
     </button>`).join("");
   els.issueBoard.querySelectorAll("[data-issue-id]").forEach((button) => {
@@ -1394,7 +1418,7 @@ function renderIssueWidgetFilters() {
       <div class="filter-control widget-filter-control ${state.issueWidgetOpenFilter === definition.key ? "open" : ""}">
         <button class="control-trigger widget-control-trigger" type="button" data-widget-filter-trigger="${escHtml(definition.key)}">
           <span class="control-summary">
-            <span class="control-main">${escHtml(`${definition.label}: ${summary.main}`)}</span>
+            <span class="control-main">${escHtml(`${definition.label}: ${summary.main}`)}${infoTip("Local issue-board filter. It affects only the issue cards, not the whole dashboard.")}</span>
             ${summary.count ? `<span class="control-count">${escHtml(summary.count)}</span>` : ""}
           </span>
           <span class="control-caret">${state.issueWidgetOpenFilter === definition.key ? "▲" : "▼"}</span>
@@ -1504,13 +1528,13 @@ function toggleIssueWidgetFilterValue(key, value, checked) {
 function renderBotSummary(botSummary) {
   const overview = botSummary.overview || {};
   els.botOverview.innerHTML = [
-    ["Chat volume", overview.chat_tickets],
-    ["Bot resolved", overview.bot_resolved_tickets],
-    ["Transferred", overview.bot_transferred_tickets],
-    ["Blank chat", overview.blank_chat_tickets],
-  ].map(([label, value]) => `
+    ["Chat volume", overview.chat_tickets, "Tickets whose normalized channel is Chat."],
+    ["Bot resolved", overview.bot_resolved_tickets, "Chat tickets where the normalized bot action is Bot resolved."],
+    ["Transferred", overview.bot_transferred_tickets, "Chat tickets where the bot transferred the user to an agent."],
+    ["Blank chat", overview.blank_chat_tickets, "Chat tickets where the normalized bot action is Blank chat."],
+  ].map(([label, value, help]) => `
     <div class="mini-stat">
-      <div class="mini-stat-key">${escHtml(label)}</div>
+      <div class="mini-stat-key">${escHtml(label)}${infoTip(help)}</div>
       <div class="mini-stat-value">${fmtNum(value || 0)}</div>
     </div>`).join("");
   renderBotTrend(state.payload?.timeline || []);
@@ -1605,9 +1629,9 @@ function renderPipeline(pipeline) {
   els.pipelineHealth.innerHTML = `
     <div class="pipeline-summary">
       <span class="pipeline-dot ${statusClass}"></span>
-      <strong>${escHtml(pipeline.status || "Unknown")}</strong>
-      <span class="mix-value">Last run ${escHtml(fmtDateTime(pipeline.last_run_at || ""))}</span>
-      <span class="mix-value">${fmtNum(pipeline.rows_inserted || 0)} rows inserted</span>
+      <strong>${escHtml(pipeline.status || "Unknown")}${infoTip("Latest ETL job status reported by the backend.")}</strong>
+      <span class="mix-value">Last run ${escHtml(fmtDateTime(pipeline.last_run_at || ""))}${infoTip("Timestamp of the latest known pipeline run.")}</span>
+      <span class="mix-value">${fmtNum(pipeline.rows_inserted || 0)} rows inserted${infoTip("Rows inserted during the latest run.")}</span>
     </div>
     <div class="pipeline-runs">
       ${recent.map((run) => `
@@ -2052,7 +2076,7 @@ function renderDrilldownFilters() {
     const filteredOptions = options.filter((item) => item.label.toLowerCase().includes(search.toLowerCase()));
     return `
       <div class="filter-control drilldown-filter-control ${state.drilldownOpenFilter === definition.key ? "open" : ""}">
-        <div class="control-label">${escHtml(definition.label)}</div>
+        <div class="control-label">${escHtml(definition.label)}${infoTip("Local drilldown filter. It affects this detail workspace only.")}</div>
         <button class="control-trigger drilldown-control-trigger" type="button" data-drilldown-filter-trigger="${escHtml(definition.key)}">
           <span class="control-summary">
             <span class="control-main">${escHtml(summary.main)}</span>
@@ -2845,7 +2869,7 @@ function renderRepeatDrilldownLocalFilters(options) {
   const filters = state.repeatDrilldownFilters || {};
   const renderSelect = (key, label, values) => `
     <label class="repeat-filter-field">
-      <span>${escHtml(label)}</span>
+      <span>${escHtml(label)}${infoTip("Local repeat-drilldown filter. It affects this detail workspace only.")}</span>
       <select data-repeat-filter="${escHtml(key)}">
         <option value="">All</option>
         ${values.map((value) => `<option value="${escHtml(value)}" ${filters[key] === value ? "selected" : ""}>${escHtml(value)}</option>`).join("")}
@@ -3480,7 +3504,7 @@ function renderIssueList(container, issues, emptyMessage) {
 
 function renderSegmented(container, options, active, onSelect) {
   container.innerHTML = options.map((option) => `
-    <button class="segment-btn ${option.key === active ? "active" : ""}" type="button" data-segment="${escHtml(option.key)}">${escHtml(option.label)}</button>
+    <button class="segment-btn ${option.key === active ? "active" : ""}" type="button" data-segment="${escHtml(option.key)}">${escHtml(option.label)}${infoTip(option.help || "")}</button>
   `).join("");
   container.querySelectorAll("[data-segment]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -4085,6 +4109,12 @@ function escHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#x27;");
+}
+
+function infoTip(text) {
+  const copy = String(text || "").trim();
+  if (!copy) return "";
+  return `<span class="info-tip" aria-label="${escHtml(copy)}" data-tip="${escHtml(copy)}">i</span>`;
 }
 
 function formatBotActionLabel(value) {

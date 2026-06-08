@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=restyle31">
+  <link rel="stylesheet" href="./styles.css?v=restyle32">
 </head>
 <body>
   <section class="auth-gate" id="authGate">
@@ -98,7 +98,7 @@
       <div class="panel-top">
         <div>
           <div class="section-label">Filters</div>
-          <h2 class="panel-title">Refine view</h2>
+          <h2 class="panel-title">Refine view <span class="info-tip" tabindex="0" role="button" aria-label="Filters apply to the dashboard after you click Apply filters. Issue-board local filters affect only their widget." data-tip="Filters apply to the dashboard after you click Apply filters. Issue-board local filters affect only their widget.">i</span></h2>
         </div>
         <div class="panel-actions">
           <button class="primary-btn" id="applyFilters" type="button" disabled>Applied</button>
@@ -110,11 +110,11 @@
       <div class="date-toolbar">
         <div class="date-inputs">
           <label class="field-label">
-            <span>From</span>
+            <span>From <span class="info-tip" tabindex="0" role="button" aria-label="Start date for ticket created date." data-tip="Start date for ticket created date.">i</span></span>
             <input id="dateStart" type="date">
           </label>
           <label class="field-label">
-            <span>To</span>
+            <span>To <span class="info-tip" tabindex="0" role="button" aria-label="End date for ticket created date." data-tip="End date for ticket created date.">i</span></span>
             <input id="dateEnd" type="date">
           </label>
         </div>
@@ -133,7 +133,7 @@
       <div class="panel-top">
         <div>
           <div class="section-label">Volume</div>
-          <h2 class="panel-title">Ticket volume trend</h2>
+          <h2 class="panel-title">Ticket volume trend <span class="info-tip" tabindex="0" role="button" aria-label="Bars show the selected metric by period. The line badges show percentage change versus the previous period." data-tip="Bars show the selected metric by period. The line badges show percentage change versus the previous period.">i</span></h2>
         </div>
         <div class="chart-toolbar">
           <div class="toolbar-cluster toolbar-cluster-metric">
@@ -151,7 +151,7 @@
       <div class="panel-top">
         <div>
           <div class="section-label">Products</div>
-          <h2 class="panel-title">Product health</h2>
+          <h2 class="panel-title">Product health <span class="info-tip" tabindex="0" role="button" aria-label="Ranks products or categories by ticket volume. Repeat % and bot resolved % are rates within each row." data-tip="Ranks products or categories by ticket volume. Repeat % and bot resolved % are rates within each row.">i</span></h2>
         </div>
         <div class="panel-actions">
           <div class="segmented" id="productViewTabs"></div>
@@ -165,7 +165,7 @@
         <div class="panel-top">
           <div>
             <div class="section-label">Models</div>
-            <h2 class="panel-title">Model risk board</h2>
+            <h2 class="panel-title">Model risk board <span class="info-tip" tabindex="0" role="button" aria-label="Compares device models by tickets, repeat rate, bot resolved rate, and dominant EFC." data-tip="Compares device models by tickets, repeat rate, bot resolved rate, and dominant EFC.">i</span></h2>
           </div>
         </div>
         <div id="modelHealthTable"></div>
@@ -175,7 +175,7 @@
         <div class="panel-top">
           <div>
             <div class="section-label">Firmware</div>
-            <h2 class="panel-title">Firmware watchlist</h2>
+            <h2 class="panel-title">Firmware watchlist <span class="info-tip" tabindex="0" role="button" aria-label="Shows firmware versions with ticket volume and related health rates when version data is available." data-tip="Shows firmware versions with ticket volume and related health rates when version data is available.">i</span></h2>
           </div>
         </div>
         <div id="firmwareWatchlist"></div>
@@ -186,37 +186,37 @@
       <div class="panel-top">
         <div>
           <div class="section-label">Repeats</div>
-          <h2 class="panel-title">Repeat analysis</h2>
+          <h2 class="panel-title">Repeat analysis <span class="info-tip" tabindex="0" role="button" aria-label="Uses return-event logic: later tickets after a resolved-like earlier ticket for the same customer and product." data-tip="Uses return-event logic: later tickets after a resolved-like earlier ticket for the same customer and product.">i</span></h2>
         </div>
       </div>
       <div class="repeat-overview" id="repeatOverview"></div>
       <div class="dashboard-grid dashboard-grid-split repeat-grid">
         <div>
-          <div class="mini-title">Return aging</div>
+          <div class="mini-title">Return aging <span class="info-tip" tabindex="0" role="button" aria-label="Buckets repeat returns by days between first ticket and return ticket." data-tip="Buckets repeat returns by days between first ticket and return ticket.">i</span></div>
           <div id="repeatAging"></div>
         </div>
         <div>
-          <div class="mini-title">Same issue vs different issue</div>
+          <div class="mini-title">Same issue vs different issue <span class="info-tip" tabindex="0" role="button" aria-label="Compares returns where FC2 stayed the same against returns with a different FC2." data-tip="Compares returns where FC2 stayed the same against returns with a different FC2.">i</span></div>
           <div class="donut-host" id="repeatIssueMix"></div>
         </div>
       </div>
       <div class="dashboard-grid dashboard-grid-split repeat-grid">
         <div>
-          <div class="mini-title">Products with highest repeat demand</div>
+          <div class="mini-title">Products with highest repeat demand <span class="info-tip" tabindex="0" role="button" aria-label="Products sorted by repeat return count in the filtered window." data-tip="Products sorted by repeat return count in the filtered window.">i</span></div>
           <div id="repeatProducts"></div>
         </div>
         <div>
-          <div class="mini-title">EFCs with highest repeat demand</div>
+          <div class="mini-title">EFCs with highest repeat demand <span class="info-tip" tabindex="0" role="button" aria-label="Return EFCs sorted by repeat return count." data-tip="Return EFCs sorted by repeat return count.">i</span></div>
           <div id="repeatEfcs"></div>
         </div>
       </div>
       <div class="dashboard-grid dashboard-grid-split repeat-grid">
         <div>
-          <div class="mini-title">First resolution fallout</div>
+          <div class="mini-title">First resolution fallout <span class="info-tip" tabindex="0" role="button" aria-label="First-ticket resolutions that most often lead to later returns." data-tip="First-ticket resolutions that most often lead to later returns.">i</span></div>
           <div id="repeatResolutionFallout"></div>
         </div>
         <div>
-          <div class="mini-title">First EFC to return EFC transitions</div>
+          <div class="mini-title">First EFC to return EFC transitions <span class="info-tip" tabindex="0" role="button" aria-label="Shows how the first ticket EFC changes, or stays same, on the return ticket." data-tip="Shows how the first ticket EFC changes, or stays same, on the return ticket.">i</span></div>
           <div id="repeatTransitions"></div>
         </div>
       </div>
@@ -226,7 +226,7 @@
       <div class="panel-top">
         <div>
           <div class="section-label">Issues</div>
-          <h2 class="panel-title">Issue concentration</h2>
+          <h2 class="panel-title">Issue concentration <span class="info-tip" tabindex="0" role="button" aria-label="Highlights issue groups by volume, bot transfer risk, or repeat-heavy behavior." data-tip="Highlights issue groups by volume, bot transfer risk, or repeat-heavy behavior.">i</span></h2>
         </div>
         <div class="panel-actions">
           <div class="widget-filter-row" id="issueWidgetFilters"></div>
@@ -240,7 +240,7 @@
       <div class="panel-top">
         <div>
           <div class="section-label">Signals</div>
-          <h2 class="panel-title">Rising signals</h2>
+          <h2 class="panel-title">Rising signals <span class="info-tip" tabindex="0" role="button" aria-label="Issues with strong week-over-week ticket growth in the current filtered view." data-tip="Issues with strong week-over-week ticket growth in the current filtered view.">i</span></h2>
         </div>
       </div>
       <div class="issue-list" id="risingSignals"></div>
@@ -251,7 +251,7 @@
       <div class="panel-top">
         <div>
           <div class="section-label">Bot</div>
-          <h2 class="panel-title">Bot performance</h2>
+          <h2 class="panel-title">Bot performance <span class="info-tip" tabindex="0" role="button" aria-label="Tracks chat volume, bot-resolved outcomes, transfers, and blank-chat leakage." data-tip="Tracks chat volume, bot-resolved outcomes, transfers, and blank-chat leakage.">i</span></h2>
         </div>
         <div class="chart-toolbar">
           <div class="toolbar-cluster toolbar-cluster-grain">
@@ -263,11 +263,11 @@
         <div class="chart-area compact" id="botTrendChart"></div>
         <div class="two-col">
           <div>
-            <div class="mini-title">High transfer issues</div>
+            <div class="mini-title">High transfer issues <span class="info-tip" tabindex="0" role="button" aria-label="Issues where bot transferred users to agents most often." data-tip="Issues where bot transferred users to agents most often.">i</span></div>
             <div class="issue-list" id="botLeakyIssues"></div>
           </div>
           <div>
-            <div class="mini-title">High bot resolved issues</div>
+            <div class="mini-title">High bot resolved issues <span class="info-tip" tabindex="0" role="button" aria-label="Issues where bot resolved outcomes are strongest." data-tip="Issues where bot resolved outcomes are strongest.">i</span></div>
             <div class="issue-list" id="botBestIssues"></div>
           </div>
         </div>
@@ -277,28 +277,28 @@
         <div class="panel-top">
           <div>
             <div class="section-label">Operations</div>
-            <h2 class="panel-title">Support mix</h2>
+            <h2 class="panel-title">Support mix <span class="info-tip" tabindex="0" role="button" aria-label="Shows ticket distribution by product/category, channel, bot action, team, and installation split." data-tip="Shows ticket distribution by product/category, channel, bot action, team, and installation split.">i</span></h2>
           </div>
         </div>
         <div class="mix-grid">
           <div>
-            <div class="mini-title">Category</div>
+            <div class="mini-title">Category <span class="info-tip" tabindex="0" role="button" aria-label="Share of tickets by mapped product category." data-tip="Share of tickets by mapped product category.">i</span></div>
             <div class="donut-host" id="categoryDonut"></div>
           </div>
           <div>
-            <div class="mini-title">Channel</div>
+            <div class="mini-title">Channel <span class="info-tip" tabindex="0" role="button" aria-label="Share of tickets by normalized channel." data-tip="Share of tickets by normalized channel.">i</span></div>
             <div class="donut-host" id="channelDonut"></div>
           </div>
           <div>
-            <div class="mini-title">Bot action</div>
+            <div class="mini-title">Bot action <span class="info-tip" tabindex="0" role="button" aria-label="Share of tickets by normalized bot action." data-tip="Share of tickets by normalized bot action.">i</span></div>
             <div class="donut-host" id="botActionDonut"></div>
           </div>
           <div>
-            <div class="mini-title">Support team</div>
+            <div class="mini-title">Support team <span class="info-tip" tabindex="0" role="button" aria-label="Share of tickets by normalized department/support team." data-tip="Share of tickets by normalized department/support team.">i</span></div>
             <div id="departmentMix"></div>
           </div>
           <div>
-            <div class="mini-title">Installation split</div>
+            <div class="mini-title">Installation split <span class="info-tip" tabindex="0" role="button" aria-label="Compares installation field-service tickets with non-installation tickets." data-tip="Compares installation field-service tickets with non-installation tickets.">i</span></div>
             <div id="installationMix"></div>
           </div>
         </div>
@@ -309,7 +309,7 @@
       <div class="panel-top">
         <div>
           <div class="section-label">Pipeline</div>
-          <h2 class="panel-title">Pipeline status</h2>
+          <h2 class="panel-title">Pipeline status <span class="info-tip" tabindex="0" role="button" aria-label="Shows ETL freshness, last sync state, and pipeline health signals." data-tip="Shows ETL freshness, last sync state, and pipeline health signals.">i</span></h2>
         </div>
         <button class="primary-btn" id="runPipelineBtn" type="button">Run pipeline</button>
       </div>
@@ -335,6 +335,6 @@
   </div>
 
   <script src="./config.js?v=restyle11"></script>
-  <script src="./app.js?v=restyle31"></script>
+  <script src="./app.js?v=restyle32"></script>
 </body>
 </html>
