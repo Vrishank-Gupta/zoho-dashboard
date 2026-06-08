@@ -276,8 +276,12 @@ const els = {
   dateEnd: document.getElementById("dateEnd"),
   quickPresets: document.getElementById("quickPresets"),
   reportingShortcuts: document.getElementById("reportingShortcuts"),
+  filtersPanel: document.getElementById("filtersPanel"),
   primaryFilterGrid: document.getElementById("primaryFilterGrid"),
   secondaryFilterGrid: document.getElementById("secondaryFilterGrid"),
+  filterApplyBar: document.getElementById("filterApplyBar"),
+  filterApplyStatus: document.getElementById("filterApplyStatus"),
+  filterApplyHint: document.getElementById("filterApplyHint"),
   applyFilters: document.getElementById("applyFilters"),
   toggleAdvancedFilters: document.getElementById("toggleAdvancedFilters"),
   resetFilters: document.getElementById("resetFilters"),
@@ -682,12 +686,28 @@ function clearFiltersPending() {
 function renderFilterApplyState() {
   if (!els.applyFilters) return;
   const isBusy = document.body.classList.contains("dashboard-busy");
-  els.applyFilters.disabled = isBusy || !state.pendingFilterChanges;
+  const pending = Boolean(state.pendingFilterChanges);
+  els.filtersPanel?.classList.toggle("filters-pending", pending);
+  els.filterApplyBar?.classList.toggle("pending", pending);
+  els.filterApplyBar?.classList.toggle("busy", isBusy);
+  els.applyFilters.disabled = isBusy || !pending;
   els.applyFilters.textContent = isBusy
-    ? state.pendingFilterChanges ? "Applying..." : "Loading..."
-    : state.pendingFilterChanges
-      ? "Apply filters"
-      : "Applied";
+    ? pending ? "Applying changes..." : "Refreshing..."
+    : pending
+      ? "Apply changes"
+      : "Filters applied";
+  if (els.filterApplyStatus) {
+    els.filterApplyStatus.textContent = isBusy
+      ? pending ? "Applying filter changes" : "Refreshing dashboard"
+      : pending
+        ? "You have unapplied filter changes"
+        : "Filters are applied";
+  }
+  if (els.filterApplyHint) {
+    els.filterApplyHint.textContent = pending
+      ? "Click Apply changes to refresh charts, tables, and KPIs with your latest selections."
+      : "Change filters above, then apply them to refresh every widget.";
+  }
 }
 
 function warmCommonDashboardWindows() {

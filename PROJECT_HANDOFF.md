@@ -42,7 +42,13 @@ Copy the PEM/key file used for prod SSH from the old laptop to the new laptop.
 
 Current key path used in this project:
 
-- `C:\Users\vrish\.ssh\heroiot-prod-voc-qubo-support-mkt-.pem`
+- `C:\Users\Vrishank Gupta\.ssh\analytics-report-key.pem`
+
+Current SSH command:
+
+```powershell
+ssh -i "$HOME\.ssh\analytics-report-key.pem" ec2-user@ec2-15-207-57-132.ap-south-1.compute.amazonaws.com
+```
 
 Also preserve permissions and keep it outside the repo.
 
@@ -77,11 +83,13 @@ and any other design references.
 
 ## Prod Architecture
 
-Production app path:
+Active production app path:
 
-- `/opt/zoho-dashboard`
+- `/home/ec2-user/zoho-dashboard`
 
-Important: operate only on `/opt/zoho-dashboard`
+Important: operate only on `/home/ec2-user/zoho-dashboard` for the active Docker Compose project.
+
+There may also be an `/opt/zoho-dashboard` folder, but the running containers currently point at `/home/ec2-user/zoho-dashboard`.
 
 Do not touch:
 
@@ -99,18 +107,18 @@ Ports:
 
 - frontend exposed on host port `81`
 - API exposed on host port `8020`
-- app inside container listens on `8001`
+- app inside container listens on `8000`
 
 ## Important Prod Gotchas
 
-### 1. Container internal port is 8001
+### 1. Container internal port is 8000
 
 When manually running frontend/API containers, map host -> container as:
 
-- `81:8001`
-- `8020:8001`
+- `81:8000`
+- `8020:8000`
 
-Not `8000`.
+The active `docker-compose.production.yml` in `/home/ec2-user/zoho-dashboard` already uses these mappings.
 
 ### 2. ClickHouse credentials are not fully present in `.env.backend.production`
 
@@ -166,7 +174,7 @@ Typical deploy pattern used:
 
 1. Build a tar bundle locally
 2. Upload bundle to prod VM
-3. Extract into `/opt/zoho-dashboard`
+3. Extract into `/home/ec2-user/zoho-dashboard`
 4. Rebuild Docker images
 5. Restart only:
    - `qubo-dashboard-api`
@@ -217,7 +225,7 @@ pip install -r requirements.txt
 
 Use this kind of bootstrapping prompt first:
 
-> This is the Qubo Zoho support dashboard project. Read `PROJECT_HANDOFF.md` first, then inspect the repo. Only operate on `/opt/zoho-dashboard` in prod. Do not touch unrelated VM folders or projects. The dashboard uses FastAPI + ClickHouse + ETL from MySQL. Continue from current local repo state.
+> This is the Qubo Zoho support dashboard project. Read `PROJECT_HANDOFF.md` and `DEPLOYMENT_REFERENCE.md` first, then inspect the repo. Only operate on `/home/ec2-user/zoho-dashboard` in prod. Do not touch unrelated VM folders or projects. The dashboard uses FastAPI + ClickHouse + ETL from MySQL. Continue from current local repo state.
 
 That will save a lot of re-explaining.
 
@@ -247,4 +255,3 @@ Transfer context using:
 - Run local validation
 - Verify SSH to prod
 - Tell Codex to read `PROJECT_HANDOFF.md` first
-

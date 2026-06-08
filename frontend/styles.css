@@ -398,6 +398,13 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 .filters-panel {
   display: grid;
   gap: 14px;
+  padding-bottom: 0;
+  overflow: visible;
+}
+
+.filters-panel.filters-pending {
+  border-color: rgba(184, 106, 69, 0.38);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.26), 0 0 0 1px rgba(184, 106, 69, 0.10);
 }
 
 .date-toolbar {
@@ -444,6 +451,60 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
 
 .reporting-shortcuts {
   margin-top: 2px;
+}
+
+.filter-apply-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 8px -24px 0;
+  padding: 13px 24px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: linear-gradient(180deg, rgba(18, 20, 27, 0.96), rgba(15, 17, 22, 0.99));
+}
+
+.filter-apply-bar.pending {
+  border-top-color: rgba(184, 106, 69, 0.42);
+  background:
+    linear-gradient(90deg, rgba(184, 106, 69, 0.11), transparent 48%),
+    linear-gradient(180deg, rgba(22, 25, 32, 0.99), rgba(16, 18, 23, 0.99));
+}
+
+.filter-apply-bar.busy {
+  cursor: progress;
+}
+
+.filter-apply-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.filter-apply-copy strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.filter-apply-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.apply-filter-btn {
+  min-width: 148px;
+  height: 42px;
+  white-space: nowrap;
+}
+
+.filter-apply-bar.pending .apply-filter-btn {
+  box-shadow: 0 0 0 3px rgba(184, 106, 69, 0.13);
 }
 
 .ghost-btn,
@@ -2197,6 +2258,18 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   .board-shell { padding: 18px 14px 36px; }
   .hero { display: grid; }
   .hero-title { font-size: 32px; }
+  .filters-panel {
+    padding-bottom: 0;
+  }
+  .filter-apply-bar {
+    align-items: stretch;
+    display: grid;
+    margin-left: -24px;
+    margin-right: -24px;
+  }
+  .apply-filter-btn {
+    width: 100%;
+  }
   .kpi-grid,
   .filter-grid,
   .pipeline-run {
