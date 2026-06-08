@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from time import perf_counter
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -159,6 +160,7 @@ async def add_no_store_for_api(request: Request, call_next):
             status_code=500,
             duration_ms=(perf_counter() - started) * 1000,
             request_id=request_id,
+            user_email=_request_user_email(request),
         )
         LOGGER.exception(
             "request_failed",
@@ -175,18 +177,29 @@ async def add_no_store_for_api(request: Request, call_next):
         status_code=response.status_code,
         duration_ms=(perf_counter() - started) * 1000,
         request_id=request_id,
+        user_email=_request_user_email(request),
     )
     return response
 
 
 @app.post("/api/auth/request-otp")
-def auth_request_otp(payload: OtpRequest) -> dict:
-    return request_otp(payload.email)
+def auth_request_otp(payload: OtpRequest, request: Request) -> dict:
+    result = request_otp(payload.email)
+    log_audit(
+        request,
+        action="auth_otp_requested",
+        details={"email": str(payload.email or "").strip().lower()},
+        user_email=str(payload.email or "").strip().lower(),
+    )
+    return result
 
 
 @app.post("/api/auth/verify")
 def auth_verify_otp(payload: OtpVerifyRequest, request: Request, response: Response) -> dict:
-    return verify_otp(payload.email, payload.otp, request, response)
+    result = verify_otp(payload.email, payload.otp, request, response)
+    email = str(result.get("email") or payload.email or "").strip().lower()
+    log_audit(request, action="auth_login_success", details={"email": email}, user_email=email)
+    return result
 
 
 @app.get("/api/auth/session")
@@ -196,8 +209,11 @@ def auth_session(request: Request) -> dict:
 
 
 @app.post("/api/auth/logout")
-def auth_logout(response: Response) -> dict:
-    return logout(response)
+def auth_logout(request: Request, response: Response) -> dict:
+    user_email = _request_user_email(request)
+    result = logout(response)
+    log_audit(request, action="auth_logout", user_email=user_email)
+    return result
 
 
 @app.get("/api/dashboard")
@@ -388,6 +404,23 @@ async def upload_efc_mapping_csv(request: Request) -> dict:
     service.invalidate_cache()
     log_audit(request, action="mapping_efc_csv_upload", details={"rows": len(rows), "bytes": len(content.encode("utf-8"))})
     return {"status": "ok", "rows": len(rows)}
+
+
+@app.get("/api/admin/access-log")
+def admin_access_log(request: Request, limit: int = Query(default=250, ge=1, le=1000)) -> dict:
+    rows = _recent_access_rows(limit)
+    log_audit(request, action="access_log_view", details={"rows": len(rows)}, user_email=_request_user_email(request))
+    unique_users = sorted({row["email"] for row in rows if row.get("email")})
+    return {
+        "access_log": {
+            "rows": rows,
+            "summary": {
+                "events": len(rows),
+                "users": len(unique_users),
+                "unique_users": unique_users,
+            },
+        }
+    }
 
 
 @app.get("/api/issues/{issue_id}")
@@ -759,6 +792,121 @@ def _frontend_file(filename: str) -> FileResponse:
             "Expires": "0",
         },
     )
+
+
+def _request_user_email(request: Request) -> str:
+    user = current_user(request)
+    return str((user or {}).get("email") or "")
+
+
+def _recent_access_rows(limit: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in _read_json_log_records(settings.app_access_log_name, limit * 8):
+        email = str(record.get("user_email") or "").strip().lower()
+        path = str(record.get("path") or "")
+        if not email:
+            continue
+        if not _is_dashboard_access_path(path):
+            continue
+        rows.append(_format_access_record(record))
+        if len(rows) >= limit:
+            break
+
+    for record in _read_json_log_records(settings.app_audit_log_name, limit * 4):
+        action = str(record.get("action") or "")
+        if action not in {"auth_login_success", "auth_logout", "auth_otp_requested"}:
+            continue
+        email = str(record.get("user_email") or record.get("details", {}).get("email") or "").strip().lower()
+        if not email:
+            continue
+        rows.append(_format_audit_record(record, email))
+
+    rows.sort(key=lambda row: row.get("timestamp") or "", reverse=True)
+    return rows[:limit]
+
+
+def _read_json_log_records(filename: str, max_records: int) -> list[dict[str, Any]]:
+    log_dir = Path(settings.app_log_dir)
+    files = sorted(
+        log_dir.glob(f"{filename}*"),
+        key=lambda path: path.stat().st_mtime if path.exists() else 0,
+        reverse=True,
+    )
+    records: list[dict[str, Any]] = []
+    for path in files:
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            if len(records) >= max_records:
+                return records
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                records.append(payload)
+    return records
+
+
+def _is_dashboard_access_path(path: str) -> bool:
+    return (
+        path == "/api/auth/session"
+        or path == "/api/dashboard"
+        or path == "/api/mapping-studio"
+        or path.startswith("/api/drilldown/")
+        or path.startswith("/api/issues/")
+    )
+
+
+def _format_access_record(record: dict[str, Any]) -> dict[str, Any]:
+    path = str(record.get("path") or "")
+    return {
+        "timestamp": str(record.get("timestamp") or ""),
+        "email": str(record.get("user_email") or "").strip().lower(),
+        "event": _access_event_label(path),
+        "method": str(record.get("method") or ""),
+        "path": path,
+        "status_code": int(record.get("status_code") or 0),
+        "client_ip": str(record.get("client_ip") or ""),
+        "user_agent": str((record.get("headers") or {}).get("user-agent") or ""),
+    }
+
+
+def _format_audit_record(record: dict[str, Any], email: str) -> dict[str, Any]:
+    action = str(record.get("action") or "")
+    labels = {
+        "auth_login_success": "Login success",
+        "auth_logout": "Logout",
+        "auth_otp_requested": "OTP requested",
+    }
+    return {
+        "timestamp": str(record.get("timestamp") or ""),
+        "email": email,
+        "event": labels.get(action, action),
+        "method": str(record.get("method") or ""),
+        "path": str(record.get("path") or ""),
+        "status_code": "",
+        "client_ip": str(record.get("client_ip") or ""),
+        "user_agent": str((record.get("headers") or {}).get("user-agent") or ""),
+    }
+
+
+def _access_event_label(path: str) -> str:
+    if path == "/api/auth/session":
+        return "Dashboard opened"
+    if path == "/api/dashboard":
+        return "Dashboard data loaded"
+    if path == "/api/mapping-studio":
+        return "Admin mapping opened"
+    if path.startswith("/api/drilldown/"):
+        return "Drilldown opened"
+    if path.startswith("/api/issues/"):
+        return "Issue details opened"
+    return "API access"
 
 
 @app.get("/api/pipeline/status")

@@ -207,6 +207,8 @@ const state = {
   mappingStudioData: null,
   mappingStudioLoading: false,
   mappingStudioTab: loadSessionJson("quboMappingStudioTab", "products"),
+  accessLogData: null,
+  accessLogLoading: false,
   issueWidgetFilters: { categories: [], products: [] },
   issueWidgetOpenFilter: null,
   categoryDrilldownBucket: "daily",
@@ -277,6 +279,9 @@ const els = {
   exportMappingOverrides: document.getElementById("exportMappingOverrides"),
   uploadMappingButton: document.getElementById("uploadMappingButton"),
   uploadMappingInput: document.getElementById("uploadMappingInput"),
+  refreshAccessLog: document.getElementById("refreshAccessLog"),
+  accessLogSummary: document.getElementById("accessLogSummary"),
+  accessLogTable: document.getElementById("accessLogTable"),
   dateStart: document.getElementById("dateStart"),
   dateEnd: document.getElementById("dateEnd"),
   quickPresets: document.getElementById("quickPresets"),
@@ -618,6 +623,7 @@ function bindEvents() {
   els.exportMappingOverrides?.addEventListener("click", downloadActiveMappingCsv);
   els.uploadMappingButton?.addEventListener("click", () => els.uploadMappingInput?.click());
   els.uploadMappingInput?.addEventListener("change", uploadActiveMappingCsv);
+  els.refreshAccessLog?.addEventListener("click", loadAccessLog);
 }
 
 async function loadDashboard() {
@@ -1688,6 +1694,8 @@ function renderActiveView() {
   if (mappingOpen) {
     if (state.mappingStudioData) renderMappingStudio(state.mappingStudioData);
     else if (!state.mappingStudioLoading) loadMappingStudio();
+    if (state.accessLogData) renderAccessLog(state.accessLogData);
+    else if (!state.accessLogLoading) loadAccessLog();
   }
 }
 
@@ -1877,6 +1885,77 @@ async function loadMappingStudio() {
   } finally {
     state.mappingStudioLoading = false;
   }
+}
+
+async function loadAccessLog() {
+  state.accessLogLoading = true;
+  renderAccessLog(state.accessLogData || {});
+  try {
+    const response = await apiFetch(apiUrl("/api/admin/access-log?limit=250"));
+    if (!response.ok) throw new Error(`API ${response.status}`);
+    const payload = await response.json();
+    state.accessLogData = payload.access_log || {};
+    renderAccessLog(state.accessLogData);
+  } catch (error) {
+    if (els.accessLogSummary) els.accessLogSummary.innerHTML = `<div class="error-state">${escHtml(error.message || "Failed to load access log.")}</div>`;
+    if (els.accessLogTable) els.accessLogTable.innerHTML = '<div class="error-state">Could not load access events.</div>';
+  } finally {
+    state.accessLogLoading = false;
+  }
+}
+
+function renderAccessLog(accessLog) {
+  if (!els.accessLogSummary || !els.accessLogTable) return;
+  if (state.accessLogLoading && !accessLog?.rows) {
+    els.accessLogSummary.innerHTML = '<div class="mapping-banner">Loading access log...</div>';
+    els.accessLogTable.innerHTML = '<div class="empty-state">Loading access events...</div>';
+    return;
+  }
+  const rows = accessLog.rows || [];
+  const summary = accessLog.summary || {};
+  els.accessLogSummary.innerHTML = `
+    <div class="mapping-stat">
+      <span class="mapping-stat-value">${fmtNum(summary.events || rows.length || 0)}</span>
+      <span class="mapping-stat-label">Recent events</span>
+    </div>
+    <div class="mapping-stat">
+      <span class="mapping-stat-value">${fmtNum(summary.users || 0)}</span>
+      <span class="mapping-stat-label">Users</span>
+    </div>
+    <div class="mapping-banner">Shows authenticated dashboard/API access and OTP login events from server logs.</div>
+  `;
+  if (!rows.length) {
+    els.accessLogTable.innerHTML = '<div class="empty-state">No authenticated access events found yet.</div>';
+    return;
+  }
+  els.accessLogTable.innerHTML = `
+    <div class="mini-table-wrap mapping-table-wrap access-log-wrap">
+      <table class="mini-table access-log-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Email</th>
+            <th>Event</th>
+            <th>Path</th>
+            <th>IP</th>
+            <th>User agent</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr>
+              <td>${escHtml(fmtDateTime(row.timestamp || ""))}</td>
+              <td>${escHtml(row.email || "")}</td>
+              <td>${escHtml(row.event || "")}</td>
+              <td>${escHtml(row.path || "")}</td>
+              <td>${escHtml(row.client_ip || "")}</td>
+              <td>${escHtml(row.user_agent || "")}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 async function runPipeline() {

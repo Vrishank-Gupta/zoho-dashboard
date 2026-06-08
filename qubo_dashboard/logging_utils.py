@@ -127,6 +127,7 @@ def log_access(
     status_code: int,
     duration_ms: float,
     request_id: str,
+    user_email: str = "",
 ) -> None:
     access_logger().info(
         "request_complete",
@@ -140,6 +141,7 @@ def log_access(
                 "status_code": status_code,
                 "duration_ms": round(duration_ms, 2),
                 "client_ip": client_ip(request),
+                "user_email": user_email,
                 "headers": header_subset(request),
             }
         },
@@ -152,6 +154,7 @@ def log_audit(
     action: str,
     outcome: str = "success",
     details: dict[str, Any] | None = None,
+    user_email: str = "",
 ) -> None:
     audit_logger().info(
         action,
@@ -164,6 +167,7 @@ def log_audit(
                 "method": request.method,
                 "path": request.url.path,
                 "client_ip": client_ip(request),
+                "user_email": user_email,
                 "headers": header_subset(request),
                 "details": details or {},
             }

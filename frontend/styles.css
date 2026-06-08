@@ -1541,6 +1541,43 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   gap: 18px;
 }
 
+.access-log-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.access-log-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 0.35fr)) minmax(280px, 1fr);
+  gap: 12px;
+}
+
+.access-log-table {
+  table-layout: fixed;
+}
+
+.access-log-table th:first-child,
+.access-log-table td:first-child {
+  width: 150px;
+}
+
+.access-log-table th:nth-child(2),
+.access-log-table td:nth-child(2) {
+  width: 250px;
+}
+
+.access-log-table th:nth-child(3),
+.access-log-table td:nth-child(3) {
+  width: 170px;
+}
+
+.access-log-table td {
+  word-break: break-word;
+}
+
 .mapping-panel {
   display: grid;
   gap: 12px;
@@ -2241,6 +2278,7 @@ button { border: 0; background: none; cursor: pointer; color: inherit; }
   }
 
   .mapping-summary,
+  .access-log-summary,
   .drilldown-two-col,
   .drilldown-kpi-rail,
   .actionability-grid {
